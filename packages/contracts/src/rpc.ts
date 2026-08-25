@@ -36,6 +36,7 @@ import {
   WebhookCredentialSchema,
   WebhookPublicUrlInput,
   WebhookSchema,
+  WorkerPresenceSchema,
 } from "./domain.js";
 import { ProductEventSchema } from "./events.js";
 import { Id } from "./ids.js";
@@ -55,6 +56,8 @@ export const appContract = {
       /** Sem mailer, a redefinição de senha acontece no próprio computador. */
       mailerEnabled: z.boolean().default(true),
       needsFirstOwner: z.boolean().default(false),
+      /** Há um worker vivo para pegar a fila? Sem ele, mandar mensagem é silêncio. */
+      worker: WorkerPresenceSchema.default({ alive: true, lastSeenAt: null }),
     }),
   ),
   me: oc.output(MeSchema),

@@ -14,7 +14,13 @@ describe("signup policy", () => {
   });
 
   it("honors SIGNUPS_ENABLED", () => {
-    expect(signupsOpen(undefined)).toBe(true);
+    expect(signupsOpen("true")).toBe(true);
+    expect(signupsOpen("1")).toBe(true);
     expect(signupsOpen("false")).toBe(false);
+    expect(signupsOpen("0")).toBe(false);
+  });
+
+  it("nasce fechado: sem a variável, ninguém cria conta", () => {
+    expect(signupsOpen(undefined)).toBe(false);
   });
 });

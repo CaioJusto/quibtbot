@@ -52,4 +52,15 @@ describe("inboxPresence", () => {
     expect(inboxPresence({ status: "idle" })).toBeNull();
     expect(inboxPresence({})).toBeNull();
   });
+
+  it("um run que a API reprovou por falta de worker apaga o verde", async () => {
+    // O reconciliador marca o run `failed` quando ficou na fila sem worker; a partir daí a
+    // lista não pode continuar dizendo "trabalhando".
+    const { inboxPresence } = await import("./presence.js");
+    expect(inboxPresence({ status: "queued" })).toBe("working");
+    expect(inboxPresence({ status: "failed" })).toBeNull();
+    expect(inboxPresence({ status: "failed", unread: true })).toBe("attention");
+    expect(inboxBotStatus({ runStatus: "failed", computerState: "running" })).toBe("idle");
+    expect(botIsOnline("failed")).toBe(false);
+  });
 });

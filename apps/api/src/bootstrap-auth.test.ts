@@ -120,6 +120,8 @@ describeDb.sequential("bootstrap first-owner pairing", () => {
   beforeAll(async () => {
     process.env.BOOTSTRAP_SECRET = BOOTSTRAP_SECRET;
     process.env.ENCRYPTION_KEY = ENCRYPTION_KEY;
+    // O cadastro nasce fechado; este arquivo também cria contas depois do dono, de propósito.
+    process.env.SIGNUPS_ENABLED = "true";
     const { createApp } = await import("./app.js");
     const handles = await createApp({
       databaseUrl: databaseUrl!,
@@ -136,6 +138,34 @@ describeDb.sequential("bootstrap first-owner pairing", () => {
 
   afterAll(async () => {
     await stop();
+  });
+
+  it("o cadastro nasce fechado: o primeiro dono entra pelo código, a segunda conta não", async () => {
+    // Um deploy recém-instalado: a linha padrão do banco já nasce com o interruptor fechado.
+    await withBootstrapDbLock(async () => {
+      await prisma.deploymentSettings.update({
+        where: { id: "default" },
+        data: { ownerUserId: null, signupsEnabled: false },
+      });
+    });
+    const mint = await mintInvite(app);
+    const { code } = await mint.json();
+    const claim = await claimCode(app, code);
+    const { enrollmentToken } = await claim.json();
+
+    const owner = await signUp(app, `closed-owner-${stamp}@quibt.test`, enrollmentToken);
+    expect(owner.status, await owner.clone().text()).toBeLessThan(400);
+    const settings = await prisma.deploymentSettings.findUniqueOrThrow({
+      where: { id: "default" },
+    });
+    expect(settings.ownerUserId).toBeTruthy();
+    expect(settings.signupsEnabled).toBe(false);
+
+    const stranger = await signUp(app, `closed-stranger-${stamp}@quibt.test`);
+    expect(stranger.status).toBe(403);
+    expect(await stranger.json()).toEqual({
+      message: "Este deploy não está aceitando novas contas.",
+    });
   });
 
   it("refuses to mint invites from remote peers", async () => {
@@ -327,6 +357,8 @@ describeDb.sequential("bootstrap first-owner atomic signup", () => {
   beforeAll(async () => {
     process.env.BOOTSTRAP_SECRET = BOOTSTRAP_SECRET;
     process.env.ENCRYPTION_KEY = ENCRYPTION_KEY;
+    // O cadastro nasce fechado; este arquivo também cria contas depois do dono, de propósito.
+    process.env.SIGNUPS_ENABLED = "true";
     const { createApp } = await import("./app.js");
     const handles = await createApp({
       databaseUrl: databaseUrl!,

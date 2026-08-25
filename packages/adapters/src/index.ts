@@ -50,4 +50,5 @@ export * from "./scripted-runtime.js";
 export * from "./secrets.js";
 export * from "./session-lifecycle.js";
 export * from "./wakeup.js";
+export * from "./worker-heartbeat.js";
 export * from "./workspace-computer.js";

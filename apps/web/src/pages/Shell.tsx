@@ -40,6 +40,7 @@ import {
 import { useNavigate, useParams } from "react-router-dom";
 import computerDesktopImage from "../../../www/public/computer-desktop-ice-blue.webp?url";
 import { GlassSurface, Icon, MenuItem } from "../components/desktop-ui";
+import { WorkerDownNotice, workerAliveRefresher } from "../components/WorkerDownNotice";
 import { applyGroupThreadEvent, applyThreadEvent } from "../lib/apply-thread-event";
 import { type Attachment, attachmentTooBig, uploadAttachment } from "../lib/attachments";
 import { authClient } from "../lib/auth";
@@ -151,6 +152,7 @@ export function ShellPage() {
   const [panel, setPanel] = useState<Panel>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [feedStatus, setFeedStatus] = useState<LiveFeedStatus>("connecting");
+  const [workerAlive, setWorkerAlive] = useState<boolean | null>(null);
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [groupRoutines, setGroupRoutines] = useState<Routine[]>([]);
   const [skills, setSkills] = useState<CapabilityInstall[]>([]);
@@ -434,10 +436,14 @@ export function ShellPage() {
         navigate("/app", { replace: true });
       }
     });
+    // O aviso de worker parado pega carona neste poll: `me` só é perguntado de tempos em
+    // tempos (a cadência do batimento), nunca a cada volta.
+    const refreshWorkerAlive = workerAliveRefresher(() => rpc.me(), setWorkerAlive);
     const stop = startPolling(
       async () => {
         if (document.visibilityState === "hidden") return;
         await refreshBots();
+        await refreshWorkerAlive();
       },
       4000,
       { immediate: true },
@@ -1466,6 +1472,7 @@ export function ShellPage() {
             : "hidden md:flex md:flex-1"
         }`}
       >
+        <WorkerDownNotice alive={workerAlive} />
         <div className="qb-dash__topbar">
           <button
             type="button"

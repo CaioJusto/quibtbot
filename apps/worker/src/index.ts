@@ -37,6 +37,7 @@ import {
   sandboxOptionsFromSettings,
   scheduleOrphanReconcile,
   scheduleRunReap,
+  startWorkerHeartbeat,
   storedComposioKeyLoader,
 } from "@quibt/adapters";
 import { editionGate, resolveEncryptionKey } from "@quibt/core";
@@ -44,6 +45,7 @@ import { assertWorkspaceWithinPlan, createDb } from "@quibt/db";
 import { MarkdownMemoryStore } from "@quibt/memory";
 import { sandboxOptionsFromEnv, workerBillingEnabled, workerRuntimeConfig } from "./config.js";
 import { createWakeupHandlers } from "./handlers.js";
+import { workerIdentity } from "./heartbeat.js";
 
 async function main() {
   const databaseUrl = process.env.DATABASE_URL;
@@ -123,6 +125,7 @@ async function main() {
       : undefined,
   });
 
+  const identity = workerIdentity(process.env);
   await wakeup.start(
     createWakeupHandlers({
       prisma,
@@ -131,13 +134,20 @@ async function main() {
       executor,
       home: new LocalAgentHomeStore(dataDir),
       dataDir,
+      workerId: identity.workerId,
     }),
   );
   // Starts the reaper loop; it reschedules itself under a single job key.
   scheduleRunReap(wakeup, 0);
   scheduleOrphanReconcile(wakeup, 0);
+  // O batimento é como a API (e a tela) sabem que este processo existe. Sem ele, um worker
+  // que não subiu era silêncio: a fila parada e a bolinha verde acesa.
+  startWorkerHeartbeat(prisma, {
+    ...identity,
+    onError: (error) => console.error("worker heartbeat", error),
+  });
 
-  console.log("quibt worker ready");
+  console.log(`quibt worker ready (${identity.workerId}, ${identity.version})`);
 }
 
 main().catch((error) => {
