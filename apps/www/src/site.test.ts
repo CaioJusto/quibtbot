@@ -2,8 +2,15 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { DESKTOP_ARTIFACT_NAMES } from "../../../scripts/release-version.mjs";
 import { COPY, ROUTES } from "./i18n";
-import { LINUX_DOWNLOAD_URL, MAC_DOWNLOAD_URL, SITE_URL, WIN_DOWNLOAD_URL } from "./site";
+import {
+  DESKTOP_VERSION,
+  LINUX_DOWNLOAD_URL,
+  MAC_DOWNLOAD_URL,
+  SITE_URL,
+  WIN_DOWNLOAD_URL,
+} from "./site";
 
 const pages = path.join(path.dirname(fileURLToPath(import.meta.url)), "pages");
 
@@ -25,9 +32,35 @@ describe("landing pricing", () => {
     expect(COPY["pt-BR"].landing.lead.toLowerCase()).toMatch(/personalidade|computador/);
     expect(COPY.en.landing.openCopy.toLowerCase()).not.toMatch(/cloud:/);
     expect(COPY["pt-BR"].landing.openCopy.toLowerCase()).not.toMatch(/cloud:/);
-    expect(MAC_DOWNLOAD_URL).toMatch(/QuibtBot-\d+\.\d+\.\d+\.dmg$/);
-    expect(WIN_DOWNLOAD_URL).toMatch(/QuibtBot-\d+\.\d+\.\d+-setup\.exe$/);
-    expect(LINUX_DOWNLOAD_URL).toMatch(/QuibtBot-\d+\.\d+\.\d+\.AppImage$/);
+  });
+
+  it("links the download buttons to the stable artifact names the release actually publishes", () => {
+    // O workflow de release só anexa os aliases sem versão (QuibtBot.dmg, QuibtBot-setup.exe,
+    // QuibtBot.AppImage). Um nome versionado no botão responde 404 em todo release.
+    const releaseDir = `https://github.com/CaioJusto/quibtbot/releases/download/v${DESKTOP_VERSION}/`;
+    const urls = {
+      mac: MAC_DOWNLOAD_URL,
+      windows: WIN_DOWNLOAD_URL,
+      linux: LINUX_DOWNLOAD_URL,
+    };
+    for (const [platform, artifact] of Object.entries(DESKTOP_ARTIFACT_NAMES)) {
+      const url = urls[platform as keyof typeof urls];
+      expect(url.startsWith(releaseDir)).toBe(true);
+      expect(path.posix.basename(new URL(url).pathname)).toBe(artifact);
+    }
+    expect(DESKTOP_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
+  });
+
+  it("describes each installer as the release ships it: notarized Mac, unsigned preview elsewhere", () => {
+    for (const locale of ["en", "pt-BR"] as const) {
+      const landing = COPY[locale].landing;
+      expect(landing.downloadMacNote).not.toMatch(/not Apple-notarized|sem notarização/i);
+      expect(landing.downloadMacNote).toMatch(/notarized|notarizado/i);
+      expect(landing.downloadWinNote).toMatch(/SmartScreen/);
+      expect(landing.downloadWinNote).toMatch(/Docker Desktop/);
+      expect(landing.downloadLinuxNote).toMatch(/libfuse2/);
+      expect(landing.downloadLatest).not.toMatch(/always the latest|sempre na última/i);
+    }
   });
 
   it("exposes the open-source install path", () => {

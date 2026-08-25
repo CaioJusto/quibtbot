@@ -7,12 +7,15 @@ export const SITE_DESCRIPTION =
 
 /** Same source as the installer/desktop/CLI — see `releaseManifest` in `scripts/release-version.mjs`. */
 export const DESKTOP_VERSION = INSTALL_RELEASE;
-export const MAC_DOWNLOAD_URL =
-  `https://github.com/CaioJusto/quibtbot/releases/download/v${DESKTOP_VERSION}/QuibtBot-${DESKTOP_VERSION}.dmg`;
-export const WIN_DOWNLOAD_URL =
-  `https://github.com/CaioJusto/quibtbot/releases/download/v${DESKTOP_VERSION}/QuibtBot-${DESKTOP_VERSION}-setup.exe`;
-export const LINUX_DOWNLOAD_URL =
-  `https://github.com/CaioJusto/quibtbot/releases/download/v${DESKTOP_VERSION}/QuibtBot-${DESKTOP_VERSION}.AppImage`;
+/**
+ * A release só publica os aliases estáveis (`DESKTOP_ARTIFACT_NAMES` em
+ * `scripts/release-version.mjs`; o workflow sobe apenas eles). O nome do arquivo não carrega
+ * a versão — ela fica na tag da URL. `site.test.ts` confere que estes basenames batem com o script.
+ */
+const DESKTOP_RELEASE_BASE = `https://github.com/CaioJusto/quibtbot/releases/download/v${DESKTOP_VERSION}`;
+export const MAC_DOWNLOAD_URL = `${DESKTOP_RELEASE_BASE}/QuibtBot.dmg`;
+export const WIN_DOWNLOAD_URL = `${DESKTOP_RELEASE_BASE}/QuibtBot-setup.exe`;
+export const LINUX_DOWNLOAD_URL = `${DESKTOP_RELEASE_BASE}/QuibtBot.AppImage`;
 
 /**
  * The one-line bootstrap for the self-hosted server, shared with the mobile setup guide.
