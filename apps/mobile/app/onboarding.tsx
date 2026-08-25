@@ -5,6 +5,7 @@ import {
   modelSaveAction,
   nextStepAfterModel,
   providersForMode,
+  shouldKeepWaitingForSubscription,
   startPolling,
   type TokenSource,
 } from "@quibt/core";
@@ -14,6 +15,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
+  AppState,
   KeyboardAvoidingView,
   Linking,
   Platform,
@@ -145,6 +147,18 @@ export default function Onboarding() {
     }).start();
   }, [step, transition]);
 
+  // Digitar o código acontece no Safari; o iOS suspende o app nesse meio-tempo e a
+  // requisição em voo morre. Isso não é o login falhando: a espera continua, e ao voltar
+  // para o app o poll é imediato para a tela mostrar "Conectado" sem esperar 3 s.
+  const [signInWake, setSignInWake] = useState(0);
+  useEffect(() => {
+    if (oauthFlow.state !== "waiting") return;
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") setSignInWake((n) => n + 1);
+    });
+    return () => sub.remove();
+  }, [oauthFlow.state]);
+
   useEffect(() => {
     if (oauthFlow.state !== "waiting") return;
     const loginId = oauthFlow.loginId;
@@ -163,14 +177,17 @@ export default function Onboarding() {
       },
       3000,
       {
-        onError: (err) =>
+        immediate: signInWake > 0,
+        onError: (err) => {
+          if (shouldKeepWaitingForSubscription(err)) return;
           setOauthFlow({
             state: "error",
             error: err instanceof Error ? err.message : "Não foi possível concluir o login",
-          }),
+          });
+        },
       },
     );
-  }, [oauthFlow]);
+  }, [oauthFlow, signInWake]);
 
   const providers = useMemo(() => {
     const seen = new Map<string, CatalogEntry>();

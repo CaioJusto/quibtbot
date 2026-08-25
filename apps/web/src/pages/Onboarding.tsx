@@ -7,6 +7,7 @@ import {
   parseOssMachine,
   planHighlights,
   type QuibtEdition,
+  shouldKeepWaitingForSubscription,
   startPolling,
 } from "@quibt/core";
 import { formatAppearance, type MarkShape } from "@quibt/ui-tokens";
@@ -329,6 +330,19 @@ export function OnboardingPage() {
     }
   }
 
+  // O código é digitado em outra aba; se o navegador congelar esta enquanto isso, a
+  // requisição em voo falha sem o login ter falhado. A espera continua, e ao voltar
+  // para a aba o poll é imediato.
+  const [signInWake, setSignInWake] = useState(0);
+  useEffect(() => {
+    if (oauthFlow.state !== "waiting") return;
+    const onVisible = () => {
+      if (document.visibilityState === "visible") setSignInWake((n) => n + 1);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [oauthFlow.state]);
+
   useEffect(() => {
     if (oauthFlow.state !== "waiting") return;
     const loginId = oauthFlow.loginId;
@@ -343,14 +357,17 @@ export function OnboardingPage() {
       },
       3000,
       {
-        onError: (err) =>
+        immediate: signInWake > 0,
+        onError: (err) => {
+          if (shouldKeepWaitingForSubscription(err)) return;
           setOauthFlow({
             state: "error",
             error: errorMessage(err, "Não foi possível concluir o login"),
-          }),
+          });
+        },
       },
     );
-  }, [oauthFlow]);
+  }, [oauthFlow, signInWake]);
 
   function applyPreset(preset: (typeof PRESETS)[number]) {
     setName(preset.name);
