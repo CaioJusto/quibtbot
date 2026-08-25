@@ -12,12 +12,14 @@ Public site: [quibt.com.br](https://quibt.com.br).
 
 ## Download
 
-Landing buttons point at GitHub Releases:
+Landing buttons point at GitHub Releases. The release attaches only the stable names
+(`DESKTOP_ARTIFACT_NAMES` in `scripts/release-version.mjs`); the version lives in the tag, so the
+URL is `https://github.com/CaioJusto/quibtbot/releases/download/v<version>/<name>`:
 
-- macOS Apple silicon: `QuibtBot-<version>.dmg`
-- macOS Intel preview: `QuibtBot-<version>-intel.dmg` when attached to that release
-- Windows 64-bit: `QuibtBot-<version>-setup.exe` (one-click NSIS, no admin)
-- Linux x64: `QuibtBot-<version>.AppImage`
+- macOS Apple silicon: `QuibtBot.dmg` — signed and notarized by Apple
+- macOS Intel: not published; run from source (`pnpm dev` + `pnpm desktop`)
+- Windows 64-bit: `QuibtBot-setup.exe` — unsigned preview (one-click NSIS, no admin); SmartScreen warns, choose **More info → Run anyway**; install Docker Desktop yourself
+- Linux x64: `QuibtBot.AppImage` — unsigned preview; needs `libfuse2`, mark it executable and run it
 
 Until a release is published, build the artifacts locally (below) and open the installer from `apps/desktop/out/`.
 
@@ -72,8 +74,8 @@ The bot does **not** click your host desktop. Navigation inside the computer pan
 | Platform | Release status                                                                                                                  | What is still missing                                                                                                                                       |
 | -------- | ------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | macOS    | The `v0.2.11` Apple-silicon `.dmg` is Developer ID signed, notarized and stapled: `spctl` reports `accepted / source=Notarized Developer ID`. | Intel (x64) is not published; Apple silicon only.                                                            |
-| Windows  | No desktop installer is published. Run from source (`pnpm dev` + `pnpm desktop`).                                                            | Authenticode certificate. Until it exists, SmartScreen would call any build an unknown publisher.            |
-| Linux    | No desktop AppImage is published; `v0.2.11` ships the x64/arm64 `quibtbot` CLI binaries for server installs.                                  | No store signature. Mark the downloaded binary executable before running it.                                 |
+| Windows  | `QuibtBot-setup.exe` is published as an **unsigned preview**; `signing-status-win.json` says `signed: false`. SmartScreen warns: **More info → Run anyway**. | Authenticode certificate. Until it exists, SmartScreen calls the installer an unknown publisher.              |
+| Linux    | `QuibtBot.AppImage` is published as an **unsigned preview**; `v0.2.11` also ships the x64/arm64 `quibtbot` CLI binaries for server installs.   | No store signature. Needs `libfuse2`; mark the download executable before running it.                        |
 
 For a maintainer release on macOS, the project-local hooks sign both the app and DMG, submit each
 to Apple, wait for acceptance, and staple the tickets:
