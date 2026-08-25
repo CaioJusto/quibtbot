@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "release": "0.2.9",
-  "baseUrl": "https://github.com/CaioJusto/quibtbot/releases/download/v0.2.9",
+  "release": "0.2.10",
+  "baseUrl": "https://github.com/CaioJusto/quibtbot/releases/download/v0.2.10",
   "digests": {
     "quibtbot-linux-x64": "9a09036eebbfa742c2085ba6b6cc9762c5f5a5e3afed2de0a505450ab57b69ce",
     "quibtbot-linux-arm64": "8500e7e627ce7c620cfd3c2f7ba5066524e105a35377b5da1b6726ff19ab0e12"

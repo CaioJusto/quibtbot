@@ -110,7 +110,7 @@ describe("runInstall resume", () => {
       path.join(dataDir, "install-state.json"),
       `${JSON.stringify({
         version: 1,
-        release: "0.2.9",
+        release: "0.2.10",
         completed: ["requirements", "environment", "images", "services", "database", "health"],
         updatedAt: "2026-08-17T00:00:00.000Z",
       })}\n`,
@@ -282,7 +282,7 @@ describe("runInstall resume", () => {
       path.join(dataDir, "install-state.json"),
       `${JSON.stringify({
         version: 1,
-        release: "0.2.9",
+        release: "0.2.10",
         completed: ["requirements", "environment", "images", "services", "database", "health"],
         updatedAt: "2026-08-17T00:00:00.000Z",
       })}\n`,
@@ -510,7 +510,7 @@ describe("retomada numa instalação pública", () => {
       path.join(dataDir, "install-state.json"),
       `${JSON.stringify({
         version: 1,
-        release: "0.2.9",
+        release: "0.2.10",
         completed: ["requirements", "environment", "images", "services", "database"],
         updatedAt: "2026-08-17T00:00:00.000Z",
       })}\n`,

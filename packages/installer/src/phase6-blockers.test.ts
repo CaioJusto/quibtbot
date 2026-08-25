@@ -373,7 +373,7 @@ describe("state validation split", () => {
     writeFileSync(
       env.path,
       readFileSync(env.path, "utf8").replace(
-        "QUIBT_STACK_VERSION=0.2.9",
+        "QUIBT_STACK_VERSION=0.2.10",
         "QUIBT_STACK_VERSION=0.1.0",
       ),
       { mode: 0o600 },
@@ -404,7 +404,7 @@ describe("state validation split", () => {
     writeFileSync(
       env.path,
       readFileSync(env.path, "utf8").replace(
-        "QUIBT_STACK_VERSION=0.2.9",
+        "QUIBT_STACK_VERSION=0.2.10",
         "QUIBT_STACK_VERSION=0.1.0",
       ),
       { mode: 0o600 },
@@ -456,7 +456,7 @@ describe("state validation split", () => {
     writeFileSync(
       env.path,
       readFileSync(env.path, "utf8").replace(
-        "QUIBT_STACK_VERSION=0.2.9",
+        "QUIBT_STACK_VERSION=0.2.10",
         "QUIBT_STACK_VERSION=0.1.0",
       ),
       { mode: 0o600 },
@@ -466,7 +466,7 @@ describe("state validation split", () => {
     const result = await runUpdate({
       dataDir,
       composeFile: COMPOSE_FILE,
-      targetRelease: "0.2.9",
+      targetRelease: "0.2.10",
       run: {
         async run(command, args) {
           const joined = [command, ...args].join(" ");
@@ -488,8 +488,8 @@ describe("state validation split", () => {
 
     expect(result.ok).toBe(true);
     expect(result.previousRelease).toBe("0.1.0");
-    expect(result.release).toBe("0.2.9");
-    expect(readFileSync(env.path, "utf8")).toMatch(/QUIBT_STACK_VERSION=0\.2\.9/);
+    expect(result.release).toBe("0.2.10");
+    expect(readFileSync(env.path, "utf8")).toMatch(/QUIBT_STACK_VERSION=0\.2\.10/);
   });
 });
 
@@ -527,11 +527,11 @@ describe("restore cleanup warnings", () => {
           : new Response("down", { status: 503 }),
       clock: { now: () => new Date(), sleep: async () => undefined },
       rollback: {
-        release: "0.2.9",
+        release: "0.2.10",
         images: [
-          { reference: "ghcr.io/quibt/quibt-stack:0.2.9", id: "sha256:id" },
-          { reference: "ghcr.io/quibt/quibt-supervisor:0.2.9", id: "sha256:id" },
-          { reference: "ghcr.io/quibt/quibt-computer:0.2.9", id: "sha256:id" },
+          { reference: "ghcr.io/quibt/quibt-stack:0.2.10", id: "sha256:id" },
+          { reference: "ghcr.io/quibt/quibt-supervisor:0.2.10", id: "sha256:id" },
+          { reference: "ghcr.io/quibt/quibt-computer:0.2.10", id: "sha256:id" },
         ],
         envSnapshotPath,
         backupBundleDir: bundle.dir,
