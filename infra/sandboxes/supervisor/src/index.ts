@@ -1,16 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import {
-  chmod,
-  chown,
-  cp,
-  lchown,
-  lstat,
-  mkdir,
-  readdir,
-  rename,
-  writeFile,
-} from "node:fs/promises";
+import { chown, cp, lchown, lstat, mkdir, readdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { loadEnvFile } from "node:process";
 import { fileURLToPath } from "node:url";
@@ -28,6 +18,7 @@ import {
   type SandboxInput,
   screenUrlFor,
   sessionPorts,
+  WORKSPACE_RESTART_POLICY,
   workspaceDesktopPath,
   workspaceHomePath,
   xdotoolCommand,
@@ -35,20 +26,28 @@ import {
 import {
   allocateDisplay,
   assertExecArgv,
+  computerStoppedError,
+  containerNeedsRestartPolicy,
   containerUsesWorkspaceHome,
   createDockerStreamDemuxer,
   type DockerEndpoint,
+  dockerDownError,
   dockerEndpointCandidates,
   dockerUnreachableMessage,
   execEnvEntries,
   explainContainerExit,
+  explainReviveFailure,
   HOME_MODE_REPAIR_COMMAND,
   HOME_NOT_WRITABLE_MESSAGE,
   HOME_REPAIR_COMMAND,
   HOME_WRITABLE_PROBE,
+  hardenDesktopRoot,
   homeIsWritable,
   homePreparationMarker,
   isAuthorizedSupervisorRequest,
+  isDockerAlreadyStarted,
+  isDockerNotFound,
+  isDockerUnreachable,
   isWorkspaceSentinel,
   MAX_EXEC_OUTPUT_BYTES,
   novncEnsureCommand,
@@ -175,8 +174,13 @@ app.post("/computers", async (c) => {
         forgetWorkspace(body.workspaceId, existing.id);
         container = undefined;
         resumed = false;
-      } else if (!info.State.Running) {
-        await startWorkspaceContainer(existing);
+      } else if (info.State.Running) {
+        await ensureWorkspaceRestartPolicy(existing, info);
+      } else {
+        // Parado: religa como o exec religa — esquecendo as sessões em memória, que
+        // morreram com o container. Só dar `start` aqui devolvia depois a tela velha,
+        // de um Xvfb que já não existia.
+        await reviveWorkspaceContainer(existing, body.workspaceId);
       }
     }
     if (!container) {
@@ -225,18 +229,52 @@ app.post("/computers", async (c) => {
  * nenhum pedindo sessão. A rota da tela exige identidade de bot e respondia 403 a esta
  * pergunta; o chamador lia "403 não é 404" como "ainda existe" e o app entregava a URL
  * de uma tela que não existe mais. Aqui basta ser o dono do workspace.
+ *
+ * `running:false` é resposta, não sumiço: o container está lá, só parado (reboot antes
+ * da política de reinício, `docker stop`, crash). O adapter lê esse campo para separar
+ * "parado → religar" (`POST /computers/:id/start`) de "sumiu → provisionar de novo".
+ * 404 só quando não há container; Docker fora do ar responde 503 `docker-down`, nunca
+ * 404 — dizer "sumiu" nessa hora fazia a API esquecer a linha e tentar outro computador.
  */
 app.get("/computers/:id/exists", async (c) => {
   const workspaceId = c.req.header("x-quibt-workspace-id");
   if (!workspaceId) return c.json({ error: "missing computer identity" }, 403);
-  const info = await docker
-    .getContainer(c.req.param("id"))
-    .inspect()
-    .catch(() => undefined);
-  if (!info || !isWorkspaceContainer(info, workspaceId)) {
-    return c.json({ error: "computer not found" }, 404);
+  try {
+    const info = await inspectWorkspaceContainer(docker.getContainer(c.req.param("id")));
+    if (!isWorkspaceContainer(info, workspaceId)) {
+      throw new SupervisorError("computer not found", 404);
+    }
+    return c.json({ id: c.req.param("id"), running: Boolean(info.State.Running) });
+  } catch (error) {
+    return failure(c, error, "exists");
   }
-  return c.json({ id: c.req.param("id"), running: Boolean(info.State.Running) });
+});
+
+/**
+ * Religa o container do workspace no lugar — mesma casa, mesmo id — quando ele está
+ * `Exited`. A API chama aqui quando `/exists` diz `running:false`, antes de abrir a
+ * tela do bot, sem esquecer as linhas do banco nem provisionar do zero. Um supervisor
+ * antigo responde 404 e a API cai no caminho de provisionar, que também retoma.
+ */
+app.post("/computers/:id/start", async (c) => {
+  const workspaceId = c.req.header("x-quibt-workspace-id");
+  if (!workspaceId) return c.json({ error: "missing computer identity" }, 403);
+  const id = c.req.param("id");
+  try {
+    const container = docker.getContainer(id);
+    const info = await inspectWorkspaceContainer(container);
+    if (!isWorkspaceContainer(info, workspaceId)) {
+      throw new SupervisorError("computer not found", 404);
+    }
+    const result = await reviveWorkspaceContainer(container, workspaceId);
+    return c.json({
+      id,
+      running: Boolean(result.info.State.Running),
+      revived: result.revived,
+    });
+  } catch (error) {
+    return failure(c, error, "start");
+  }
 });
 
 app.get("/computers/:id", async (c) => {
@@ -247,7 +285,7 @@ app.get("/computers/:id", async (c) => {
       id,
       c.req.header("x-quibt-bot-id"),
       c.req.header("x-quibt-workspace-id"),
-      { ensureSession: true },
+      { ensureSession: true, stopped: "revive" },
     );
     const session = requireSession(found.session);
     await ensureNovnc(found.container, session.botId, session.display);
@@ -260,6 +298,7 @@ app.get("/computers/:id", async (c) => {
       image: found.info.Config.Image,
       screenUrl,
       display: session.display,
+      revived: found.revived,
     });
   } catch (error) {
     return failure(c, error, "inspect", 404);
@@ -279,11 +318,13 @@ app.post("/computers/:id/exec", async (c) => {
     const body = execSchema.parse(await readJson(c.req.raw));
     const argv = assertExecArgv(body.argv);
     const timeoutMs = boundedSandboxCommandTimeoutMs(body.timeoutMs);
-    const { container, session } = await managedSession(
+    // Container parado (reboot, `docker stop`): religa e roda, em vez de devolver
+    // "computer request failed" em todo comando até alguém dar `docker start` na mão.
+    const { container, session, revived } = await managedSession(
       id,
       c.req.header("x-quibt-bot-id"),
       c.req.header("x-quibt-workspace-id"),
-      { allowMissingSession: true },
+      { allowMissingSession: true, stopped: "revive" },
     );
     const timedCommand = sandboxTimeoutCommand(
       argv.length ? argv : ["/bin/echo", "ready"],
@@ -309,11 +350,16 @@ app.post("/computers/:id/exec", async (c) => {
           ? `${output.stderr}${output.stderr && !output.stderr.endsWith("\n") ? "\n" : ""}command timed out after ${timeoutMs} ms\n`
           : output.stderr,
       code,
+      // O bot precisa saber que as janelas de antes se foram; o adapter põe isso no stderr.
+      ...(revived ? { revived: true } : {}),
     });
   } catch (error) {
-    const { status, message } = publicError(normalizeError(error));
+    const { status, message, code: errorCode } = publicError(normalizeError(error));
     if (status >= 500) console.error("supervisor exec failed", error);
-    return c.json({ stdout: "", stderr: message, code: 1 }, 200);
+    return c.json(
+      { stdout: "", stderr: message, code: 1, ...(errorCode ? { errorCode } : {}) },
+      200,
+    );
   }
 });
 
@@ -379,9 +425,9 @@ app.post("/computers/:id/input", async (c) => {
     }
     return c.json({ ok: true, leaseId: body.leaseId ?? null });
   } catch (error) {
-    const { status, message } = publicError(normalizeError(error));
+    const { status, message, code } = publicError(normalizeError(error));
     if (status >= 500) console.error("supervisor input failed", error);
-    return c.json({ ok: false, error: message }, status);
+    return c.json({ ok: false, error: message, ...(code ? { code } : {}) }, status);
   }
 });
 
@@ -391,8 +437,14 @@ app.post("/computers/:id/stop", async (c) => {
       c.req.param("id"),
       c.req.header("x-quibt-bot-id"),
       c.req.header("x-quibt-workspace-id"),
+      { allowMissingSession: true, stopped: "allow" },
     );
-    const session = requireSession(found.session);
+    // Container parado ou bot sem tela aberta: para quem apertou "Desligar", já está
+    // desligado. Responder 404 aqui fazia a API lançar e o banco seguir dizendo "ligado".
+    if (!found.info.State.Running || !found.session) {
+      return c.json({ ok: true, alreadyStopped: true });
+    }
+    const session = found.session;
     await execIn(
       found.container,
       ["quibt-session", "stop", session.botId, String(session.display)],
@@ -408,23 +460,28 @@ app.post("/computers/:id/stop", async (c) => {
 app.delete("/computers/:id", async (c) => {
   const id = c.req.param("id");
   const preserveComputer = c.req.header("x-quibt-preserve-computer") === "true";
+  const workspaceId = c.req.header("x-quibt-workspace-id") ?? "";
   try {
-    const found = await managedSession(
-      id,
-      c.req.header("x-quibt-bot-id"),
-      c.req.header("x-quibt-workspace-id"),
-    );
-    const session = requireSession(found.session);
-    await execIn(
-      found.container,
-      ["quibt-session", "stop", session.botId, String(session.display)],
-      sessionUser(session.display),
-    ).catch(() => undefined);
-    dropSession(session.workspaceId, session.botId);
-    if (shouldRemoveSharedContainer(preserveComputer, await probeSessions(found.container))) {
+    const found = await managedSession(id, c.req.header("x-quibt-bot-id"), workspaceId, {
+      allowMissingSession: true,
+      stopped: "allow",
+    });
+    const running = Boolean(found.info.State.Running);
+    if (found.session && running) {
+      const session = found.session;
+      await execIn(
+        found.container,
+        ["quibt-session", "stop", session.botId, String(session.display)],
+        sessionUser(session.display),
+      ).catch(() => undefined);
+      dropSession(session.workspaceId, session.botId);
+    }
+    // Num container parado nada está vivo: o probe nem roda, e a resposta é "ninguém".
+    const probe = running ? await probeSessions(found.container) : new Map<string, number>();
+    if (shouldRemoveSharedContainer(preserveComputer, probe)) {
       await found.container.remove({ force: true }).catch(() => undefined);
-      forgetWorkspace(session.workspaceId, found.container.id);
-      await removeComputerNetwork(session.workspaceId);
+      forgetWorkspace(workspaceId, found.container.id);
+      await removeComputerNetwork(workspaceId);
     }
     return c.json({ ok: true, preserveComputer });
   } catch (error) {
@@ -439,8 +496,29 @@ serve({ fetch: app.fetch, hostname, port }, () => {
     `sandbox supervisor on http://${hostname}:${port} (docker ${dockerEndpoint.description})`,
   );
   void reconcileComputerNetworks();
-  void retireOutdatedWorkspaceContainers();
+  void retireOutdatedWorkspaceContainers().then(adoptWorkspaceRestartPolicy);
 });
+
+/**
+ * Containers criados antes da política de reinício ganham `unless-stopped` no lugar, sem
+ * recriar: quem atualizou o app não precisa esperar o próximo provision para o computador
+ * voltar sozinho depois de um reboot.
+ */
+async function adoptWorkspaceRestartPolicy(): Promise<void> {
+  try {
+    const listed = await docker.listContainers({
+      all: true,
+      filters: { label: ["quibt.kind=workspace", "quibt.managed=true"] },
+    });
+    for (const item of listed) {
+      const container = docker.getContainer(item.Id);
+      const info = await container.inspect().catch(() => null);
+      if (info) await ensureWorkspaceRestartPolicy(container, info);
+    }
+  } catch (error) {
+    console.error("adopt workspace restart policy failed", error);
+  }
+}
 
 /**
  * Ao subir com uma imagem de computador nova (o app foi atualizado), aposenta os containers
@@ -617,8 +695,12 @@ async function startWorkspaceContainer(container: Docker.Container) {
   try {
     await container.start();
   } catch (error) {
-    const raw = error instanceof Error ? error.message : String(error);
-    throw explainContainerExit(255, raw);
+    if (isDockerUnreachable(error)) throw dockerDownError();
+    // Outro pedido ligou no meio do caminho (dois bots acordando juntos): confere abaixo.
+    if (!isDockerAlreadyStarted(error)) {
+      const raw = error instanceof Error ? error.message : String(error);
+      throw explainContainerExit(255, raw);
+    }
   }
   const info = await container.inspect();
   if (info.State.Running) return info;
@@ -637,30 +719,115 @@ async function readJson(request: Request) {
   }
 }
 
-/** Zod rejections are caller mistakes, not supervisor failures. */
+/**
+ * Zod rejections are caller mistakes, not supervisor failures. Um Docker que não responde
+ * ganha nome e código próprios: "computer request failed" não diz à pessoa para abrir o
+ * Docker, e 404 diria à API que o computador sumiu.
+ */
 function normalizeError(error: unknown) {
-  return error instanceof z.ZodError ? new SupervisorError("invalid request body") : error;
+  if (error instanceof z.ZodError) return new SupervisorError("invalid request body");
+  if (isDockerUnreachable(error)) return dockerDownError();
+  return error;
 }
 
 function failure(c: Context, error: unknown, scope: string, fallbackStatus?: 404) {
-  const { status, message } = publicError(normalizeError(error));
+  const { status, message, code } = publicError(normalizeError(error));
   if (status >= 500) console.error(`supervisor ${scope} failed`, error);
-  return c.json({ error: message }, status === 500 && fallbackStatus ? fallbackStatus : status);
+  return c.json(
+    { error: message, ...(code ? { code } : {}) },
+    status === 500 && fallbackStatus ? fallbackStatus : status,
+  );
 }
+
+/** `inspect` que separa "não existe" (404) de "o Docker não respondeu" (503). */
+async function inspectWorkspaceContainer(container: Docker.Container) {
+  try {
+    return await container.inspect();
+  } catch (error) {
+    if (isDockerNotFound(error)) throw new SupervisorError("computer not found", 404);
+    throw normalizeError(error);
+  }
+}
+
+async function ensureWorkspaceRestartPolicy(
+  container: Docker.Container,
+  info: Docker.ContainerInspectInfo,
+) {
+  if (!containerNeedsRestartPolicy(info)) return;
+  await container
+    .update({ RestartPolicy: { Name: WORKSPACE_RESTART_POLICY } })
+    .catch((error: unknown) => {
+      console.warn(`restart policy update failed for ${container.id.slice(0, 12)}`, error);
+    });
+}
+
+/**
+ * Religa um container de workspace parado, uma vez por workspace de cada vez (a fila é
+ * a mesma das sessões: dois bots acordando juntos não disputam o `start`). O que a
+ * memória guardava daquela caixa — displays, telas — morreu com o container e é
+ * esquecido; a próxima sessão redescobre o que estiver vivo, como após um restart do
+ * supervisor. Depois do `start` valem as mesmas conferências do provision: `/run` é
+ * tmpfs e nasce vazio de novo.
+ */
+async function reviveWorkspaceContainer(container: Docker.Container, workspaceId: string) {
+  return withWorkspaceSessionLock(workspaceId, async () => {
+    const current = await inspectWorkspaceContainer(container);
+    if (current.State.Running) return { info: current, revived: false };
+    console.log(
+      `workspace container ${container.id.slice(0, 12)} is ${current.State.Status}; starting it again`,
+    );
+    forgetWorkspace(workspaceId, container.id);
+    await ensureWorkspaceRestartPolicy(container, current);
+    let info: Docker.ContainerInspectInfo;
+    try {
+      info = await startWorkspaceContainer(container);
+    } catch (error) {
+      throw explainReviveFailure(error);
+    }
+    await ensureHomeWritable(container);
+    await ensureSharedHomePermissions(container);
+    await assertPrivateDesktopRoot(container);
+    return { info, revived: true };
+  });
+}
+
+/**
+ * O que fazer com um container que existe mas não roda: `revive` liga antes de seguir
+ * (exec, abrir a tela); `allow` devolve como está, sem sessão, para quem só quer parar ou
+ * apagar; `reject` (padrão) recusa com `computer-stopped` — digitar numa tela parada não
+ * tem sentido.
+ */
+type StoppedContainerPolicy = "revive" | "allow" | "reject";
 
 async function managedSession(
   id: string,
   botId: string | undefined,
   workspaceId: string | undefined,
-  opts: { allowMissingSession?: boolean; ensureSession?: boolean } = {},
+  opts: {
+    allowMissingSession?: boolean;
+    ensureSession?: boolean;
+    stopped?: StoppedContainerPolicy;
+  } = {},
 ) {
   if (!botId || !workspaceId) throw new SupervisorError("missing computer identity", 403);
   const container = docker.getContainer(id);
-  const info = await container.inspect().catch(() => {
-    throw new SupervisorError("computer not found", 404);
-  });
+  let info = await inspectWorkspaceContainer(container);
   if (!isWorkspaceContainer(info, workspaceId)) {
     throw new SupervisorError("computer identity mismatch", 403);
+  }
+  let revived = false;
+  if (!info.State.Running) {
+    const policy = opts.stopped ?? "reject";
+    if (policy === "revive") {
+      const result = await reviveWorkspaceContainer(container, workspaceId);
+      info = result.info;
+      revived = result.revived;
+    } else {
+      // Parado: o que a memória guarda desta caixa é de antes de parar.
+      forgetWorkspace(workspaceId, container.id);
+      if (policy === "reject") throw computerStoppedError();
+      return { container, info, session: undefined, revived };
+    }
   }
   const key = sessionKey(workspaceId, botId);
   let session = sessions.get(key);
@@ -716,10 +883,10 @@ async function managedSession(
    */
   if (!session && opts.ensureSession) {
     session = await ensureBotSession(container, botId, workspaceId);
-    return { container, info: await container.inspect(), session };
+    return { container, info: await container.inspect(), session, revived };
   }
   if (!session && !opts.allowMissingSession) throw new SupervisorError("session not found", 404);
-  return { container, info, session };
+  return { container, info, session, revived };
 }
 
 function isWorkspaceContainer(info: Docker.ContainerInspectInfo, workspaceId: string) {
@@ -1128,31 +1295,6 @@ async function ensureSharedHomePermissions(container: Docker.Container) {
     ],
     "0",
   );
-}
-
-/**
- * A raiz dos desktops fica 1777 — qualquer sessão cria a sua ali e só o dono apaga a
- * dele, como em `/tmp`. Escrito daqui, do host, nunca de dentro do container, onde
- * `CapDrop: ALL` proíbe. Dono não se mexe: o supervisor nem sempre é root (`pnpm dev`
- * e o CI rodam como gente comum) e mudar dono exige privilégio.
- */
-export async function hardenDesktopRoot(desktopRoot: string) {
-  const info = await lstat(desktopRoot).catch(() => undefined);
-  if (info?.isSymbolicLink()) throw new SupervisorError("desktop storage path is a link", 500);
-  if (!info) await mkdir(desktopRoot, { recursive: true });
-  await chmod(desktopRoot, 0o1777);
-  // Relido de propósito: um chmod que "passa" mas não fica (bind mount, fs sem suporte)
-  // deixava o dir 755 root, o dono da sessão não conseguia criar o desktop dele e a
-  // tela morria em "framebuffer failed" — silenciosamente, só na hora de assumir o
-  // controle. Melhor o install falhar aqui, com nome, do que o celular ficar
-  // "conectando" para sempre.
-  const mode = (await lstat(desktopRoot)).mode & 0o7777;
-  if (mode !== 0o1777) {
-    throw new SupervisorError(
-      `desktop root ${desktopRoot} ficou com modo ${mode.toString(8)}, esperado 1777`,
-      500,
-    );
-  }
 }
 
 /**

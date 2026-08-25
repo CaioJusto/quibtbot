@@ -1,6 +1,7 @@
 import {
   type AdapterContext,
   AdapterRegistry,
+  type ComputerPresence,
   type ComputerRef,
   type SandboxProvider,
 } from "@quibt/adapter-kit";
@@ -120,6 +121,8 @@ export interface RoutingSandboxProvider extends SandboxProvider {
   /** The provider id a *new* computer would boot into right now. */
   bootKind(): Promise<string>;
   keepAlive(computer: ComputerRef, context?: AdapterContext): Promise<void>;
+  presence(computer: ComputerRef, context: AdapterContext): Promise<ComputerPresence>;
+  start(computer: ComputerRef, context: AdapterContext): Promise<ComputerRef>;
 }
 
 /** Emulators stand in for their family, so `e2b-emulator` still serves an `e2b` computer. */
@@ -267,6 +270,21 @@ export function createRoutingSandboxProvider(deps: SandboxRouterDeps): RoutingSa
       const provider = forRef(computer);
       if (!provider.exists) return true;
       return provider.exists(computer, context);
+    },
+    // Mesma regra, mais fina: quem só tem `exists` responde "sumiu" ou "não sei"; só o
+    // provedor de verdade (Docker/VPS) diz "parado", que é o que dá para religar no lugar.
+    async presence(computer, context) {
+      const provider = forRef(computer);
+      if (provider.presence) return provider.presence(computer, context);
+      if (!provider.exists) return "unknown";
+      return (await provider.exists(computer, context)) ? "unknown" : "missing";
+    },
+    async start(computer, context) {
+      const provider = forRef(computer);
+      if (!provider.start) {
+        throw new Error(`the ${computer.kind} provider cannot restart a stopped computer`);
+      }
+      return provider.start(computer, context);
     },
     stop(computer, context) {
       return forRef(computer).stop(computer, context);

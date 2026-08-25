@@ -1,17 +1,27 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { chmod, lstat, mkdir } from "node:fs/promises";
 import path from "node:path";
-import { MAX_WORKSPACE_SESSIONS } from "./computer-spec.js";
+import { MAX_WORKSPACE_SESSIONS, WORKSPACE_RESTART_POLICY } from "./computer-spec.js";
 
-export type SupervisorErrorStatus = 400 | 401 | 403 | 404 | 409 | 500;
+export type SupervisorErrorStatus = 400 | 401 | 403 | 404 | 409 | 500 | 503;
+
+/**
+ * Código legível por máquina que acompanha a mensagem. O adapter (`docker-sandbox.ts`)
+ * lê o código para dizer ao bot e à pessoa o que houve — "estava desligado e foi
+ * religado", "abra o Docker" — em vez de um "computer request failed" igual para tudo.
+ */
+export type SupervisorErrorCode = "computer-stopped" | "docker-down";
 
 /** Error whose message is safe to return to the caller. */
 export class SupervisorError extends Error {
   readonly status: SupervisorErrorStatus;
+  readonly code: SupervisorErrorCode | undefined;
 
-  constructor(message: string, status: SupervisorErrorStatus = 400) {
+  constructor(message: string, status: SupervisorErrorStatus = 400, code?: SupervisorErrorCode) {
     super(message);
     this.name = "SupervisorError";
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -22,9 +32,111 @@ export class SupervisorError extends Error {
 export function publicError(error: unknown): {
   status: SupervisorErrorStatus;
   message: string;
+  code?: SupervisorErrorCode;
 } {
-  if (error instanceof SupervisorError) return { status: error.status, message: error.message };
+  if (error instanceof SupervisorError) {
+    return {
+      status: error.status,
+      message: error.message,
+      ...(error.code ? { code: error.code } : {}),
+    };
+  }
   return { status: 500, message: "computer request failed" };
+}
+
+// ── Erros do Docker ──────────────────────────────────────────────────────────
+// O dockerode devolve dois tipos de erro: o daemon respondeu (HTTP, com `statusCode`)
+// ou nem chegou lá (erro de socket, com `code` do Node). Confundir os dois era o que
+// fazia um Docker fechado virar "computer not found" — e a API, acreditando que o
+// container tinha sumido, esquecia a linha do banco e tentava provisionar outro.
+
+export const DOCKER_DOWN_MESSAGE =
+  "O Docker não está respondendo: abra o Docker (ou o serviço dele) e tente de novo.";
+
+export const COMPUTER_STOPPED_MESSAGE =
+  "O computador está desligado. Abra a tela do bot ou mande um comando para religar.";
+
+export const COMPUTER_REVIVED_MESSAGE =
+  "O computador estava desligado e foi religado. As janelas abertas antes se perderam; os arquivos da pasta de casa continuam lá.";
+
+export const COMPUTER_REVIVE_DOCKER_DOWN_MESSAGE =
+  "O computador estava desligado e não conseguiu religar: abra o Docker e tente de novo.";
+
+export const COMPUTER_REVIVE_FAILED_MESSAGE =
+  "O computador estava desligado e não conseguiu religar.";
+
+const DOCKER_UNREACHABLE_CODES = new Set([
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "ENOENT",
+  "EPIPE",
+  "ETIMEDOUT",
+  "EAI_AGAIN",
+  "ENETUNREACH",
+  "EHOSTUNREACH",
+]);
+
+/** O daemon respondeu "não existe" (container, imagem, rede). */
+export function isDockerNotFound(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { statusCode?: unknown }).statusCode === 404
+  );
+}
+
+/** Já rodava: `start` num container que outro pedido ligou no meio do caminho. */
+export function isDockerAlreadyStarted(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { statusCode?: unknown }).statusCode === 304
+  );
+}
+
+/** O daemon não respondeu: socket sumiu, Docker fechado ou reiniciando. */
+export function isDockerUnreachable(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const code = (error as { code?: unknown }).code;
+  if (typeof code === "string" && DOCKER_UNREACHABLE_CODES.has(code)) return true;
+  const message = error instanceof Error ? error.message : "";
+  return /socket hang up/i.test(message);
+}
+
+export function dockerDownError(): SupervisorError {
+  return new SupervisorError(DOCKER_DOWN_MESSAGE, 503, "docker-down");
+}
+
+export function computerStoppedError(): SupervisorError {
+  return new SupervisorError(COMPUTER_STOPPED_MESSAGE, 409, "computer-stopped");
+}
+
+/**
+ * Religar um container parado falhou. Com o Docker fora, o que a pessoa precisa saber é
+ * "abra o Docker"; em qualquer outro caso, o motivo que o `start` deu (código de saída,
+ * EAGAIN) vai junto, porque só ele explica o que fazer.
+ */
+export function explainReviveFailure(error: unknown): SupervisorError {
+  if (error instanceof SupervisorError && error.code === "docker-down") {
+    return new SupervisorError(COMPUTER_REVIVE_DOCKER_DOWN_MESSAGE, 503, "docker-down");
+  }
+  const detail = error instanceof SupervisorError ? error.message.trim() : "";
+  return new SupervisorError(
+    detail ? `${COMPUTER_REVIVE_FAILED_MESSAGE} ${detail}` : COMPUTER_REVIVE_FAILED_MESSAGE,
+    500,
+    "computer-stopped",
+  );
+}
+
+/**
+ * Containers criados antes desta versão nasceram sem política de reinício: depois de
+ * reiniciar o Mac ou o Docker ficavam `Exited` até alguém dar `docker start` na mão.
+ * `docker update --restart` corrige no lugar, sem recriar (e sem perder as janelas).
+ */
+export function containerNeedsRestartPolicy(info: {
+  HostConfig?: { RestartPolicy?: { Name?: string } | undefined };
+}): boolean {
+  return info.HostConfig?.RestartPolicy?.Name !== WORKSPACE_RESTART_POLICY;
 }
 
 /**
@@ -595,4 +707,32 @@ export function explainContainerExit(
       : `O computador saiu com código ${exitCode ?? "desconhecido"}.`,
     500,
   );
+}
+
+/**
+ * A raiz dos desktops fica 1777 — qualquer sessão cria a sua ali e só o dono apaga a
+ * dele, como em `/tmp`. Escrito daqui, do host, nunca de dentro do container, onde
+ * `CapDrop: ALL` proíbe. Dono não se mexe: o supervisor nem sempre é root (`pnpm dev`
+ * e o CI rodam como gente comum) e mudar dono exige privilégio.
+ *
+ * Mora aqui, e não no `index.ts`, para o teste não precisar subir o supervisor inteiro
+ * (que abre o Docker e escuta uma porta só de ser importado).
+ */
+export async function hardenDesktopRoot(desktopRoot: string) {
+  const info = await lstat(desktopRoot).catch(() => undefined);
+  if (info?.isSymbolicLink()) throw new SupervisorError("desktop storage path is a link", 500);
+  if (!info) await mkdir(desktopRoot, { recursive: true });
+  await chmod(desktopRoot, 0o1777);
+  // Relido de propósito: um chmod que "passa" mas não fica (bind mount, fs sem suporte)
+  // deixava o dir 755 root, o dono da sessão não conseguia criar o desktop dele e a
+  // tela morria em "framebuffer failed" — silenciosamente, só na hora de assumir o
+  // controle. Melhor o install falhar aqui, com nome, do que o celular ficar
+  // "conectando" para sempre.
+  const mode = (await lstat(desktopRoot)).mode & 0o7777;
+  if (mode !== 0o1777) {
+    throw new SupervisorError(
+      `desktop root ${desktopRoot} ficou com modo ${mode.toString(8)}, esperado 1777`,
+      500,
+    );
+  }
 }

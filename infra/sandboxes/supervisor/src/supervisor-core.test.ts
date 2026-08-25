@@ -4,20 +4,29 @@ import { MAX_WORKSPACE_SESSIONS } from "./computer-spec.js";
 import {
   allocateDisplay,
   assertExecArgv,
+  COMPUTER_REVIVE_DOCKER_DOWN_MESSAGE,
+  computerStoppedError,
+  containerNeedsRestartPolicy,
   containerUsesWorkspaceHome,
   createDockerStreamDemuxer,
   DEFAULT_DOCKER_SOCKET,
+  dockerDownError,
   dockerEndpointCandidates,
   dockerUnreachableMessage,
   execEnvEntries,
   explainContainerExit,
+  explainReviveFailure,
   HOME_MODE_REPAIR_COMMAND,
   HOME_REPAIR_COMMAND,
   HOME_WRITABLE_PROBE,
+  hardenDesktopRoot,
   hasLiveSessions,
   homeIsWritable,
   homePreparationMarker,
   isAuthorizedSupervisorRequest,
+  isDockerAlreadyStarted,
+  isDockerNotFound,
+  isDockerUnreachable,
   isWorkspaceSentinel,
   novncEnsureCommand,
   parseNovncEnsure,
@@ -154,6 +163,85 @@ describe("public errors", () => {
     expect(
       publicError(new Error("connect ENOENT /var/run/docker.sock (uid=0 /Users/op/data)")),
     ).toEqual({ status: 500, message: "computer request failed" });
+  });
+
+  it("carrega o código junto da mensagem, para o adapter saber o que dizer", () => {
+    expect(publicError(dockerDownError())).toEqual({
+      status: 503,
+      message: expect.stringMatching(/abra o Docker/),
+      code: "docker-down",
+    });
+    expect(publicError(computerStoppedError())).toEqual({
+      status: 409,
+      message: expect.stringMatching(/desligado/),
+      code: "computer-stopped",
+    });
+    // Sem código, sem chave: o corpo antigo continua igual.
+    expect(publicError(new SupervisorError("x", 404))).not.toHaveProperty("code");
+  });
+});
+
+describe("erros do Docker", () => {
+  it("separa 'não existe' de 'o daemon não respondeu'", () => {
+    const notFound = Object.assign(new Error("(HTTP code 404) no such container"), {
+      statusCode: 404,
+    });
+    const refused = Object.assign(new Error("connect ECONNREFUSED /var/run/docker.sock"), {
+      code: "ECONNREFUSED",
+    });
+    const missingSocket = Object.assign(new Error("connect ENOENT ~/.colima/docker.sock"), {
+      code: "ENOENT",
+    });
+    const hungUp = new Error("socket hang up");
+    expect(isDockerNotFound(notFound)).toBe(true);
+    expect(isDockerUnreachable(notFound)).toBe(false);
+    for (const down of [refused, missingSocket, hungUp]) {
+      expect(isDockerNotFound(down)).toBe(false);
+      expect(isDockerUnreachable(down)).toBe(true);
+    }
+    expect(isDockerUnreachable(new Error("exec failed"))).toBe(false);
+    expect(isDockerUnreachable(undefined)).toBe(false);
+  });
+
+  it("um start que perdeu a corrida (304) não é falha", () => {
+    expect(
+      isDockerAlreadyStarted(
+        Object.assign(new Error("(HTTP code 304) container already started"), {
+          statusCode: 304,
+        }),
+      ),
+    ).toBe(true);
+    expect(isDockerAlreadyStarted(new Error("boom"))).toBe(false);
+  });
+});
+
+describe("religar um container parado", () => {
+  it("com o Docker fora, diz para abrir o Docker e mantém o código", () => {
+    const error = explainReviveFailure(dockerDownError());
+    expect(error.code).toBe("docker-down");
+    expect(error.status).toBe(503);
+    expect(error.message).toBe(COMPUTER_REVIVE_DOCKER_DOWN_MESSAGE);
+  });
+
+  it("noutra falha, conta o motivo do start e marca computer-stopped", () => {
+    const error = explainReviveFailure(explainContainerExit(255, "eagain"));
+    expect(error.code).toBe("computer-stopped");
+    expect(error.message).toMatch(/^O computador estava desligado e não conseguiu religar\./);
+    expect(error.message).toMatch(/EAGAIN/);
+    // Erro cru do Docker não vaza caminho de socket nenhum.
+    const raw = explainReviveFailure(new Error("connect /Users/op/.colima/docker.sock"));
+    expect(raw.message).toBe("O computador estava desligado e não conseguiu religar.");
+  });
+
+  it("só containers antigos precisam ganhar a política de reinício", () => {
+    expect(containerNeedsRestartPolicy({ HostConfig: { RestartPolicy: { Name: "no" } } })).toBe(
+      true,
+    );
+    expect(containerNeedsRestartPolicy({ HostConfig: {} })).toBe(true);
+    expect(containerNeedsRestartPolicy({})).toBe(true);
+    expect(
+      containerNeedsRestartPolicy({ HostConfig: { RestartPolicy: { Name: "unless-stopped" } } }),
+    ).toBe(false);
   });
 });
 
@@ -575,7 +663,6 @@ describe("hardenDesktopRoot", () => {
     const { mkdtempSync, lstatSync } = await import("node:fs");
     const { tmpdir } = await import("node:os");
     const path = await import("node:path");
-    const { hardenDesktopRoot } = await import("./index.js");
     const root = path.join(mkdtempSync(path.join(tmpdir(), "quibt-desk-")), "desktops");
     await hardenDesktopRoot(root);
     expect((lstatSync(root).mode & 0o7777).toString(8)).toBe("1777");
@@ -588,7 +675,6 @@ describe("hardenDesktopRoot", () => {
     const { mkdtempSync, symlinkSync } = await import("node:fs");
     const { tmpdir } = await import("node:os");
     const path = await import("node:path");
-    const { hardenDesktopRoot } = await import("./index.js");
     const dir = mkdtempSync(path.join(tmpdir(), "quibt-desk-link-"));
     const root = path.join(dir, "desktops");
     symlinkSync(dir, root);
