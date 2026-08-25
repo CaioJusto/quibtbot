@@ -15,8 +15,9 @@ export interface AutoApprover {
 }
 
 export function autoDecision(bot: AutoApprover, tool: string, summary: string): string | null {
-  // This legacy broker used opt-in auto approval; keep that API contract while sharing the
-  // hardened command policy with the production executor.
+  // Este broker legado só auto-aprova com opt-in explícito (autoApprove: true); mantém esse
+  // contrato e compartilha com o executor de produção a mesma política: comando comum roda,
+  // destrutivo/sensível/spawn/delete param.
   return coreAutoDecision({ ...bot, autoApprove: bot.autoApprove === true }, tool, summary);
 }
 
