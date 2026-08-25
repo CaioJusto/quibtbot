@@ -1,7 +1,7 @@
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { composeServices, readComposeFile } from "../../testkit/src/compose-config.js";
-import { allQuibtImages, composeInvocation, INSTALL_RELEASE } from "./compose.js";
+import { allQuibtImages, composeInvocation, DESKTOP_SIGNING, INSTALL_RELEASE } from "./compose.js";
 
 const desktopComposeFile = path.resolve("infra/compose/docker-compose.desktop.yml");
 const manifest = readComposeFile(desktopComposeFile);
@@ -62,5 +62,16 @@ describe("composeInvocation", () => {
     const up = composeInvocation("packaged", composeFile, envFile, "up");
     expect(up).toEqual([...base, "up", "-d", "--wait"]);
     expect(up).not.toContain("--build");
+  });
+});
+
+describe("DESKTOP_SIGNING", () => {
+  it("never claims a notarized Mac build that is not signed", () => {
+    // Notarização pressupõe assinatura Developer ID: o par (signed:false, notarized:true) não
+    // existe num signing-status-mac.json real.
+    if (DESKTOP_SIGNING.mac.notarized) expect(DESKTOP_SIGNING.mac.signed).toBe(true);
+    for (const platform of ["mac", "win", "linux"] as const) {
+      expect(typeof DESKTOP_SIGNING[platform].signed).toBe("boolean");
+    }
   });
 });

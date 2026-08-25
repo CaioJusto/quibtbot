@@ -19,6 +19,8 @@ export {
   type ComposeMode,
   type ComposeStep,
   composeInvocation,
+  DESKTOP_SIGNING,
+  type DesktopSigning,
   INSTALL_RELEASE,
   postgresUpInvocation,
   resolveQuibtImage,

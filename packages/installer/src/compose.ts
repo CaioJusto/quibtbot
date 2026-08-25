@@ -1,6 +1,29 @@
 import { PUBLIC_PROFILE } from "./public-access.js";
 
 export const INSTALL_RELEASE = "0.2.11";
+
+export interface DesktopSigning {
+  mac: { signed: boolean; notarized: boolean };
+  win: { signed: boolean };
+  linux: { signed: boolean };
+}
+
+/**
+ * Como os instaladores da tag `v${INSTALL_RELEASE}` foram publicados de fato. O checklist de
+ * release preenche isto a partir dos `signing-status-*.json` anexados à tag (o CI gera o
+ * arquivo; a notarização acontece só no Mac do mantenedor, que substitui o DMG e o status
+ * quando a faz). Site, README e docs escolhem a frase de download por este objeto — nunca
+ * chame um build de assinado ou notarizado sem o status da tag dizer isso.
+ *
+ * v0.2.11: o `QuibtBot.dmg` é o build do CI, `signing-status-mac.json` diz
+ * `signed: false, notarized: false`. Na v0.2.10 (e na v0.2.9) o mantenedor substituiu o DMG
+ * pelo notarizado e o status dizia `true`.
+ */
+export const DESKTOP_SIGNING: DesktopSigning = {
+  mac: { signed: false, notarized: false },
+  win: { signed: false },
+  linux: { signed: false },
+};
 export const QUIBT_IMAGE_PREFIX = "ghcr.io/quibt";
 
 export function requiredQuibtImages(release = INSTALL_RELEASE): string[] {

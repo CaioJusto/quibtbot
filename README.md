@@ -25,16 +25,19 @@
 
 Each bot has one thread, one computer, memory, routines, and history. You run the stack on your machine. Packages live under `@quibt/*`. This repository is the complete product.
 
-> **Where this is:** `v0.2.11` is published and running. What that means concretely: the
-> Apple-silicon DMG is Developer ID signed **and** notarized (`spctl` reports
-> `accepted / source=Notarized Developer ID`), the three container images are public and
-> multi-architecture, and CI proves the Linux path on every run — a real Docker host boots a bot
-> computer and the VPS Compose stack comes up and answers.
+> **Where this is:** `v0.2.11` is published and running. What that means concretely: the three
+> container images are public and multi-architecture, and CI proves the Linux path on every run —
+> a real Docker host boots a bot computer and the VPS Compose stack comes up and answers.
 >
-> What is **not** covered yet: the Windows installer and the Linux AppImage are unsigned previews
-> (Intel Macs run from source), and a public multi-user deployment still needs the isolation and TLS
-> choices in [Security model](#security-model) — Docker and `remote-supervisor` assume one trusted
-> owner. The evidence behind each claim is in the
+> What is **not** covered yet: the `v0.2.11` desktop installers are the CI builds, **unsigned** on
+> every platform. The Apple-silicon `QuibtBot.dmg` attached to `v0.2.11` is not notarized
+> (`signing-status-mac.json` says `signed: false, notarized: false`), so macOS warns the first
+> time — **right-click → Open**. The notarized DMG exists for `v0.2.10` (and `v0.2.9`, where the
+> maintainer replaced the CI DMG by the notarized one); the same swap is pending for `v0.2.11`.
+> The Windows installer and the Linux AppImage are unsigned test builds (Intel Macs run from
+> source), and a public multi-user deployment still needs the isolation and TLS choices in
+> [Security model](#security-model) — Docker and `remote-supervisor` assume one trusted owner.
+> The evidence behind each claim, per tag, is in the
 > [release-readiness ledger](docs/release-readiness.md).
 
 ## Download
@@ -44,14 +47,16 @@ The desktop app wraps the same UI the browser shows. The API, worker, and bot co
 
 | Platform | Installer | One sentence |
 | --- | --- | --- |
-| macOS (Apple silicon) | [`QuibtBot.dmg`](https://github.com/CaioJusto/quibtbot/releases/download/v0.2.11/QuibtBot.dmg) | Developer ID signed **and notarized** by Apple: it opens without the "unidentified developer" warning. |
-| macOS (Intel) | — | Not supported yet: run from source (`pnpm dev` + `pnpm desktop`). |
-| Windows (64-bit) | [`QuibtBot-setup.exe`](https://github.com/CaioJusto/quibtbot/releases/download/v0.2.11/QuibtBot-setup.exe) | Unsigned preview installer: SmartScreen warns (**More info → Run anyway**), and you install Docker Desktop yourself. |
-| Linux (x64) | [`QuibtBot.AppImage`](https://github.com/CaioJusto/quibtbot/releases/download/v0.2.11/QuibtBot.AppImage) | Unsigned preview AppImage: needs `libfuse2`, mark it executable and run it. |
+| macOS (Apple silicon) | [`QuibtBot.dmg`](https://github.com/CaioJusto/quibtbot/releases/download/v0.2.11/QuibtBot.dmg) | CI build, unsigned and not notarized: macOS warns the first time — **right-click → Open**. |
+| macOS (Intel) | — | No installer yet: run from source (`pnpm dev` + `pnpm desktop`). |
+| Windows (64-bit) | [`QuibtBot-setup.exe`](https://github.com/CaioJusto/quibtbot/releases/download/v0.2.11/QuibtBot-setup.exe) | Unsigned test installer: SmartScreen warns (**More info → Run anyway**), and you install Docker Desktop yourself. |
+| Linux (x64) | [`QuibtBot.AppImage`](https://github.com/CaioJusto/quibtbot/releases/download/v0.2.11/QuibtBot.AppImage) | Unsigned test AppImage: needs `libfuse2`, mark it executable and run it; you install Docker (Engine or Desktop) yourself. |
 | Linux / macOS (server) | `quibtbot` CLI | The one-line install below; no desktop app involved. |
 
-The file names above never change; the version lives in the release tag. Details and the
-signing status of each installer are in [`docs/desktop.md`](docs/desktop.md).
+The file names above never change; the version lives in the release tag. The sentence next to
+each installer follows `DESKTOP_SIGNING` in `packages/installer/src/compose.ts`, filled from the
+`signing-status-*.json` files attached to the tag. Details are in
+[`docs/desktop.md`](docs/desktop.md).
 
 The `v0.2.11` release publishes those three desktop installers, standalone macOS/Linux/Windows
 `quibtbot` binaries, matching SHA-256 files, and public multi-architecture Docker images from

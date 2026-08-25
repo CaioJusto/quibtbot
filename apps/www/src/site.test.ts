@@ -2,17 +2,20 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { DESKTOP_SIGNING } from "@quibt/installer";
 import { DESKTOP_ARTIFACT_NAMES } from "../../../scripts/release-version.mjs";
-import { COPY, ROUTES } from "./i18n";
+import { COPY } from "./i18n";
 import {
   DESKTOP_VERSION,
   LINUX_DOWNLOAD_URL,
   MAC_DOWNLOAD_URL,
+  macDownloadNote,
   SITE_URL,
   WIN_DOWNLOAD_URL,
 } from "./site";
 
 const pages = path.join(path.dirname(fileURLToPath(import.meta.url)), "pages");
+const repoRoot = path.resolve(path.dirname(pages), "..", "..", "..");
 
 describe("landing pricing", () => {
   it("talks about each bot's own screen, not a locked-down machine", () => {
@@ -51,16 +54,83 @@ describe("landing pricing", () => {
     expect(DESKTOP_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
   });
 
-  it("describes each installer as the release ships it: notarized Mac, unsigned preview elsewhere", () => {
+  it("describes the Mac DMG the way the tag's signing status says it was published", () => {
+    // A frase do Mac é escolhida por DESKTOP_SIGNING (preenchido a partir do
+    // signing-status-mac.json da tag), não por uma alegação fixa no texto. Sem notarização o
+    // Gatekeeper bloqueia o DMG, e a frase tem de dar a saída (botão direito → Abrir).
+    const notarizedPhrase = /notarized by Apple|notarizado pela Apple/;
+    const gatekeeperExit = /right-click → Open|botão direito → Abrir/;
+    for (const locale of ["en", "pt-BR"] as const) {
+      const rendered = macDownloadNote(locale);
+      if (DESKTOP_SIGNING.mac.notarized) {
+        expect(rendered).toMatch(notarizedPhrase);
+        expect(rendered).not.toMatch(gatekeeperExit);
+      } else {
+        expect(rendered).toMatch(gatekeeperExit);
+        expect(rendered).not.toMatch(notarizedPhrase);
+      }
+      // Os dois ramos existem e trocam de frase quando o status muda.
+      const others = { win: { signed: false }, linux: { signed: false } };
+      const notarized = { mac: { signed: true, notarized: true }, ...others };
+      const unsigned = { mac: { signed: false, notarized: false }, ...others };
+      expect(macDownloadNote(locale, notarized)).toMatch(notarizedPhrase);
+      expect(macDownloadNote(locale, notarized)).not.toMatch(gatekeeperExit);
+      expect(macDownloadNote(locale, unsigned)).toMatch(gatekeeperExit);
+      expect(macDownloadNote(locale, unsigned)).not.toMatch(notarizedPhrase);
+      expect(macDownloadNote(locale, notarized)).toMatch(/Intel/);
+      expect(macDownloadNote(locale, unsigned)).toMatch(/README/);
+    }
+    const landingPage = readFileSync(
+      path.join(path.dirname(pages), "components", "LandingPage.astro"),
+      "utf8",
+    );
+    expect(landingPage).toContain("macDownloadNote(locale)");
+    expect(landingPage).not.toMatch(/landing\.downloadMacNote/);
+  });
+
+  it("describes Windows and Linux as the unsigned test builds the CI publishes, without jargon", () => {
     for (const locale of ["en", "pt-BR"] as const) {
       const landing = COPY[locale].landing;
-      expect(landing.downloadMacNote).not.toMatch(/not Apple-notarized|sem notarização/i);
-      expect(landing.downloadMacNote).toMatch(/notarized|notarizado/i);
       expect(landing.downloadWinNote).toMatch(/SmartScreen/);
       expect(landing.downloadWinNote).toMatch(/Docker Desktop/);
       expect(landing.downloadLinuxNote).toMatch(/libfuse2/);
+      // O AppImage não instala o Docker: o usuário Linux instala o Engine (ou o Desktop) sozinho.
+      expect(landing.downloadLinuxNote).toMatch(
+        /Docker \(Engine or Desktop\)|Docker \(Engine ou Desktop\)/,
+      );
+      expect(landing.downloadLinuxNote).toMatch(/mark it executable|marque como executável/);
       expect(landing.downloadLatest).not.toMatch(/always the latest|sempre na última/i);
+      for (const note of [landing.downloadWinNote, landing.downloadLinuxNote]) {
+        expect(note).not.toMatch(/preview|prévia/i);
+        expect(note).toMatch(/test|teste/);
+      }
     }
+    expect(COPY["pt-BR"].landing.downloadMacNoteUnsigned).not.toMatch(/roda do código/);
+    expect(COPY["pt-BR"].landing.downloadMacNoteNotarized).not.toMatch(/roda do código/);
+  });
+
+  it("keeps the layperson guide and the README on the same Mac story as the site", () => {
+    const onboarding = readFileSync(path.join(repoRoot, "docs", "onboarding.md"), "utf8");
+    const readme = readFileSync(path.join(repoRoot, "README.md"), "utf8");
+    const macLine = onboarding.split("\n").find((line) => /Mac \(Apple silicon\)/.test(line));
+    expect(macLine).toBeDefined();
+    const readmeMacRow = readme
+      .split("\n")
+      .find((line) => /^\| macOS \(Apple silicon\)/.test(line));
+    expect(readmeMacRow).toBeDefined();
+    if (DESKTOP_SIGNING.mac.notarized) {
+      expect(macLine).toMatch(/notarizado/);
+      expect(readmeMacRow).toMatch(/notarized/);
+    } else {
+      expect(macLine).toMatch(/botão direito → Abrir/);
+      expect(macLine).not.toMatch(/notarizado/);
+      expect(readmeMacRow).toMatch(/right-click → Open/);
+      expect(readmeMacRow).not.toMatch(/signed \*\*and notarized\*\*/);
+    }
+    expect(onboarding).toMatch(/Executar assim mesmo/);
+    expect(onboarding).toMatch(/libfuse2/);
+    expect(onboarding).toMatch(/marque como executável/);
+    expect(onboarding).toMatch(/instale o Docker[^\n]*por conta própria/);
   });
 
   it("exposes the open-source install path", () => {
