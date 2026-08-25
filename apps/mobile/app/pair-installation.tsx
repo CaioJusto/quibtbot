@@ -57,10 +57,20 @@ export default function PairInstallation() {
           )
         : await claimInstallation(apiDraft, code);
       if (!result.ok) {
-        setError(result.error);
+        // `error` vazio vinha de um deep link mal formado: o botão "funcionava" e nada
+        // aparecia. Quem toca precisa de uma frase, sempre.
+        setError(result.error || "Não foi possível validar este convite. Leia o QR de novo.");
         return;
       }
       router.replace("/sign-up");
+    } catch (err) {
+      // Sem isto, uma falha ao gravar no chaveiro (SecureStore) morria em silêncio:
+      // o convite já tinha sido consumido no servidor e a tela ficava parada.
+      setError(
+        err instanceof Error && err.message
+          ? `Não consegui guardar a conexão neste aparelho: ${err.message}`
+          : "Não consegui guardar a conexão neste aparelho.",
+      );
     } finally {
       setPending(false);
     }
