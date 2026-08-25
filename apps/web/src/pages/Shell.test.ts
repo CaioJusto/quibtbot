@@ -38,8 +38,23 @@ describe("dashboard copies the landing product demo", () => {
   });
 
   it("does not keep a screen URL or heartbeat after the lease is gone", () => {
-    expect(shell).toContain("Assuma o controle para ver a tela");
+    expect(shell).not.toContain("Assuma o controle para ver a tela");
     expect(shell).toContain('if (computer?.controlHolder !== "user") return;');
+  });
+
+  it("shows the bot's screen as polled stills while the user does not hold control", () => {
+    // Sem o controle não há stream, mas há retrato: o painel e a tela cheia mostram o
+    // último `computer.preview` com a idade em cima, nunca só a ilustração de mesa.
+    expect(shell).toContain("rpc.computer.preview({ botId: previewBotId })");
+    expect(shell).toContain("shouldPollPreview({");
+    expect(shell).toContain("streaming: pinnedScreenUrl !== null");
+    expect(shell).toContain("previewPollDelayMs(failures)");
+    expect(shell).toContain("previewAgeLabel(previewAgeMs(preview, previewNow))");
+    expect(shell.match(/className="qb-live-badge/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(shell).toContain('className="qb-screen-still"');
+    expect(shell).toContain("sem prévia · tentando de novo");
+    // A pílula de assumir continua sobre o retrato em tela cheia.
+    expect(shell.match(/className="qb-screen-claim"/g)).toHaveLength(2);
   });
 
   it("keeps the monitor toggle on the side panel, not a jump to fullscreen", () => {
