@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { INSTALL_RELEASE } from "./compose.js";
+import { PUBLIC_HOST_ENV } from "./public-access.js";
 
 const SECRET_KEYS = [
   "BETTER_AUTH_SECRET",
@@ -51,9 +52,19 @@ function assignDefault(values: Record<string, string>, key: string, value: strin
   return true;
 }
 
+export interface InstallEnvironmentOptions {
+  /**
+   * Host `quibt-xxxx.<ip>.sslip.io` de uma instalação pública. Quando vem, as origens
+   * viram `https://<host>` e o Caddy (profile `public`) é quem encara a internet — web e
+   * API ficam presos em 127.0.0.1 no host. Sem ele, tudo segue como sempre.
+   */
+  publicHost?: string;
+}
+
 export function ensureInstallEnvironment(
   dataDir: string,
   publicUrl: string,
+  options: InstallEnvironmentOptions = {},
 ): InstallEnvironmentResult {
   mkdirSync(dataDir, { recursive: true });
   const absoluteDataDir = path.resolve(dataDir);
@@ -73,20 +84,37 @@ export function ensureInstallEnvironment(
   // registrations later; an internet-facing VPS must not create free tenants on sight.
   assignDefault(values, "SIGNUPS_ENABLED", "false");
   assignDefault(values, "SANDBOX_PROVIDER", "docker");
+
+  // Um host público já gravado sobrevive a reinstalações: trocá-lo trocaria o
+  // certificado e o endereço que o celular guardou. Só o primeiro install o define.
+  const publicHost = values[PUBLIC_HOST_ENV] || options.publicHost;
+  if (publicHost) values[PUBLIC_HOST_ENV] = publicHost;
+
   assignDefault(
     values,
     "QUIBT_WEB_BIND_HOST",
-    new URL(publicUrl).hostname === "127.0.0.1" || new URL(publicUrl).hostname === "localhost"
+    // Instalação pública ou puramente local: o web só escuta em loopback. Quem chega
+    // de fora na pública passa pelo Caddy, na 443. Só uma LAN sem TLS abre o 0.0.0.0.
+    publicHost ||
+      new URL(publicUrl).hostname === "127.0.0.1" ||
+      new URL(publicUrl).hostname === "localhost"
       ? "127.0.0.1"
       : "0.0.0.0",
   );
+  if (publicHost) assignDefault(values, "QUIBT_API_BIND_HOST", "127.0.0.1");
 
-  if (!values.WEB_ORIGIN) values.WEB_ORIGIN = publicUrl;
-  if (!values.BETTER_AUTH_URL) values.BETTER_AUTH_URL = publicUrl;
+  const origin = publicHost ? `https://${publicHost}` : publicUrl;
+  if (!values.WEB_ORIGIN) values.WEB_ORIGIN = origin;
+  if (!values.BETTER_AUTH_URL) values.BETTER_AUTH_URL = origin;
   if (!values.API_URL) {
-    const origin = new URL(publicUrl);
-    origin.port = "3100";
-    values.API_URL = origin.toString().replace(/\/$/, "");
+    if (publicHost) {
+      // Atrás do Caddy a API não tem porta própria: o web faz proxy de /api e /rpc.
+      values.API_URL = origin;
+    } else {
+      const api = new URL(publicUrl);
+      api.port = "3100";
+      values.API_URL = api.toString().replace(/\/$/, "");
+    }
   }
 
   for (const key of SECRET_KEYS) {

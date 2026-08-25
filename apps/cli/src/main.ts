@@ -41,6 +41,8 @@ export interface ParsedCli {
   showSensitive: boolean;
   keepData: boolean;
   keepImages: boolean;
+  /** `install --local`: nunca expor à internet, mesmo podendo. */
+  local: boolean;
 }
 
 const VALID_COMMANDS = ["install", "status", "doctor", "pair", "update", "uninstall"] as const;
@@ -62,7 +64,13 @@ export function parseCli(args: string[]): ParsedCli {
 
   const [first, ...rest] = args;
 
-  const none = { nonInteractive: false, showSensitive: false, keepData: false, keepImages: false };
+  const none = {
+    nonInteractive: false,
+    showSensitive: false,
+    keepData: false,
+    keepImages: false,
+    local: false,
+  };
   if (first === "--version") {
     return { command: "version", ...none };
   }
@@ -79,7 +87,13 @@ export function parseCli(args: string[]): ParsedCli {
   let showSensitive = false;
   let keepData = false;
   let keepImages = false;
+  let local = false;
   for (const arg of rest) {
+    // Não expor nada, mesmo numa VPS com IP público e 80/443 livres.
+    if (arg === "--local" && first === "install") {
+      local = true;
+      continue;
+    }
     if (arg === "--non-interactive") {
       nonInteractive = true;
       continue;
@@ -100,7 +114,14 @@ export function parseCli(args: string[]): ParsedCli {
     throw new CliUsageError(`unknown option: ${arg}`);
   }
 
-  return { command: first as CliCommand, nonInteractive, showSensitive, keepData, keepImages };
+  return {
+    command: first as CliCommand,
+    nonInteractive,
+    showSensitive,
+    keepData,
+    keepImages,
+    local,
+  };
 }
 
 function isMainModule(): boolean {
@@ -131,6 +152,7 @@ Commands:
 Options:
   --help            Show this help
   --version         Show version
+  --local           (install) Keep everything on 127.0.0.1 even on a public VPS
   --non-interactive Run install without prompts
   --show-sensitive  Print pairing token/code/deep-link/QR on non-TTY stdout
   --keep-data       (uninstall) Keep the data dir: database, bot homes, secrets
@@ -288,6 +310,8 @@ export async function runCliAsync(args: string[], deps: RunCliDeps = {}): Promis
           publicUrl,
           composeFile,
           composeMode: "packaged",
+          forceLocal: parsed.local,
+          publicAccess: { fetch: fetchImpl },
           run,
           fetch: fetchImpl,
           clock,

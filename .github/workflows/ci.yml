@@ -305,6 +305,12 @@ jobs:
           "${BASE[@]}" up -d --wait postgres
           "${BASE[@]}" run --rm --no-deps api quibt-migrate
           "${BASE[@]}" up -d --wait supervisor api worker web computer
+          # A instalação pública (sslip.io + Caddy) tem de renderizar e subir com o
+          # profile ligado. O runner não tem 80/443 públicas, então o Let's Encrypt não
+          # emite aqui; o que este passo prova é o Compose e o container, não o cert.
+          QUIBT_PUBLIC_HOST="quibt-ci.127.0.0.1.sslip.io" "${BASE[@]}" --profile public config --services | grep -qx caddy
+          QUIBT_PUBLIC_HOST="quibt-ci.127.0.0.1.sslip.io" "${BASE[@]}" --profile public up -d caddy
+          docker ps --format '{{.Names}}' | grep -q caddy
           for attempt in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:3100/ready > /dev/null &&
               curl -fsS http://127.0.0.1:5173/ > /dev/null; then

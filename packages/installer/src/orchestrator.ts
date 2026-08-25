@@ -26,6 +26,12 @@ import {
 } from "./orchestrator-helpers.js";
 import type { SensitivePairingOutput } from "./pairing.js";
 import { buildPairingOutput } from "./pairing.js";
+import {
+  decidePublicAccess,
+  PUBLIC_HOST_ENV,
+  type PublicAccessDecision,
+  type PublicAccessInput,
+} from "./public-access.js";
 import { redactInstallerText } from "./redact.js";
 import { type InstallState, type InstallStep, nextInstallStep } from "./state.js";
 import {
@@ -78,6 +84,14 @@ export interface InstallResult {
 export interface OrchestratorDeps {
   dataDir: string;
   publicUrl: string;
+  /** `install --local`: fica em loopback mesmo com IP público e 80/443 livres. */
+  forceLocal?: boolean;
+  /**
+   * Liga a descoberta do endereço público. O CLI passa `{}` (rede de verdade); os
+   * testes injetam `fetch`/`checkPort` falsos; quem omite fica em loopback sem
+   * consultar nada.
+   */
+  publicAccess?: Pick<PublicAccessInput, "fetch" | "checkPort" | "random">;
   composeFile: string;
   composeMode: ComposeMode;
   run: ProcessRunner;
@@ -87,6 +101,14 @@ export interface OrchestratorDeps {
   docker?: DockerInvocation;
   onEvent?: (event: InstallerEvent) => void;
   onWarning?: (message: string) => void;
+}
+
+/** O host público de uma instalação anterior, se o env já existir. */
+function readExistingPublicHost(dataDir: string): string | undefined {
+  const file = envFilePath(dataDir);
+  if (!existsSync(file)) return undefined;
+  const host = parseEnvFile(readFileSync(file, "utf8"))[PUBLIC_HOST_ENV];
+  return host ? host : undefined;
 }
 
 function envFilePath(dataDir: string): string {
@@ -349,6 +371,7 @@ export async function runInstall(deps: OrchestratorDeps): Promise<InstallResult>
 
     state = loadInstallState(deps.dataDir, deps.onWarning) ?? state;
     let envValues = loadEnvValues(deps.dataDir);
+    let access: PublicAccessDecision | undefined;
     secrets.push(...collectSecrets(envValues));
     emit = (event: InstallerEvent) => emitEvent(deps.onEvent, event, secrets);
     while (true) {
@@ -366,10 +389,34 @@ export async function runInstall(deps: OrchestratorDeps): Promise<InstallResult>
       }
 
       if (step === "environment") {
-        const env = ensureInstallEnvironment(deps.dataDir, deps.publicUrl);
+        // Decidido AQUI, antes do env existir: o host público entra nas origens do
+        // Better Auth e do web, e mudar isso depois invalidaria sessões. Um host já
+        // gravado por uma instalação anterior vence a descoberta, para o certificado
+        // e o endereço que o celular guardou continuarem valendo.
+        // A descoberta de IP só acontece quando quem chama a pede (`publicAccess`): o
+        // CLI passa a rede de verdade; `pnpm dev` e os testes não passam nada e ficam
+        // locais. Assim a suíte nunca depende da internet, por construção.
+        access = deps.publicAccess
+          ? await decidePublicAccess({
+              forceLocal: deps.forceLocal,
+              existingHost: readExistingPublicHost(deps.dataDir),
+              ...deps.publicAccess,
+            })
+          : { mode: "local", reason: "Instalação a partir do código fica na rede local." };
+        const env = ensureInstallEnvironment(deps.dataDir, deps.publicUrl, {
+          publicHost: access.mode === "public" ? access.host : undefined,
+        });
         envValues = env.values;
         secrets.length = 0;
         secrets.push(...collectSecrets(envValues));
+        emit({
+          step,
+          status: "running",
+          message:
+            access.mode === "public"
+              ? `Endereço público: ${access.url} (HTTPS pelo Let's Encrypt, sem domínio)`
+              : access.reason,
+        });
       }
 
       if (step === "images") {
@@ -442,7 +489,9 @@ export async function runInstall(deps: OrchestratorDeps): Promise<InstallResult>
           const appsUp = await runDocker(
             deps,
             dockerInv,
-            appServicesUpInvocation(deps.composeMode, deps.composeFile, envFile),
+            appServicesUpInvocation(deps.composeMode, deps.composeFile, envFile, {
+              publicAccess: access?.mode === "public",
+            }),
           );
           if (appsUp.code !== 0) {
             return fail(
@@ -499,7 +548,10 @@ export async function runInstall(deps: OrchestratorDeps): Promise<InstallResult>
         }
         // The installer talks directly to the loopback-only API. Phones and remote
         // browsers must use the public web origin, whose /api proxy reaches that API.
-        const pairing = buildPairingOutput(deps.publicUrl, deps.publicUrl, minted);
+        // Numa instalação pública o celular tem de receber o https do Caddy, não o
+        // loopback: é esse endereço que vai no QR e que ele guarda.
+        const reachableUrl = access?.mode === "public" ? access.url : deps.publicUrl;
+        const pairing = buildPairingOutput(reachableUrl, reachableUrl, minted);
         emit({ step, status: "succeeded", message: "Pairing invite ready" });
         return { ok: true, state, pairing, pairingPending: true };
       }

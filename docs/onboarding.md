@@ -65,6 +65,14 @@ Esta tela só aparece para quem é dono do install. Toque numa opção e **leia 
 
 Receitas Hetzner / DigitalOcean / “qualquer VPS” são atalhos para a opção Minha VPS.
 
+Quer usar do celular fora de casa, sem depender do notebook ligado? Instale o Quibt **inteiro**
+na VPS com `quibtbot install`. Se a máquina tiver IP público e as portas 80 e 443 livres, o
+instalador liga o HTTPS sozinho: escolhe um nome como `quibt-a1b2c3d4.203.0.113.9.sslip.io`
+(um DNS público que aponta para o próprio IP) e tira o certificado no Let's Encrypt. Você não
+precisa de domínio, e a Quibt não põe domínio nenhum no meio. O QR já sai com `https://`.
+Se as portas estiverem ocupadas por outro site, ele avisa e fica só na máquina — aí é o caso
+de colocar atrás do seu proxy. `quibtbot install --local` deixa local mesmo numa VPS limpa.
+
 O passo a passo de cada uma está em [computers.md](./computers.md) e no próprio app (o mesmo texto).
 
 Toque em **Testar** antes de salvar. Se algo faltar, a tela diz o que colar.

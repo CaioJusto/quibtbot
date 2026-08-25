@@ -44,7 +44,29 @@ local role must be recreated (`pnpm compose:down` deletes it) or the role rename
 
 The Docker supervisor is not published. It is authenticated and stays on the internal Compose network because access to it is equivalent to control of the Docker host. Production requires its own credential: set the same `SANDBOX_SUPERVISOR_TOKEN` (a long random string, different from `BETTER_AUTH_SECRET`) on the API, worker, and supervisor, or the three services refuse to boot. Outside production an empty value is accepted and each service derives the token from `BETTER_AUTH_SECRET`, so the session secret itself never reaches the supervisor.
 
-On a VPS, put TLS in front of `:5173` (or serve the web build behind your proxy) and set:
+### HTTPS on a VPS, with nobody's domain
+
+`quibtbot install` on a machine with a public IP and free ports 80/443 makes the install
+public by itself: it picks a name like `quibt-a1b2c3d4.203.0.113.9.sslip.io` — [sslip.io](https://sslip.io)
+is a public DNS that resolves any `<label>.<ip>.sslip.io` to that IP — and starts a Caddy
+container (Compose profile `public`) that obtains a Let's Encrypt certificate for that name and
+renews it on its own. The phone gets `https://…` in the QR; the web and the API stay bound to
+`127.0.0.1` on the host, so only Caddy faces the internet. You bring no domain, Quibt brings no
+domain, and there is no relay in the middle.
+
+Why a per-install label instead of the bare IP: Let's Encrypt limits certificates per exact
+name, and providers recycle addresses. A fresh label never collides with whoever had the IP before.
+
+The decision is printed during the `environment` step and is **fail-closed**: no public IP, or
+80/443 already taken by another site or proxy, and the install stays on `127.0.0.1` and says why.
+`quibtbot install --local` forces that even on a clean VPS. The chosen host is stored as
+`QUIBT_PUBLIC_HOST` in `quibt.env` and survives reinstalls, so the address the phone saved and
+the certificate keep working.
+
+### Your own domain, or an existing proxy
+
+If you already run Traefik/Caddy/nginx on 80/443 (the install detected them and stayed local),
+or you want your own name, put TLS in front of `:5173` and set:
 
 ```env
 BETTER_AUTH_URL=https://app.example.com

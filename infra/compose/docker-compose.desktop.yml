@@ -121,3 +121,29 @@ services:
     depends_on:
       api:
         condition: service_healthy
+
+  # HTTPS sem domínio de ninguém. Só sobe no profile `public`, que o instalador liga
+  # quando o host tem IP público e as portas 80/443 estão livres: o nome vira
+  # `quibt-xxxx.<ip>.sslip.io` (DNS público que resolve para o próprio IP), o Caddy tira
+  # o Let's Encrypt sozinho por esse nome e renova sem cron. Web e API continuam presos
+  # em 127.0.0.1 no host; só o Caddy encara a internet.
+  caddy:
+    # Índice multi-arch, como o postgres acima: um digest de filho amd64 não instala em VPS ARM.
+    image: caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+    profiles: ["public"]
+    command:
+      - caddy
+      - reverse-proxy
+      - --from
+      - ${QUIBT_PUBLIC_HOST:-localhost}
+      - --to
+      - web:5173
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ${DATA_DIR:?}/caddy:/data
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_started

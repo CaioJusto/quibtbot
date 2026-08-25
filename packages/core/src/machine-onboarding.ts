@@ -65,6 +65,7 @@ const REMOTE_GUIDE: MachineGuide = {
   ],
   steps: [
     "Crie a VPS na sua conta (Hetzner CX22, Droplet de 2 GB ou equivalente).",
+    "Para o celular alcançar a VPS de qualquer lugar, rode o instalador inteiro nela (`quibtbot install`): com 80 e 443 livres ele tira um certificado HTTPS sozinho, num nome sslip.io — sem domínio seu, sem domínio da Quibt.",
     "Escolha a receita do provedor nesta tela, ou rode o script genérico por SSH.",
     "No servidor, preencha BETTER_AUTH_SECRET, ENCRYPTION_KEY e SANDBOX_SUPERVISOR_TOKEN no .env e suba o Compose.",
     "Cole aqui a URL do supervisor e o mesmo token. Toque em Testar e depois em Salvar.",

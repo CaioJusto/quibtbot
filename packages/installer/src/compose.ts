@@ -1,3 +1,5 @@
+import { PUBLIC_PROFILE } from "./public-access.js";
+
 export const INSTALL_RELEASE = "0.2.9";
 export const QUIBT_IMAGE_PREFIX = "ghcr.io/quibt";
 
@@ -81,10 +83,16 @@ export function appServicesUpInvocation(
   mode: ComposeMode,
   composeFile: string,
   envFile: string,
+  options: { publicAccess?: boolean } = {},
 ): string[] {
-  const base = composeBaseArgs(composeFile, envFile);
+  // `--profile public` acorda o Caddy (HTTPS via sslip.io). Sem o profile o serviço nem
+  // existe para o Compose, então uma instalação local não paga nada por ele.
+  const base = options.publicAccess
+    ? [...composeBaseArgs(composeFile, envFile), "--profile", PUBLIC_PROFILE]
+    : composeBaseArgs(composeFile, envFile);
+  const services = options.publicAccess ? [...APP_SERVICES, "caddy"] : [...APP_SERVICES];
   if (mode === "source") {
-    return [...base, "up", "-d", "--build", "--wait", ...APP_SERVICES];
+    return [...base, "up", "-d", "--build", "--wait", ...services];
   }
-  return [...base, "up", "-d", "--wait", ...APP_SERVICES];
+  return [...base, "up", "-d", "--wait", ...services];
 }

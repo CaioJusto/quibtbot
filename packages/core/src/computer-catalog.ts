@@ -139,7 +139,7 @@ export const MACHINE_CATALOG: MachineCatalogDefinition[] = [
     searchable: ["vps", "ubuntu", "script", "cloud-init", "oracle", "linode", "vultr"],
     recipe: {
       provider: "generic",
-      hint: "Qualquer Ubuntu 22.04/24.04 com IP público. Abra 443/5173 para o app e mantenha o supervisor só na rede interna ou com token.",
+      hint: "Qualquer Ubuntu 22.04/24.04 com IP público. Com 80/443 livres o instalador liga HTTPS sozinho (nome sslip.io + Let's Encrypt, sem domínio). Mantenha o supervisor só na rede interna ou com token.",
       installScript: GENERIC_VPS_SCRIPT,
     },
   },

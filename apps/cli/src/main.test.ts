@@ -20,6 +20,7 @@ describe("parseCli", () => {
       showSensitive: false,
       keepData: false,
       keepImages: false,
+      local: false,
     });
     expect(parseCli(["install", "--non-interactive"])).toEqual({
       command: "install",
@@ -27,6 +28,7 @@ describe("parseCli", () => {
       showSensitive: false,
       keepData: false,
       keepImages: false,
+      local: false,
     });
     expect(parseCli(["pair", "--show-sensitive"])).toEqual({
       command: "pair",
@@ -34,6 +36,7 @@ describe("parseCli", () => {
       showSensitive: true,
       keepData: false,
       keepImages: false,
+      local: false,
     });
   });
   it("uninstall accepts what to keep, and only uninstall does", () => {
