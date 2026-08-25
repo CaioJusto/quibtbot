@@ -2,6 +2,14 @@ import { sha256 } from "./secrets-guard.js";
 
 const DESTRUCTIVE = [
   /\brm\s+(-[a-z]*\s+)*-[a-z]*[rf]/i,
+  // Apagar em massa sem -r/-f: rm com glob ou apontado para a casa (compartilhada entre
+  // os bots do workspace), find -delete, git clean / descartar o working tree, shred,
+  // truncate para zero. O redirecionamento `> arquivo` puro fica de fora (falso positivo).
+  /\brm\s+(-[a-z-]+\s+)*[^|;&\n]*(\*|~\/|\/home\/|\$HOME\b|\$\{HOME\})/i,
+  /\bfind\b[^|;&\n]*\s-delete\b/i,
+  /\bgit\s+(clean\b|checkout\s+--\s+\.(?=\s|$)|restore\s+(-\S+\s+)*\.(?=\s|$))/i,
+  /\b(pkill|killall)\b|\bkill\s+(-\S+\s+)*-1(?=\s*$|\s*[;&|)])/i,
+  /\bshred\b|\btruncate\b[^|;&\n]*(-s\s*0|--size[=\s]0)\b/i,
   /\bmkfs\b|\bdiskutil\s+erase|\bdd\s+[^|]*\bof=\/dev\//i,
   /\bshutdown\b|\breboot\b|\bhalt\b/i,
   /:\(\)\s*\{.*\}\s*;?\s*:/,
@@ -20,6 +28,10 @@ const SENSITIVE = [
   /\.aws\/credentials|\.netrc|\.npmrc|\.pypirc|\.docker\/config\.json/i,
   /security\s+find-(generic|internet)-password|\bkeychain\b/i,
   /\bcredentials?\.json\b|\bserviceaccount\b/i,
+  // Perfil e cookies do navegador: o login compartilhado entre os bots do workspace
+  // (~/.config/quibt-shared-chromium, Default/Cookies, Default/Login Data).
+  /quibt-shared-chromium|\.config\/(chromium|google-chrome)|\/(Cookies|Login Data)\b|\.mozilla\//i,
+  /\.git-credentials|\.config\/gh\/hosts\.yml|\.envrc\b/i,
 ];
 
 const COMMAND_TOOLS = new Set([
@@ -30,6 +42,45 @@ const COMMAND_TOOLS = new Set([
   "computer_exec",
   "terminal",
 ]);
+
+const SAFE_COMMANDS = new Set([
+  "date",
+  "df",
+  "du",
+  "echo",
+  "false",
+  "file",
+  "id",
+  "ls",
+  "printf",
+  "pwd",
+  "stat",
+  "true",
+  "uname",
+  "whereis",
+  "which",
+  "whoami",
+  "xdg-open",
+]);
+
+const SAFE_GIT_SUBCOMMANDS = new Set(["branch", "ls-files", "rev-parse", "status"]);
+
+/**
+ * Com "aprovar automaticamente" desligado, só este vocabulário mínimo roda sem card: um
+ * processo só, sem composição, expansão, redirecionamento nem interpretador. Com auto-aprovar
+ * ligado (o padrão) a lista não é consultada — comando comum roda de qualquer jeito.
+ */
+export function commandCanAutoApprove(tool: string, summary: string): boolean {
+  if (!COMMAND_TOOLS.has(bareToolName(tool))) return false;
+  const command = summary.trim();
+  if (!command || /[\r\n;&|`$<>(){}]/.test(command)) return false;
+  if (looksDestructive(command) || looksSensitive(command)) return false;
+  const words = command.split(/\s+/);
+  if (words.some((word) => /^[A-Z_][A-Z0-9_]*=/.test(word)) || words[0] === "sudo") return false;
+  const program = (words[0] ?? "").split("/").pop()?.toLowerCase() ?? "";
+  if (program === "git") return SAFE_GIT_SUBCOMMANDS.has((words[1] ?? "").toLowerCase());
+  return SAFE_COMMANDS.has(program);
+}
 
 /** Tools the model can always run without a card. */
 export const SAFE_TOOLS = new Set([
@@ -45,7 +96,11 @@ export const SAFE_TOOLS = new Set([
   "request_takeover",
 ]);
 
-/** Even with auto-approve on, these pause for a card unless Always allow matches. */
+/**
+ * Criar ou apagar bot pede card toda vez, com ou sem auto-aprovar, e o card nem oferece
+ * "Sempre permitir": a chave seria a ferramenta inteira (não é command tool), e um clique
+ * liberaria apagar qualquer bot para sempre.
+ */
 export const ALWAYS_ASK_TOOLS = new Set(["spawn_bot", "delete_bot"]);
 
 /**
@@ -148,7 +203,8 @@ export interface AutoDecisionOptions {
  * (decisão do dono, 19/08/2026). O que para sempre, auto-aprovar ou não: destrutivo,
  * sensível, criar/apagar bot (ALWAYS_ASK_TOOLS) e tudo que chega sem ninguém olhando
  * (`unattended`). Com auto-aprovar desligado, todo comando pede, salvo o texto exato que a
- * pessoa já marcou em "Sempre permitir".
+ * pessoa já marcou em "Sempre permitir" e o vocabulário mínimo de `commandCanAutoApprove`
+ * (`ls`, `pwd`, `git status`…), que não muda nada no computador.
  */
 export function autoDecision(
   bot: AutoApprover,
@@ -161,13 +217,14 @@ export function autoDecision(
   if (looksDestructive(summary) || looksDestructive(tool) || looksDestructive(blob)) return null;
   if (looksSensitive(summary) || looksSensitive(blob)) return null;
   if (options?.unattended) return null;
+  if (ALWAYS_ASK_TOOLS.has(tool)) return null;
   const key = approvalKey(tool, summary);
   const commandTool = COMMAND_TOOLS.has(bareToolName(tool));
   if (bot.alwaysAllow?.includes(key) || (!commandTool && bot.alwaysAllow?.includes(tool))) {
     return `auto-approved ${key} (always allowed)`;
   }
-  if (ALWAYS_ASK_TOOLS.has(tool)) return null;
   if (bot.autoApprove !== false) return `auto-approved ${tool}`;
+  if (commandTool && commandCanAutoApprove(tool, summary)) return "auto-approved safe command";
   return null;
 }
 
@@ -177,9 +234,10 @@ export function autoDecision(
  * O sim permanente só vale para o que `autoDecision` honra depois: um pedido que parou
  * por ser destrutivo ou sensível vai parar de novo na próxima vez, com ou sem a chave na
  * lista — oferecer o botão ali prometia o que não ia acontecer. Sem ninguém olhando
- * (webhook) não existe consentimento permanente nenhum. Qualquer outro comando de shell
- * (com pipe, encadeamento, interpretador…) pode: a chave é o hash do texto inteiro, então o
- * sim vale exatamente para aquele texto — só um comando vazio (chave `:invalid`) fica de fora.
+ * (webhook) não existe consentimento permanente nenhum, e criar/apagar bot
+ * (ALWAYS_ASK_TOOLS) pede toda vez. Qualquer outro comando de shell (com pipe, encadeamento,
+ * interpretador…) pode: a chave é o hash do texto inteiro, então o sim vale exatamente para
+ * aquele texto — só um comando vazio (chave `:invalid`) fica de fora.
  */
 export function canAlwaysAllow(
   tool: string,
@@ -187,6 +245,7 @@ export function canAlwaysAllow(
   options?: AutoDecisionOptions,
 ): boolean {
   if (options?.unattended) return false;
+  if (ALWAYS_ASK_TOOLS.has(tool)) return false;
   const blob = `${tool} ${summary}`;
   if (looksDestructive(summary) || looksDestructive(tool) || looksDestructive(blob)) return false;
   if (looksSensitive(summary) || looksSensitive(blob)) return false;
