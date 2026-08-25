@@ -31,6 +31,16 @@ describe("permission broker", () => {
 
   it("auto-approves a safe shell when the bot is in auto mode", () => {
     expect(autoDecision({ autoApprove: true }, "shell", "ls -la")).toBe("auto-approved shell");
+    // Comando comum com interpretador, pipe ou encadeamento também roda sem card.
+    expect(autoDecision({ autoApprove: true }, "shell", "python -c 'print(1)'")).toBe(
+      "auto-approved shell",
+    );
+    expect(autoDecision({ autoApprove: true }, "shell", "xdotool click 1 && sleep 1")).toBe(
+      "auto-approved shell",
+    );
+    // O broker legado é opt-in: sem autoApprove explícito, pede.
+    expect(autoDecision({}, "shell", "python -c 'print(1)'")).toBeNull();
+    expect(autoDecision({ autoApprove: false }, "shell", "xdotool click 1")).toBeNull();
   });
 
   it("keys command tools by exact operation so Always allow stays narrow", () => {

@@ -31,44 +31,6 @@ const COMMAND_TOOLS = new Set([
   "terminal",
 ]);
 
-const SAFE_COMMANDS = new Set([
-  "date",
-  "df",
-  "du",
-  "echo",
-  "false",
-  "file",
-  "id",
-  "ls",
-  "printf",
-  "pwd",
-  "stat",
-  "true",
-  "uname",
-  "whereis",
-  "which",
-  "whoami",
-  "xdg-open",
-]);
-
-const SAFE_GIT_SUBCOMMANDS = new Set(["branch", "ls-files", "rev-parse", "status"]);
-
-/**
- * Automatic command execution is deliberately a small, single-process language. Bash
- * composition, expansion, redirection and interpreters all need a person's approval.
- */
-export function commandCanAutoApprove(tool: string, summary: string): boolean {
-  if (!COMMAND_TOOLS.has(bareToolName(tool))) return false;
-  const command = summary.trim();
-  if (!command || /[\r\n;&|`$<>(){}]/.test(command)) return false;
-  if (looksDestructive(command) || looksSensitive(command)) return false;
-  const words = command.split(/\s+/);
-  if (words.some((word) => /^[A-Z_][A-Z0-9_]*=/.test(word)) || words[0] === "sudo") return false;
-  const program = (words[0] ?? "").split("/").pop()?.toLowerCase() ?? "";
-  if (program === "git") return SAFE_GIT_SUBCOMMANDS.has((words[1] ?? "").toLowerCase());
-  return SAFE_COMMANDS.has(program);
-}
-
 /** Tools the model can always run without a card. */
 export const SAFE_TOOLS = new Set([
   "memory",
@@ -177,8 +139,16 @@ export interface AutoDecisionOptions {
 }
 
 /**
- * Returns a reason string when the tool may run without asking.
- * Destructive and sensitive work never auto-approves.
+ * Devolve o motivo quando a ferramenta pode rodar sem card; `null` quando precisa perguntar.
+ *
+ * O computador é do bot (container, VPS, sandbox), nunca a máquina da pessoa. Por isso, com
+ * "aprovar automaticamente" ligado (o padrão de todo bot), um comando de shell comum —
+ * `ls`, `xdg-open`, `python3 script.py`, `curl`, `xdotool`, pipes e encadeamentos — roda
+ * sem card; uma tarefa de dez cliques não pode virar dez cards e dez reinícios de contexto
+ * (decisão do dono, 19/08/2026). O que para sempre, auto-aprovar ou não: destrutivo,
+ * sensível, criar/apagar bot (ALWAYS_ASK_TOOLS) e tudo que chega sem ninguém olhando
+ * (`unattended`). Com auto-aprovar desligado, todo comando pede, salvo o texto exato que a
+ * pessoa já marcou em "Sempre permitir".
  */
 export function autoDecision(
   bot: AutoApprover,
@@ -197,7 +167,6 @@ export function autoDecision(
     return `auto-approved ${key} (always allowed)`;
   }
   if (ALWAYS_ASK_TOOLS.has(tool)) return null;
-  if (commandTool && !commandCanAutoApprove(tool, summary)) return null;
   if (bot.autoApprove !== false) return `auto-approved ${tool}`;
   return null;
 }
@@ -208,7 +177,9 @@ export function autoDecision(
  * O sim permanente só vale para o que `autoDecision` honra depois: um pedido que parou
  * por ser destrutivo ou sensível vai parar de novo na próxima vez, com ou sem a chave na
  * lista — oferecer o botão ali prometia o que não ia acontecer. Sem ninguém olhando
- * (webhook) não existe consentimento permanente nenhum.
+ * (webhook) não existe consentimento permanente nenhum. Qualquer outro comando de shell
+ * (com pipe, encadeamento, interpretador…) pode: a chave é o hash do texto inteiro, então o
+ * sim vale exatamente para aquele texto — só um comando vazio (chave `:invalid`) fica de fora.
  */
 export function canAlwaysAllow(
   tool: string,
@@ -219,10 +190,7 @@ export function canAlwaysAllow(
   const blob = `${tool} ${summary}`;
   if (looksDestructive(summary) || looksDestructive(tool) || looksDestructive(blob)) return false;
   if (looksSensitive(summary) || looksSensitive(blob)) return false;
-  if (COMMAND_TOOLS.has(bareToolName(tool))) {
-    const canonical = summary.trim();
-    if (!canonical || /[\r\n;&|`$<>(){}]/.test(canonical)) return false;
-  }
+  if (COMMAND_TOOLS.has(bareToolName(tool)) && !summary.trim()) return false;
   return true;
 }
 
