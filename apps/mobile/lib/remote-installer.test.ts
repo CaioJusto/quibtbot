@@ -190,6 +190,13 @@ describe("createMockSshTransport", () => {
   });
 });
 
+describe("INSTALL_RELEASE do celular", () => {
+  it("é o mesmo número do installer, sem importar o pacote Node no app", async () => {
+    const { INSTALL_RELEASE: installer } = await import("@quibt/installer");
+    expect(INSTALL_RELEASE).toBe(installer);
+  });
+});
+
 describe("resolveEmbeddedReleaseArtifacts", () => {
   it("ships a manifest the phone can really install from", () => {
     // Este era o teste que guardava o defeito: o manifesto embutido vinha com digests
