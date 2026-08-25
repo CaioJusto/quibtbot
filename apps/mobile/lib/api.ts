@@ -619,7 +619,7 @@ export function askText(block: MobileMessage["blocks"][number]): string {
   return lines.filter(Boolean).join("\n");
 }
 
-type ThreadEvent = {
+export type ThreadEvent = {
   id?: string;
   type: string;
   seq?: number;

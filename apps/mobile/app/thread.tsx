@@ -38,6 +38,7 @@ import {
   sendToGroup,
   subscribeGroupThread,
   subscribeThread,
+  type ThreadEvent,
 } from "../lib/api";
 import {
   type Attachment,
@@ -79,6 +80,7 @@ import {
 } from "../lib/mentions";
 import { AppSymbol, isIOS, showNativeSheet } from "../lib/native";
 import { isPlanLimitError } from "../lib/plans";
+import { createProgressCadence } from "../lib/progress-cadence";
 import {
   type ApprovalKind,
   isNearBottom,
@@ -270,6 +272,12 @@ export default function Thread() {
         reloadInFlight = false;
       }
     };
+    // Suaviza o streaming: uma rajada de `thread.progress` (cada um com o texto já
+    // acumulado) vira um flush a cada ~60 ms, em vez de dezenas de re-renders. Eventos
+    // estruturais descarregam o progress pendente e aplicam na hora — ordem preservada.
+    const cadence = createProgressCadence((event) =>
+      setSnap((prev) => applyMobileThreadEvent(prev, event as ThreadEvent)),
+    );
     const onEvent = (event: { type: string }) => {
       if (
         event.type === "thread.progress" ||
@@ -279,7 +287,7 @@ export default function Thread() {
         event.type === "run.failed" ||
         event.type === "run.cancelled"
       ) {
-        setSnap((prev) => applyMobileThreadEvent(prev, event));
+        cadence.push(event as ThreadEvent);
       }
       if (threadEventNeedsSnapshotRefresh(event.type)) {
         void reload();

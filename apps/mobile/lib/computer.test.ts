@@ -252,7 +252,11 @@ describe("mobile computer screen", () => {
   it("sends relative pointer moves and non-empty clipboard paste", () => {
     const src = source("../app/computer.tsx");
     expect(src).toContain('kind: "pointer"');
-    expect(src).toContain('type: "move"');
+    // Trackpad manda o deslocamento (relativo), não a posição absoluta, e o toque-clique
+    // é um "tap" que clica onde o cursor está — não um click em (0,0).
+    expect(src).toContain('type: "moveRelative"');
+    expect(src).toContain('type: "tap"');
+    expect(src).not.toContain('type: "move"');
     expect(src).toContain('kind: "clipboard"');
     expect(src).toContain("readClipboardText");
     expect(src).not.toContain('payload: { text: "" }');
