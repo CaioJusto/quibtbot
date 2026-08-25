@@ -15,9 +15,9 @@ Escolha um caminho.
 **App de desktop (mais fácil)**
 
 1. Baixe o instalador em [quibt.com.br](https://quibt.com.br) ou nas [Releases do GitHub](https://github.com/CaioJusto/quibtbot/releases/latest):
-   - Mac (Apple silicon): `QuibtBot.dmg` — na primeira vez, clique com o botão direito → Abrir.
-   - Windows: `QuibtBot-setup.exe` — se o SmartScreen avisar, Mais informações → Executar mesmo assim.
-   - Linux: `QuibtBot.AppImage`.
+   - Mac (Apple silicon): `QuibtBot.dmg` — o arquivo da v0.2.11 é sem assinatura, então o macOS avisa; na primeira vez, clique com o botão direito → Abrir. Mac Intel: ainda sem instalador — só rodando a partir do código-fonte (veja o README).
+   - Windows: `QuibtBot-setup.exe` — instalador de teste 64 bits, sem assinatura; o SmartScreen avisa: Mais informações → Executar assim mesmo. Instale o Docker Desktop por conta própria.
+   - Linux: `QuibtBot.AppImage` — AppImage x64 de teste, sem assinatura; precisa de libfuse2, marque como executável e instale o Docker (Engine ou Desktop) por conta própria.
 2. Abra o Quibt Bot. Se o stack local ainda não estiver de pé, o app mostra um assistente.
 3. No Mac, o assistente encontra Docker Desktop, Colima e Homebrew sozinho. Se nenhum Docker existir, baixa o DMG oficial certo para o processador, confere a assinatura da Docker Inc. e a notarização da Apple, pede a senha do Mac uma vez, abre o Docker e continua. Não precisa instalar o Docker antes.
 

@@ -51,10 +51,14 @@ export const COPY = {
       downloadMac: "Download for macOS",
       downloadWin: "Download for Windows",
       downloadLinux: "Download for Linux",
-      downloadMacNote: "macOS: Apple silicon · .dmg signed and notarized by Apple · Intel Macs run from source",
+      downloadMacNoteNotarized:
+        "macOS: Apple silicon · .dmg signed and notarized by Apple, opens with no warning · Intel Macs: no installer yet — run from source (see README)",
+      downloadMacNoteUnsigned:
+        "macOS: Apple silicon · unsigned .dmg, macOS warns — the first time: right-click → Open · Intel Macs: no installer yet — run from source (see README)",
       downloadWinNote:
-        "Windows: 64-bit preview installer, unsigned — SmartScreen warns: More info → Run anyway · install Docker Desktop yourself",
-      downloadLinuxNote: "Linux: x64 preview AppImage, unsigned · needs libfuse2",
+        "Windows: 64-bit test installer, unsigned — SmartScreen warns: More info → Run anyway · install Docker Desktop yourself",
+      downloadLinuxNote:
+        "Linux: x64 test AppImage, unsigned · needs libfuse2, mark it executable · install Docker (Engine or Desktop) yourself",
       downloadLatest: "these three links are pinned to",
       downloadReleases: "all releases",
       downloadEyebrow: "Install",
@@ -251,10 +255,14 @@ export const COPY = {
       downloadMac: "Baixar para macOS",
       downloadWin: "Baixar para Windows",
       downloadLinux: "Baixar para Linux",
-      downloadMacNote: "macOS: Apple silicon · .dmg assinado e notarizado pela Apple · Mac Intel roda do código",
+      downloadMacNoteNotarized:
+        "macOS: Apple silicon · .dmg assinado e notarizado pela Apple, abre sem aviso · Mac Intel: ainda sem instalador — só rodando a partir do código-fonte (veja o README)",
+      downloadMacNoteUnsigned:
+        "macOS: Apple silicon · .dmg sem assinatura, o macOS avisa — na primeira vez: botão direito → Abrir · Mac Intel: ainda sem instalador — só rodando a partir do código-fonte (veja o README)",
       downloadWinNote:
-        "Windows: instalador de prévia 64 bits, sem assinatura — o SmartScreen avisa: Mais informações → Executar assim mesmo · instale o Docker Desktop por conta própria",
-      downloadLinuxNote: "Linux: AppImage x64 de prévia, sem assinatura · precisa de libfuse2",
+        "Windows: instalador de teste 64 bits, sem assinatura — o SmartScreen avisa: Mais informações → Executar assim mesmo · instale o Docker Desktop por conta própria",
+      downloadLinuxNote:
+        "Linux: AppImage x64 de teste, sem assinatura · precisa de libfuse2, marque como executável · instale o Docker (Engine ou Desktop) por conta própria",
       downloadLatest: "os três links apontam para a",
       downloadReleases: "todos os releases",
       downloadEyebrow: "Instalar",
