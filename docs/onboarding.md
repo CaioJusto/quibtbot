@@ -98,7 +98,7 @@ Instalar põe containers, um container por computador de bot, três imagens e um
 
 | Sintoma | O que tentar |
 | --- | --- |
-| “Docker não responde” | Clique em **Começar instalação** novamente. No Mac o Quibt abre o Docker e espera automaticamente; confira apenas se há uma confirmação de senha do macOS atrás da janela. |
+| “Docker não responde” / “Abra o Docker Desktop (a baleia)” | Ao abrir, o app já abre o Docker Desktop e religa o Quibt sozinho (“Ligando o Quibt Bot…”, cerca de um minuto depois de ligar o Mac). Se a tela mostrar um erro, clique em **Tentar de novo**; se pedir a baleia, abra o Docker Desktop pela pasta Aplicativos e tente de novo. Confira também se há uma confirmação de senha do macOS atrás da janela. Um download que travou é refeito sozinho até três vezes, e o que já baixou fica guardado. |
 | Bot não responde | Toque em **Conectar modelo** no aviso da conversa (ou abra **Conta → Modelo**) e cole a chave, entre na assinatura, ou confirme que o Ollama está aberto. |
 | Tela preta no computador | Mande outra mensagem, ou toque em Assumir controle. No Docker, o desktop só sobe quando o bot precisa dele. |
 | Celular não conecta | No computador, abra **Conta → Conectar o celular**. No app móvel, **Ler o QR do computador** é a primeira opção. Os dois aparelhos devem estar no mesmo Wi-Fi; no iPhone, aceite **Rede Local** ou libere em **Ajustes → Privacidade e Segurança → Rede Local → Quibt Bot**. Fora dessa rede, ative o acesso por Tailscale no computador e gere outro QR. |

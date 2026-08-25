@@ -1,6 +1,6 @@
 import os from "node:os";
 import path from "node:path";
-import type { ProcessRunner } from "./orchestrator.js";
+import type { ProcessRunner, ProcessRunOptions } from "./orchestrator.js";
 
 export interface DockerInvocation {
   command: string;
@@ -165,7 +165,7 @@ export async function runDockerCommand(
   run: ProcessRunner,
   inv: DockerInvocation,
   args: string[],
-  options?: { cwd?: string; timeoutMs?: number },
+  options?: ProcessRunOptions,
 ) {
   const [command, argv] = dockerArgv(inv, args);
   return run.run(command, argv, options);

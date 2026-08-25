@@ -153,7 +153,7 @@ Options:
   --help            Show this help
   --version         Show version
   --local           (install) Keep everything on 127.0.0.1 even on a public VPS
-  --non-interactive Run install without prompts
+  --non-interactive (install) Never prompt: fails instead of asking for the Mac password to install Docker Desktop
   --show-sensitive  Print pairing token/code/deep-link/QR on non-TTY stdout
   --keep-data       (uninstall) Keep the data dir: database, bot homes, secrets
   --keep-images     (uninstall) Keep the Docker images for a faster reinstall
@@ -193,6 +193,8 @@ export interface RunCliDeps {
   probeEndpoint?: (port: number) => Promise<boolean>;
   isTty?: boolean;
   showSensitive?: boolean;
+  /** Só os testes trocam: decide se o Docker Desktop pode ser instalado sozinho. */
+  platform?: NodeJS.Platform;
   log?: typeof console.log;
   error?: typeof console.error;
 }
@@ -311,12 +313,20 @@ export async function runCliAsync(args: string[], deps: RunCliDeps = {}): Promis
           composeFile,
           composeMode: "packaged",
           forceLocal: parsed.local,
+          nonInteractive: parsed.nonInteractive,
           publicAccess: { fetch: fetchImpl },
           run,
           fetch: fetchImpl,
           clock,
+          platform: deps.platform,
           onEvent: (event) => printEvent(event, log),
         });
+        if (result.ok && result.alreadyInstalled) {
+          log(
+            `Quibt Bot ${INSTALL_RELEASE} já instalado e no ar em ${result.url ?? publicUrl}. Para conectar o celular: quibtbot pair`,
+          );
+          return 0;
+        }
         if (result.claimedInstruction) {
           log(result.claimedInstruction);
         }
@@ -330,6 +340,7 @@ export async function runCliAsync(args: string[], deps: RunCliDeps = {}): Promis
           }
         }
         if (!result.ok) {
+          // O evento `failed` já saiu com os detalhes técnicos; aqui só a frase final.
           if (result.error) error(result.error);
           return result.exitCode ?? 1;
         }

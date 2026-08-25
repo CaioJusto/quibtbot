@@ -79,6 +79,38 @@ export function postgresUpInvocation(
   return [...base, "up", "-d", "--wait", "postgres"];
 }
 
+/**
+ * Religa um stack já instalado: todos os serviços de uma vez, esperando ficarem
+ * saudáveis. Numa instalação pública o profile entra para o Caddy voltar junto.
+ */
+export function stackUpInvocation(
+  mode: ComposeMode,
+  composeFile: string,
+  envFile: string,
+  options: { publicAccess?: boolean } = {},
+): string[] {
+  const base = options.publicAccess
+    ? [...composeBaseArgs(composeFile, envFile), "--profile", PUBLIC_PROFILE]
+    : composeBaseArgs(composeFile, envFile);
+  if (mode === "source") return [...base, "up", "-d", "--build", "--wait"];
+  return [...base, "up", "-d", "--wait"];
+}
+
+/**
+ * As imagens que o Compose vai puxar, já resolvidas (versão, digests do binário de
+ * release e o Caddy só com o profile público). É a lista que vira "imagem 2 de 4".
+ */
+export function composeImagesInvocation(
+  composeFile: string,
+  envFile: string,
+  options: { publicAccess?: boolean } = {},
+): string[] {
+  const base = options.publicAccess
+    ? [...composeBaseArgs(composeFile, envFile), "--profile", PUBLIC_PROFILE]
+    : composeBaseArgs(composeFile, envFile);
+  return [...base, "config", "--images"];
+}
+
 export function appServicesUpInvocation(
   mode: ComposeMode,
   composeFile: string,

@@ -16,6 +16,14 @@ import { loadInstallState } from "./state-persist.js";
 const COMPOSE_FILE = path.resolve("infra/compose/docker-compose.desktop.yml");
 const PUBLIC_URL = "http://127.0.0.1:5173";
 const _VALID_DUMP_PREFIX = "-- PostgreSQL database dump\nSET statement_timeout = 0;\n";
+/** Disco de sobra: a suíte não pode depender do quanto a máquina de quem roda tem livre. */
+const plentyOfDisk = async () => ({ bsize: 4096, bavail: 25_000_000 });
+const COMPOSE_IMAGES = [
+  "postgres:16@sha256:e17e86066e5ef83e0952a9347f5c792b7ece00972e2aa787a6986f471b3dd3d5",
+  "ghcr.io/quibt/quibt-computer:0.2.11",
+  "ghcr.io/quibt/quibt-supervisor:0.2.11",
+  "ghcr.io/quibt/quibt-stack:0.2.11",
+];
 
 function collectSecrets(envValues: Record<string, string>): string[] {
   return [
@@ -100,7 +108,7 @@ describe("runInstall resume", () => {
     expect(result.ok).toBe(true);
     expect(inspectAttempts).toBe(3);
     expect(pullAttempts).toBe(0);
-    expect(events.some((event) => event.message.includes("already available"))).toBe(true);
+    expect(events.some((event) => event.message.includes("nada para baixar"))).toBe(true);
   });
 
   it("mints packaged pairing from loopback inside the api container after host NAT is refused", async () => {
@@ -173,14 +181,17 @@ describe("runInstall resume", () => {
     const envMtimeBefore = statSync(env.path).mtimeMs;
 
     let pullAttempts = 0;
+    let firstRun = true;
     const run: ProcessRunner = {
       async run(command, args) {
         const joined = [command, ...args].join(" ");
-        if (joined.includes("docker compose") && joined.includes(" pull")) {
+        if (joined.includes("docker compose") && joined.includes(" config --images")) {
+          return { code: 0, stdout: `${COMPOSE_IMAGES.join("\n")}\n`, stderr: "" };
+        }
+        if (command === "docker" && args[0] === "pull") {
           pullAttempts += 1;
-          if (pullAttempts === 1) {
-            return { code: 1, stdout: "", stderr: "pull failed" };
-          }
+          // Na primeira passada a rede cai de vez: as três tentativas falham.
+          if (firstRun) return { code: 1, stdout: "", stderr: "pull failed: i/o timeout" };
         }
         if (joined.includes("docker compose") && joined.includes(" up")) {
           return { code: 0, stdout: "started", stderr: "" };
@@ -232,15 +243,24 @@ describe("runInstall resume", () => {
       fetch: fetchImpl,
       clock,
       platform: "linux",
+      statfs: plentyOfDisk,
       onEvent: (event) => firstEvents.push(event),
     });
 
     expect(first.ok).toBe(false);
-    expect(pullAttempts).toBe(1);
+    // Três tentativas na mesma imagem antes de desistir; a frase diz que dá para voltar.
+    expect(pullAttempts).toBe(3);
+    expect(first.error).toContain("falhou 3 vezes");
+    expect(first.error).toContain("o que já baixou fica guardado");
+    expect(first.errorDetail).toContain("pull failed");
+    expect(firstEvents.map((event) => event.message)).toContainEqual(
+      expect.stringContaining("tentativa 1 de 3"),
+    );
     expect(loadInstallState(dataDir)?.completed).toEqual(["requirements", "environment"]);
     expect(statSync(env.path).mtimeMs).toBe(envMtimeBefore);
     assertNoSecrets(firstEvents, secrets);
 
+    firstRun = false;
     const secondEvents: InstallerEvent[] = [];
     const second = await runInstall({
       dataDir,
@@ -251,6 +271,7 @@ describe("runInstall resume", () => {
       fetch: fetchImpl,
       clock,
       platform: "linux",
+      statfs: plentyOfDisk,
       onEvent: (event) => secondEvents.push(event),
     });
 
@@ -412,6 +433,7 @@ describe("instalação pública (sslip.io + Caddy)", () => {
       fetch: fetchImpl,
       clock: { now: () => new Date("2026-08-17T00:30:00.000Z"), sleep: async () => undefined },
       platform: "linux",
+      statfs: plentyOfDisk,
       publicAccess: {
         fetch: fetchImpl,
         checkPort: async () => true,
@@ -484,6 +506,7 @@ describe("instalação pública (sslip.io + Caddy)", () => {
       fetch: fetchImpl,
       clock: { now: () => new Date("2026-08-17T00:30:00.000Z"), sleep: async () => undefined },
       platform: "linux",
+      statfs: plentyOfDisk,
       publicAccess: { fetch: fetchImpl, checkPort: async (port) => port !== 80 },
       onEvent: (event) => events.push(event),
     });
@@ -624,5 +647,460 @@ describe("quibtbot pair numa VPS", () => {
       // E o celular recebe o https, não o loopback.
       expect(result.pairing.url).toBe("https://quibt-4d2a48dc.46.224.84.18.sslip.io");
     }
+  });
+});
+
+/** Estado até `environment`: a próxima passada começa no download das imagens. */
+function writeStateBeforeImages(dataDir: string): void {
+  writeFileSync(
+    path.join(dataDir, "install-state.json"),
+    `${JSON.stringify({
+      version: 1,
+      release: "0.2.11",
+      completed: ["requirements", "environment"],
+      updatedAt: "2026-08-17T00:00:00.000Z",
+    })}\n`,
+    { mode: 0o600 },
+  );
+}
+
+const clockNow = { now: () => new Date("2026-08-17T00:30:00.000Z"), sleep: async () => undefined };
+
+describe("download das imagens com progresso", () => {
+  it("avisa o tamanho, puxa uma imagem por vez e emite camadas feitas/total", async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), "quibt-pull-progress-"));
+    ensureInstallEnvironment(dataDir, PUBLIC_URL);
+    writeStateBeforeImages(dataDir);
+    const pulled: string[] = [];
+    const run: ProcessRunner = {
+      async run(command, args, options) {
+        const joined = [command, ...args].join(" ");
+        if (command === "docker" && args[0] === "info") {
+          return { code: 0, stdout: "/var/lib/docker\n", stderr: "" };
+        }
+        if (joined.includes(" config --images")) {
+          return { code: 0, stdout: `${COMPOSE_IMAGES.join("\n")}\n`, stderr: "" };
+        }
+        if (command === "docker" && args[0] === "pull") {
+          pulled.push(args[1] as string);
+          options?.onOutput?.("aaaaaaaaaaaa: Pulling fs layer", "stdout");
+          options?.onOutput?.("bbbbbbbbbbbb: Pulling fs layer", "stdout");
+          options?.onOutput?.("aaaaaaaaaaaa: Pull complete", "stdout");
+          options?.onOutput?.("bbbbbbbbbbbb: Pull complete", "stdout");
+          return { code: 0, stdout: "", stderr: "" };
+        }
+        if (joined.includes("quibt-migrate")) return { code: 0, stdout: "migrate ok", stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    };
+    const events: InstallerEvent[] = [];
+    const result = await runInstall({
+      dataDir,
+      publicUrl: PUBLIC_URL,
+      composeFile: COMPOSE_FILE,
+      composeMode: "packaged",
+      run,
+      fetch: (async (input: string, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/ready")) return new Response("{}", { status: 200 });
+        if (url.endsWith("/rpc/health") && init?.method === "POST") {
+          return new Response(JSON.stringify({ json: { ok: true, needsFirstOwner: false } }), {
+            status: 200,
+          });
+        }
+        return new Response("not found", { status: 404 });
+      }) as typeof fetch,
+      clock: clockNow,
+      platform: "linux",
+      statfs: plentyOfDisk,
+      onEvent: (event) => events.push(event),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(pulled).toEqual(COMPOSE_IMAGES);
+    const messages = events.map((event) => event.message);
+    expect(messages).toContainEqual(expect.stringContaining("Vou baixar cerca de 1,7 GB"));
+    const progress = events.filter((event) => event.progress).map((event) => event.progress);
+    expect(progress[0]).toEqual({
+      image: COMPOSE_IMAGES[0],
+      index: 1,
+      count: 4,
+      layersDone: 0,
+      layersTotal: 0,
+    });
+    expect(progress).toContainEqual({
+      image: "ghcr.io/quibt/quibt-stack:0.2.11",
+      index: 4,
+      count: 4,
+      layersDone: 1,
+      layersTotal: 2,
+    });
+    expect(messages).toContain("Baixando imagem 4 de 4: quibt-stack:0.2.11 — 1/2 camadas");
+    // O passo continuou e o estado gravou o download.
+    expect(loadInstallState(dataDir)?.completed).toContain("images");
+  });
+
+  it("download que fica mudo é refeito; depois de três vezes falha com a causa", async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), "quibt-pull-idle-"));
+    ensureInstallEnvironment(dataDir, PUBLIC_URL);
+    writeStateBeforeImages(dataDir);
+    const pullOptions: Array<{ inactivityTimeoutMs?: number; timeoutMs?: number }> = [];
+    const run: ProcessRunner = {
+      async run(command, args, options) {
+        const joined = [command, ...args].join(" ");
+        if (command === "docker" && args[0] === "info") return { code: 0, stdout: "", stderr: "" };
+        if (joined.includes(" config --images")) {
+          return { code: 0, stdout: `${COMPOSE_IMAGES.join("\n")}\n`, stderr: "" };
+        }
+        if (command === "docker" && args[0] === "pull") {
+          pullOptions.push(options ?? {});
+          return {
+            code: 124,
+            stdout: "",
+            stderr: "process produced no output for 180 s",
+            timedOut: "inactivity",
+          };
+        }
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    };
+    const events: InstallerEvent[] = [];
+    const result = await runInstall({
+      dataDir,
+      publicUrl: PUBLIC_URL,
+      composeFile: COMPOSE_FILE,
+      composeMode: "packaged",
+      run,
+      fetch: (async () => new Response("not found", { status: 404 })) as typeof fetch,
+      clock: clockNow,
+      platform: "linux",
+      statfs: plentyOfDisk,
+      onEvent: (event) => events.push(event),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(pullOptions).toHaveLength(3);
+    for (const options of pullOptions) {
+      expect(options.inactivityTimeoutMs).toBe(180_000);
+      expect(options.timeoutMs).toBe(60 * 60_000);
+    }
+    expect(result.error).toContain("ficou 3 minutos sem progresso");
+    expect(result.error).toContain("falhou 3 vezes");
+    const failed = events.find((event) => event.status === "failed");
+    expect(failed?.step).toBe("images");
+    expect(failed?.detail).toEqual({ stderr: "process produced no output for 180 s" });
+    expect(loadInstallState(dataDir)?.completed).toEqual(["requirements", "environment"]);
+  });
+
+  it("sem 10 GB livres falha antes de baixar, dizendo quanto falta e onde", async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), "quibt-pull-disk-"));
+    ensureInstallEnvironment(dataDir, PUBLIC_URL);
+    writeStateBeforeImages(dataDir);
+    let pulls = 0;
+    const measured: string[] = [];
+    const run: ProcessRunner = {
+      async run(command, args) {
+        if (command === "docker" && args[0] === "info" && args[1] === "--format") {
+          return { code: 0, stdout: "/var/lib/docker\n", stderr: "" };
+        }
+        if (command === "docker" && args[0] === "info") return { code: 0, stdout: "", stderr: "" };
+        if (args[0] === "pull") pulls += 1;
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    };
+    const events: InstallerEvent[] = [];
+    const result = await runInstall({
+      dataDir,
+      publicUrl: PUBLIC_URL,
+      composeFile: COMPOSE_FILE,
+      composeMode: "packaged",
+      run,
+      fetch: (async () => new Response("not found", { status: 404 })) as typeof fetch,
+      clock: clockNow,
+      platform: "linux",
+      statfs: async (target) => {
+        measured.push(target);
+        if (target === "/var/lib/docker") return { bsize: 4096, bavail: 500_000 }; // 2 GB
+        return { bsize: 4096, bavail: 25_000_000 };
+      },
+      onEvent: (event) => events.push(event),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(pulls).toBe(0);
+    expect(measured).toEqual([path.resolve(dataDir), "/var/lib/docker"]);
+    expect(result.error).toContain("Faltam 8 GB em /var/lib/docker");
+    expect(events.at(-1)).toMatchObject({ step: "images", status: "failed" });
+  });
+});
+
+describe("já instalado = ligar", () => {
+  function completeState(dataDir: string): void {
+    writeFileSync(
+      path.join(dataDir, "install-state.json"),
+      `${JSON.stringify({
+        version: 1,
+        release: "0.2.11",
+        completed: [
+          "requirements",
+          "environment",
+          "images",
+          "services",
+          "database",
+          "health",
+          "pairing",
+        ],
+        updatedAt: "2026-08-17T00:00:00.000Z",
+      })}\n`,
+      { mode: 0o600 },
+    );
+  }
+
+  it("com o estado completo religa o stack, espera a API e devolve o endereço", async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), "quibt-start-"));
+    ensureInstallEnvironment(dataDir, PUBLIC_URL);
+    completeState(dataDir);
+    const composeCalls: string[] = [];
+    const readyProbes: string[] = [];
+    const run: ProcessRunner = {
+      async run(command, args, options) {
+        const joined = [command, ...args].join(" ");
+        if (command === "docker" && args[0] === "info") {
+          return { code: 0, stdout: "Server Version: 27.0.0", stderr: "" };
+        }
+        if (joined.includes("docker compose")) {
+          composeCalls.push(`${joined} [timeout ${options?.timeoutMs}]`);
+          return { code: 0, stdout: "", stderr: "" };
+        }
+        return { code: 1, stdout: "", stderr: `unexpected: ${joined}` };
+      },
+    };
+    const events: InstallerEvent[] = [];
+    const result = await runInstall({
+      dataDir,
+      publicUrl: PUBLIC_URL,
+      composeFile: COMPOSE_FILE,
+      composeMode: "packaged",
+      run,
+      fetch: (async (input: string) => {
+        readyProbes.push(String(input));
+        return String(input).endsWith("/ready")
+          ? new Response("{}", { status: 200 })
+          : new Response("not found", { status: 404 });
+      }) as typeof fetch,
+      clock: clockNow,
+      platform: "linux",
+      onEvent: (event) => events.push(event),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.alreadyInstalled).toBe(true);
+    expect(result.url).toBe(PUBLIC_URL);
+    expect(result.servicesStarted).toBe(true);
+    expect(result.pairing).toBeUndefined();
+    // Um único `up --wait` com todos os serviços, sem pull, sem migração.
+    const ups = composeCalls.filter((call) => call.includes(" up "));
+    expect(ups).toHaveLength(1);
+    expect(ups[0]).toMatch(/ up -d --wait \[timeout 600000\]$/);
+    expect(ups[0]).not.toContain("--profile");
+    expect(composeCalls.some((call) => call.includes(" pull") || call.includes("migrate"))).toBe(
+      false,
+    );
+    expect(readyProbes).toEqual(["http://127.0.0.1:3100/ready"]);
+    const messages = events.map((event) => event.message);
+    expect(messages).toContain("Ligando o Quibt Bot…");
+    expect(messages).toContain(`No ar em ${PUBLIC_URL}`);
+    expect(events.at(-1)).toMatchObject({ step: "health", status: "succeeded" });
+    // O estado continua completo: nada foi reinstalado.
+    expect(loadInstallState(dataDir)?.completed).toContain("pairing");
+  });
+
+  it("numa instalação pública liga o profile do Caddy e entrega o https", async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), "quibt-start-public-"));
+    ensureInstallEnvironment(dataDir, PUBLIC_URL, {
+      publicHost: "quibt-deadbeef.31.97.86.113.sslip.io",
+    });
+    completeState(dataDir);
+    const composeCalls: string[] = [];
+    const result = await runInstall({
+      dataDir,
+      publicUrl: PUBLIC_URL,
+      composeFile: COMPOSE_FILE,
+      composeMode: "packaged",
+      run: {
+        async run(command, args) {
+          const joined = [command, ...args].join(" ");
+          if (joined.includes("docker compose")) composeCalls.push(joined);
+          return { code: 0, stdout: "", stderr: "" };
+        },
+      },
+      fetch: (async (input: string) =>
+        String(input) === "http://127.0.0.1:3100/ready"
+          ? new Response("{}", { status: 200 })
+          : new Response("not found", { status: 404 })) as typeof fetch,
+      clock: clockNow,
+      platform: "linux",
+    });
+    expect(result.ok).toBe(true);
+    expect(result.url).toBe("https://quibt-deadbeef.31.97.86.113.sslip.io");
+    expect(composeCalls.find((call) => call.includes(" up "))).toContain("--profile public");
+  });
+
+  it("no Mac com o Docker Desktop fechado abre a baleia, espera e só então liga", async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), "quibt-start-mac-"));
+    ensureInstallEnvironment(dataDir, PUBLIC_URL);
+    completeState(dataDir);
+    const commands: string[] = [];
+    let opened = false;
+    const DOCKER_CLI = "/Applications/Docker.app/Contents/Resources/bin/docker";
+    const run: ProcessRunner = {
+      async run(command, args) {
+        const joined = [command, ...args].join(" ");
+        commands.push(joined);
+        if (command === "/usr/bin/test") return { code: 0, stdout: "", stderr: "" };
+        if (command === "/usr/bin/open") {
+          opened = true;
+          return { code: 0, stdout: "", stderr: "" };
+        }
+        if (command === DOCKER_CLI && opened) return { code: 0, stdout: "", stderr: "" };
+        return { code: 1, stdout: "", stderr: "Cannot connect to the Docker daemon" };
+      },
+    };
+    const events: InstallerEvent[] = [];
+    const result = await runInstall({
+      dataDir,
+      publicUrl: PUBLIC_URL,
+      composeFile: COMPOSE_FILE,
+      composeMode: "packaged",
+      run,
+      fetch: (async () => new Response("{}", { status: 200 })) as typeof fetch,
+      clock: clockNow,
+      platform: "darwin",
+      onEvent: (event) => events.push(event),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.alreadyInstalled).toBe(true);
+    expect(commands).toContain("/usr/bin/open -g /Applications/Docker.app");
+    expect(
+      commands.some(
+        (entry) => entry.startsWith(`${DOCKER_CLI} compose`) && entry.includes(" up -d --wait"),
+      ),
+    ).toBe(true);
+    expect(events.map((event) => event.message)).toContain("Abrindo o Docker Desktop…");
+  });
+
+  it("se o up falhar, a frase é para gente e o stderr fica nos detalhes", async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), "quibt-start-fail-"));
+    ensureInstallEnvironment(dataDir, PUBLIC_URL);
+    completeState(dataDir);
+    const events: InstallerEvent[] = [];
+    const result = await runInstall({
+      dataDir,
+      publicUrl: PUBLIC_URL,
+      composeFile: COMPOSE_FILE,
+      composeMode: "packaged",
+      run: {
+        async run(command, args) {
+          const joined = [command, ...args].join(" ");
+          if (joined.includes(" up ")) {
+            return {
+              code: 1,
+              stdout: "",
+              stderr: "Bind for 127.0.0.1:5173 failed: port is already allocated",
+            };
+          }
+          return { code: 0, stdout: "", stderr: "" };
+        },
+      },
+      fetch: (async () => new Response("{}", { status: 200 })) as typeof fetch,
+      clock: clockNow,
+      platform: "linux",
+      onEvent: (event) => events.push(event),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.servicesStarted).toBeUndefined();
+    expect(result.error).toContain("A porta 5173 já está em uso");
+    expect(result.errorDetail).toContain("port is already allocated");
+    expect(events.at(-1)).toMatchObject({
+      step: "services",
+      status: "failed",
+      detail: { stderr: expect.stringContaining("port is already allocated") },
+    });
+  });
+});
+
+describe("retornos antecipados avisam quem escuta", () => {
+  it("trava ocupada emite um evento failed em português", async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), "quibt-lock-event-"));
+    const { acquireInstallLock, releaseInstallLock } = await import("./install-lock.js");
+    // O pai do processo de teste está vivo de verdade: a trava não é dada como órfã.
+    const holder = process.ppid;
+    expect(acquireInstallLock(dataDir, holder, new Date(), () => true).ok).toBe(true);
+    const events: InstallerEvent[] = [];
+    try {
+      const result = await runInstall({
+        dataDir,
+        publicUrl: PUBLIC_URL,
+        composeFile: COMPOSE_FILE,
+        composeMode: "packaged",
+        run: {
+          async run() {
+            return { code: 0, stdout: "", stderr: "" };
+          },
+        },
+        fetch: (async () => new Response("not found", { status: 404 })) as typeof fetch,
+        clock: clockNow,
+        platform: "linux",
+        onEvent: (event) => events.push(event),
+      });
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain(
+        "Outra instalação ou atualização do Quibt já está em andamento",
+      );
+      expect(result.error).toContain(String(holder));
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({ step: "requirements", status: "failed" });
+      expect(events[0]?.message).toBe(result.error);
+    } finally {
+      releaseInstallLock(dataDir, holder);
+    }
+  });
+
+  it("versão diferente emite failed mandando atualizar", async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), "quibt-update-event-"));
+    writeFileSync(
+      path.join(dataDir, "install-state.json"),
+      `${JSON.stringify({
+        version: 1,
+        release: "0.1.0",
+        completed: ["requirements"],
+        updatedAt: "2026-08-17T00:00:00.000Z",
+      })}\n`,
+      { mode: 0o600 },
+    );
+    const events: InstallerEvent[] = [];
+    const result = await runInstall({
+      dataDir,
+      publicUrl: PUBLIC_URL,
+      composeFile: COMPOSE_FILE,
+      composeMode: "packaged",
+      run: {
+        async run() {
+          return { code: 0, stdout: "", stderr: "" };
+        },
+      },
+      fetch: (async () => new Response("not found", { status: 404 })) as typeof fetch,
+      clock: clockNow,
+      platform: "linux",
+      onEvent: (event) => events.push(event),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.exitCode).toBe(2);
+    expect(result.error).toContain("0.1.0");
+    expect(result.error).toContain("quibtbot update");
+    expect(events).toEqual([
+      expect.objectContaining({ step: "requirements", status: "failed", message: result.error }),
+    ]);
   });
 });
