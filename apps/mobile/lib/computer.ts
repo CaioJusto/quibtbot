@@ -1,49 +1,14 @@
 export const COMPUTER_HEARTBEAT_MS = 60_000;
 export const COMPUTER_STATUS_POLL_MS = 2_000;
 export const COMPUTER_CONTROL_POLL_MS = 800;
-export const TRACKPAD_CLICK_SLOP_PX = 8;
-
-export type PointerDelta = { x: number; y: number };
-
-export function createPointerMoveCoalescer(
-  send: (delta: PointerDelta) => void,
-  schedule: (callback: () => void) => number = requestAnimationFrame,
-  cancelScheduled: (id: number) => void = cancelAnimationFrame,
-) {
-  let scheduled: number | null = null;
-  let x = 0;
-  let y = 0;
-
-  const emit = () => {
-    scheduled = null;
-    const delta = { x, y };
-    x = 0;
-    y = 0;
-    if (delta.x !== 0 || delta.y !== 0) send(delta);
-  };
-
-  return {
-    add(delta: PointerDelta) {
-      x += delta.x;
-      y += delta.y;
-      if (scheduled === null) scheduled = schedule(emit);
-    },
-    flush() {
-      if (scheduled !== null) cancelScheduled(scheduled);
-      emit();
-    },
-    cancel() {
-      if (scheduled !== null) cancelScheduled(scheduled);
-      scheduled = null;
-      x = 0;
-      y = 0;
-    },
-  };
-}
-
-export function trackpadReleaseAction(movedPx: number): "click" | null {
-  return movedPx <= TRACKPAD_CLICK_SLOP_PX ? "click" : null;
-}
+// O trackpad em si (soma de deltas por quadro, soltar = clique) mora no core, junto com
+// a versão da web; aqui só o que é do app.
+export {
+  createPointerMoveCoalescer,
+  type PointerDelta,
+  TRACKPAD_CLICK_SLOP_PX,
+  trackpadReleaseAction,
+} from "@quibt/core";
 
 export function computerPollMs(hasControl: boolean) {
   return hasControl ? COMPUTER_CONTROL_POLL_MS : COMPUTER_STATUS_POLL_MS;

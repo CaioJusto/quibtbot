@@ -12,6 +12,7 @@ import type {
 } from "@quibt/contracts";
 import type { LiveFeedStatus } from "@quibt/core";
 import {
+  createPointerMoveCoalescer,
   cronFromPreset,
   defaultCronPreset,
   deviceTimezone,
@@ -22,6 +23,8 @@ import {
   startLiveFeed,
   startPolling,
   threadEventNeedsSnapshotRefresh,
+  trackpadKeyInput,
+  trackpadReleaseAction,
 } from "@quibt/core";
 import { multiAgentBursts } from "@quibt/ui-tokens";
 import { BotAvatar, Button, Switch } from "@quibt/ui-web";
@@ -1188,12 +1191,100 @@ export function ShellPage() {
     });
   }
 
+  /**
+   * Modo trackpad: o mouse fica preso na área da tela (pointer lock) e manda o
+   * DESLOCAMENTO, como um trackpad de verdade; soltar sem arrastar é clique (direito com
+   * o botão direito) e o teclado vai para o computador do bot. Sem o controle nada disso
+   * chega, então entrar no modo assume o controle primeiro.
+   */
+  const trackpadSurface = useRef<HTMLDivElement | null>(null);
+  const trackpadBotId = useRef<string | null>(null);
+  trackpadBotId.current = active?.id ?? null;
+  const trackpadMoved = useRef(0);
+  const trackpadMoves = useMemo(
+    () =>
+      createPointerMoveCoalescer(({ x, y }) => {
+        const botId = trackpadBotId.current;
+        if (!botId) return;
+        void rpc.computer.input({
+          botId,
+          kind: "pointer",
+          payload: { x, y, type: "moveRelative" },
+        });
+      }),
+    [],
+  );
+  const trackpadLive = trackpadMode && Boolean(active) && computer?.controlHolder === "user";
+
+  async function toggleTrackpadMode() {
+    if (trackpadMode) {
+      setTrackpadMode(false);
+      if (document.pointerLockElement) document.exitPointerLock();
+      return;
+    }
+    try {
+      if (computer?.controlHolder !== "user") await takeOverComputer();
+      setTrackpadMode(true);
+    } catch (cause) {
+      setActionFailure(cause, "Não foi possível assumir o computador.");
+    }
+  }
+
+  useEffect(() => {
+    if (!trackpadMode) return;
+    trackpadSurface.current?.focus();
+    // Esc solta o mouse no navegador — e é a saída natural do modo trackpad.
+    const onLockChange = () => {
+      if (!document.pointerLockElement) setTrackpadMode(false);
+    };
+    document.addEventListener("pointerlockchange", onLockChange);
+    return () => {
+      document.removeEventListener("pointerlockchange", onLockChange);
+      trackpadMoves.cancel();
+      if (document.pointerLockElement) document.exitPointerLock();
+    };
+  }, [trackpadMode, trackpadMoves]);
+
+  function onTrackpadPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!trackpadMode) return;
+    event.preventDefault();
+    trackpadMoved.current = 0;
+    const surface = trackpadSurface.current;
+    surface?.focus();
+    if (surface && document.pointerLockElement !== surface) {
+      surface.requestPointerLock?.();
+    }
+  }
+
   function onTrackpadMove(event: ReactPointerEvent<HTMLDivElement>) {
-    if (!trackpadMode || !active || computer?.controlHolder !== "user") return;
+    if (!trackpadLive) return;
+    trackpadMoved.current += Math.abs(event.movementX) + Math.abs(event.movementY);
+    trackpadMoves.add({ x: event.movementX, y: event.movementY });
+  }
+
+  function onTrackpadPointerUp(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!trackpadLive || !active) return;
+    trackpadMoves.flush();
+    if (trackpadReleaseAction(trackpadMoved.current) !== "click") return;
     void rpc.computer.input({
       botId: active.id,
       kind: "pointer",
-      payload: { x: event.movementX, y: event.movementY, type: "moveRelative" },
+      payload: { x: 0, y: 0, type: "tap", button: event.button === 2 ? "right" : "left" },
+    });
+  }
+
+  function onTrackpadKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (!trackpadLive || !active) return;
+    const input = trackpadKeyInput(event);
+    if (!input) return;
+    event.preventDefault();
+    void rpc.computer.input({
+      botId: active.id,
+      kind: input.kind,
+      payload:
+        input.kind === "key"
+          ? { key: input.key, modifiers: input.modifiers }
+          : { text: input.text },
     });
   }
 
@@ -2555,8 +2646,8 @@ export function ShellPage() {
                     type="button"
                     className="qb-menu__item"
                     onClick={() => {
-                      setTrackpadMode((on) => !on);
                       setComputerMenu(false);
+                      void toggleTrackpadMode();
                     }}
                   >
                     <span>🖱️</span> {trackpadMode ? "Sair do modo trackpad" : "Modo trackpad"}
@@ -2583,9 +2674,28 @@ export function ShellPage() {
               </button>
             </div>
           </div>
-          <div className="min-h-0 flex-1 bg-[var(--qb-rail)]" onPointerMove={onTrackpadMove}>
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: no modo trackpad esta área É o trackpad; fora dele os handlers não fazem nada. */}
+          <div
+            ref={trackpadSurface}
+            tabIndex={trackpadMode ? 0 : -1}
+            className={`min-h-0 flex-1 bg-[var(--qb-rail)] outline-none ${trackpadMode ? "cursor-none" : ""}`}
+            onPointerDown={onTrackpadPointerDown}
+            onPointerMove={onTrackpadMove}
+            onPointerUp={onTrackpadPointerUp}
+            onContextMenu={(event) => {
+              if (trackpadMode) event.preventDefault();
+            }}
+            onKeyDown={onTrackpadKeyDown}
+          >
             {computer?.state === "running" && pinnedScreenUrl ? (
               <div className="relative h-full w-full">
+                {trackpadMode ? (
+                  <div className="pointer-events-none absolute top-3 left-1/2 z-20 -translate-x-1/2 rounded-full bg-[var(--qb-ink-strong)] px-4 py-1.5 text-[13px] text-[var(--qb-canvas)]">
+                    {trackpadLive
+                      ? "Modo trackpad: mova o mouse, clique para clicar, digite para escrever · Esc sai"
+                      : "Assumindo o controle do computador…"}
+                  </div>
+                ) : null}
                 <iframe
                   ref={attachScreenFrame}
                   title="Tela do bot"

@@ -1330,7 +1330,14 @@ export function createRouter(deps: RouterDeps) {
         if (!computer || !providerRef) return { ok: true as const };
         const mapped =
           input.kind === "key"
-            ? { kind: "key" as const, key: String(input.payload.key ?? "") }
+            ? {
+                kind: "key" as const,
+                key: String(input.payload.key ?? ""),
+                // ctrl+c do modo trackpad chega como key "c" + modifiers ["ctrl"].
+                modifiers: Array.isArray(input.payload.modifiers)
+                  ? input.payload.modifiers.map(String)
+                  : undefined,
+              }
             : input.kind === "clipboard"
               ? {
                   kind: "clipboard" as const,
