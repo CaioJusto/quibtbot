@@ -25,6 +25,7 @@ import {
   type PiOAuthLogins,
   parseLessonCapture,
   probeComputer,
+  probeModelCredential,
   publicComputerBootMessage,
   removePushToken,
   runSandboxCommand,
@@ -131,6 +132,8 @@ export interface RouterDeps {
   pool?: Pool;
   /** Lets the sandbox routing drop its cached machine the moment the owner saves a new one. */
   onDeploymentSettingsChanged?: () => void;
+  /** O fetch da sondagem da chave do modelo em `models.connect`; os testes injetam um falso. */
+  probeFetch?: typeof fetch;
   env: TrustedOriginEnv & {
     defaultProvider: string;
     defaultModel: string;
@@ -356,6 +359,21 @@ export function createRouter(deps: RouterDeps) {
         }));
       }),
       connect: authed.models.connect.handler(async ({ context, input }) => {
+        // A chave é conferida no provedor antes de ser gravada: colada errada, ela
+        // passava pelo onboarding e só falhava na primeira mensagem, com "401" cru.
+        // O emulador dos testes não fala com provedor nenhum, então não há o que sondar.
+        if (deps.env.agentRuntime !== "scripted") {
+          const probe = await probeModelCredential(
+            { provider: input.provider, apiKey: input.apiKey },
+            { fetchImpl: deps.probeFetch },
+          );
+          if (!probe.ok) {
+            throw new ORPCError("BAD_REQUEST", {
+              message: probe.message,
+              data: { code: "MODEL_CREDENTIAL_REJECTED", provider: input.provider },
+            });
+          }
+        }
         return persistModelCredential(deps, context.actor, {
           provider: input.provider,
           plaintext: input.apiKey,

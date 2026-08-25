@@ -64,6 +64,16 @@ describe("mobile model source section", () => {
     expect(section).toContain('"models/usePlan"');
   });
 
+  it("segue a ordem do onboarding e confirma a chave que o servidor conferiu", () => {
+    const subscription = section.indexOf('label="Assinatura"');
+    const key = section.indexOf('label="Chave"');
+    const local = section.indexOf('label="Local"');
+    expect(subscription).toBeGreaterThan(-1);
+    expect(subscription).toBeLessThan(key);
+    expect(key).toBeLessThan(local);
+    expect(section).toContain("Chave confirmada ✓");
+  });
+
   it("shows the device code and opens the verification link natively", () => {
     expect(section).toContain("Linking.openURL");
     expect(section).toContain("userCode");

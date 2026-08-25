@@ -4,13 +4,16 @@ import {
   chooseProvider,
   chosenMachineMatches,
   clientOnboardingSteps,
+  initialTokenSource,
   localModelUrl,
+  MISSING_MODEL_MESSAGE,
   machineActivationGate,
   machineCredentialsReady,
   machineNotice,
   machineStepNeeded,
   modeForProvider,
   modelSaveAction,
+  needsModelConnection,
   nextStepAfterModel,
   providersForMode,
   splitMachineCatalog,
@@ -18,10 +21,12 @@ import {
 
 const catalog = [
   { provider: "openrouter", id: "or/one", auth: "api-key" as const },
-  { provider: "anthropic", id: "an/one", auth: "api-key" as const },
+  { provider: "anthropic", id: "an/one", auth: "both" as const, subscription: true },
   { provider: "ollama", id: "llama3.2", auth: "api-key" as const },
   { provider: "openai-compatible", id: "local-model", auth: "api-key" as const },
   { provider: "copilot", id: "gh/one", auth: "oauth" as const, signIn: "device-code" as const },
+  // Assinatura no catálogo do Pi, mas sem login implementado no app.
+  { provider: "kimi-for-coding", id: "kimi/one", auth: "oauth" as const, subscription: true },
 ];
 
 describe("clientOnboardingSteps", () => {
@@ -72,7 +77,81 @@ describe("providersForMode", () => {
     expect(providersForMode(catalog, "subscription").map((entry) => entry.provider)).toEqual([
       "copilot",
     ]);
-    expect(providersForMode(catalog, "plan")).toHaveLength(5);
+    expect(providersForMode(catalog, "plan")).toHaveLength(6);
+  });
+
+  it("só oferece na aba Assinatura quem tem o login pelo código implementado", () => {
+    // O Pi marca a Anthropic e o Kimi como assinatura, mas o app só sabe entrar com
+    // device code. Listar os outros gravava um provedor sem credencial: bot mudo.
+    const subscription = providersForMode(catalog, "subscription").map((entry) => entry.provider);
+    expect(subscription).not.toContain("anthropic");
+    expect(subscription).not.toContain("kimi-for-coding");
+    // Quem aceita chave continua na aba da chave; quem só tem OAuth sem login, em nenhuma.
+    expect(providersForMode(catalog, "key").map((entry) => entry.provider)).toContain("anthropic");
+    expect(providersForMode(catalog, "key").map((entry) => entry.provider)).not.toContain(
+      "kimi-for-coding",
+    );
+  });
+});
+
+describe("initialTokenSource", () => {
+  it("abre em Minha assinatura quando há login para oferecer", () => {
+    expect(
+      initialTokenSource({ catalog, preferred: catalog[0], connected: [], fallback: "key" }),
+    ).toBe("subscription");
+  });
+
+  it("cai na chave quando o catálogo não tem assinatura com login", () => {
+    const keysOnly = catalog.filter((entry) => entry.signIn !== "device-code");
+    expect(initialTokenSource({ catalog: keysOnly, connected: [], fallback: "key" })).toBe("key");
+  });
+
+  it("abre no cartão da credencial que a conta já conectou", () => {
+    expect(
+      initialTokenSource({
+        catalog,
+        preferred: catalog[0],
+        connected: ["openrouter"],
+        fallback: "key",
+      }),
+    ).toBe("key");
+    expect(
+      initialTokenSource({
+        catalog,
+        preferred: catalog[2],
+        connected: ["ollama"],
+        fallback: "key",
+      }),
+    ).toBe("local");
+  });
+
+  it("mantém os tokens do plano na Cloud", () => {
+    expect(initialTokenSource({ catalog, connected: [], fallback: "plan" })).toBe("plan");
+  });
+});
+
+describe("needsModelConnection", () => {
+  it("reconhece o modelo ausente e os erros de chave ou crédito", () => {
+    expect(needsModelConnection(MISSING_MODEL_MESSAGE)).toBe(true);
+    expect(needsModelConnection("401 Unauthorized")).toBe(true);
+    expect(needsModelConnection("OpenAI API error (402): insufficient credits")).toBe(true);
+    expect(needsModelConnection("Chave recusada pelo OpenRouter.")).toBe(true);
+    expect(needsModelConnection("Provider is not configured: openrouter")).toBe(true);
+  });
+
+  it("deixa em paz os erros que um modelo novo não resolve", () => {
+    expect(needsModelConnection("O computador não ligou: o Docker recusou o processo.")).toBe(
+      false,
+    );
+    expect(needsModelConnection("Só quem instalou o Quibt pode mudar esta configuração.")).toBe(
+      false,
+    );
+    expect(needsModelConnection(null)).toBe(false);
+  });
+
+  it("aponta para lugares que existem: o botão e Conta → Modelo", () => {
+    expect(MISSING_MODEL_MESSAGE).toContain("Conectar modelo");
+    expect(MISSING_MODEL_MESSAGE).toContain("Conta → Modelo");
   });
 });
 
@@ -229,14 +308,27 @@ describe("modeForProvider", () => {
     expect(modeForProvider({ provider: "xai", id: "grok", signIn: "device-code" })).toBe(
       "subscription",
     );
-    expect(modeForProvider({ provider: "copilot", id: "gh/one", auth: "oauth" })).toBe(
-      "subscription",
-    );
+    expect(
+      modeForProvider({
+        provider: "github-copilot",
+        id: "gh/one",
+        auth: "oauth",
+        signIn: "device-code",
+      }),
+    ).toBe("subscription");
   });
 
   it("mantém OpenRouter como chave, mesmo sendo oauth no catálogo", () => {
     expect(modeForProvider({ provider: "openrouter", id: "or/one", auth: "oauth" })).toBe("key");
     expect(modeForProvider({ provider: "anthropic", id: "an/one", auth: "api-key" })).toBe("key");
+  });
+
+  it("uma credencial Anthropic só pode ter vindo de chave colada: abre na aba da chave", () => {
+    // Antes, `subscription: true` no catálogo mandava a Conta para a aba Assinatura,
+    // que só tem os botões de login — e a Anthropic não tem login no app.
+    expect(
+      modeForProvider({ provider: "anthropic", id: "an/one", auth: "both", subscription: true }),
+    ).toBe("key");
   });
 
   it("reconhece o modelo local", () => {

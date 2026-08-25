@@ -34,6 +34,7 @@ import {
   chooseMode,
   chooseProvider,
   chosenMachineMatches,
+  initialTokenSource,
   localModelUrl,
   machineCredentialsReady,
   machineNotice,
@@ -48,25 +49,29 @@ import { errorMessage } from "../lib/rpc-errors";
 const switchModelsToPlan = rpc.models.usePlan;
 
 // O catálogo do Pi descreve a cobrança em inglês. O produto é todo em português.
+// Só entram aqui assinaturas com login no app (device code): prometer "entre com a sua
+// assinatura" de um provedor sem esse fluxo gravava provedor sem credencial.
 const BILLING_PT: Record<string, string> = {
   "openai-codex":
     "Entre com ChatGPT Plus ou Pro. O uso sai da sua assinatura OpenAI — a Quibt não paga.",
-  anthropic: "Entre com a sua assinatura Claude. O uso sai dela — a Quibt não paga.",
   "github-copilot": "Entre com a sua assinatura GitHub Copilot. O uso sai dela — a Quibt não paga.",
   xai: "Entre com a sua assinatura SuperGrok. O uso sai dela — a Quibt não paga.",
-  "kimi-for-coding":
-    "Entre com a sua assinatura Kimi For Coding. O uso sai dela — a Quibt não paga.",
-  openrouter: "Cole a sua chave OpenRouter. O uso sai da sua conta — a Quibt não paga.",
+  openrouter: "Cole a sua chave OpenRouter. Você paga por uso na sua conta — a Quibt não paga.",
 };
 
 function billingText(entry: CatalogEntry | undefined): string {
   if (!entry) return "";
   const mapped = BILLING_PT[entry.provider];
   if (mapped) return mapped;
-  return entry.subscription
+  return entry.signIn === "device-code"
     ? "Entre com a assinatura que você já tem. O uso sai dela — a Quibt não paga."
     : "Cole a chave da sua conta. O uso sai dela — a Quibt não paga.";
 }
+
+/** Tempo para ler "Chave confirmada ✓" antes de a etapa seguinte entrar. */
+const KEY_CONFIRMED_PAUSE_MS = 700;
+
+type KeyStatus = { kind: "ok" } | { kind: "error"; message: string };
 
 const PRESETS: Array<{ name: string; title: string; color: string; shape: MarkShape }> = [
   { name: "Quib", title: "Assistente", color: "#5B7FE5", shape: "strobi" },
@@ -136,6 +141,8 @@ export function OnboardingPage() {
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [tokenSource, setTokenSource] = useState<TokenSource>("key");
+  /** O que o provedor disse da chave colada: recusada (com o porquê) ou confirmada. */
+  const [keyStatus, setKeyStatus] = useState<KeyStatus | null>(null);
   const [oauthFlow, setOauthFlow] = useState<OAuthFlow>({ state: "idle" });
   const [loadFailed, setLoadFailed] = useState(false);
   /** Assinaturas que esta conta já conectou antes: não faz sentido pedir login de novo. */
@@ -176,17 +183,25 @@ export function OnboardingPage() {
           ) ??
           models.find((entry) => entry.provider === me.defaultProvider) ??
           models[0];
+        // "Minha assinatura" é o primeiro cartão e o que começa marcado; o provedor
+        // selecionado tem de ser um que esse cartão lista, senão o campo Provedor mostra
+        // um nome e o estado guarda outro.
+        const source = initialTokenSource({
+          catalog: models,
+          preferred,
+          connected: credentials.map((entry) => entry.provider),
+          fallback: flow.tokenSource,
+        });
         if (preferred) {
-          setProvider(preferred.provider);
-          setModelId(preferred.id);
+          const start = chooseMode(
+            { provider: preferred.provider, modelId: preferred.id, apiKey: "" },
+            models,
+            source,
+          );
+          setProvider(start.provider);
+          setModelId(start.modelId);
         }
-        // O cartão marcado tem de bater com o provedor que a lista já mostra: começar em
-        // "Chave OpenRouter" com um provedor de assinatura selecionado confunde.
-        setTokenSource(
-          preferred?.subscription || preferred?.signIn === "device-code"
-            ? "subscription"
-            : flow.tokenSource,
-        );
+        setTokenSource(source);
         setConnectedProviders(new Set(credentials.map((entry) => entry.provider)));
         setStep(flow.firstStep);
       })
@@ -245,11 +260,13 @@ export function OnboardingPage() {
     setProvider(next.provider);
     setModelId(next.modelId);
     setApiKey(next.apiKey);
+    setKeyStatus(null);
   }
 
   function pickTokenSource(next: TokenSource) {
     setTokenSource(next);
     setError(null);
+    setKeyStatus(null);
     const fixed = chooseMode({ provider, modelId, apiKey }, catalog, next);
     setProvider(fixed.provider);
     setModelId(fixed.modelId);
@@ -289,14 +306,29 @@ export function OnboardingPage() {
         await switchModelsToPlan();
       } else {
         if (action.kind === "connect") {
-          await rpc.models.connect({
-            provider,
-            apiKey,
-            modelId,
-            label: selected?.providerName ?? provider,
-          });
+          setKeyStatus(null);
+          try {
+            await rpc.models.connect({
+              provider,
+              apiKey,
+              modelId,
+              label: selected?.providerName ?? provider,
+            });
+          } catch (err) {
+            // O servidor conferiu a chave no provedor e recusou: nada foi gravado, e a
+            // razão fica junto do campo, não num erro genérico no rodapé.
+            setKeyStatus({
+              kind: "error",
+              message: errorMessage(err, "Não foi possível confirmar a chave"),
+            });
+            return;
+          }
+          setKeyStatus({ kind: "ok" });
         }
         await rpc.models.setDefault({ provider, modelId });
+        if (action.kind === "connect") {
+          await new Promise((resolve) => setTimeout(resolve, KEY_CONFIRMED_PAUSE_MS));
+        }
       }
       setStep(nextStepAfterModel());
     } catch (err) {
@@ -558,11 +590,20 @@ export function OnboardingPage() {
                   onSelect={() => pickTokenSource("plan")}
                 />
               ) : null}
+              {/* A assinatura vem primeiro: é o que a pessoa já paga. A chave OpenRouter
+                  é a segunda porta, e o modelo local a terceira. */}
+              <TokenCard
+                selected={tokenSource === "subscription"}
+                source="subscription"
+                title="Minha assinatura"
+                body="ChatGPT Plus/Pro, Copilot ou SuperGrok — a que você já paga."
+                onSelect={() => pickTokenSource("subscription")}
+              />
               <TokenCard
                 selected={tokenSource === "key"}
                 source="key"
                 title="Chave OpenRouter"
-                body="Uma chave, centenas de modelos."
+                body="Uma chave, centenas de modelos. Você paga por uso na sua conta OpenRouter."
                 onSelect={() => pickTokenSource("key")}
               />
               {edition === "oss" ? (
@@ -574,13 +615,6 @@ export function OnboardingPage() {
                   onSelect={() => pickTokenSource("local")}
                 />
               ) : null}
-              <TokenCard
-                selected={tokenSource === "subscription"}
-                source="subscription"
-                title="Minha assinatura"
-                body="ChatGPT, Claude, Copilot ou SuperGrok."
-                onSelect={() => pickTokenSource("subscription")}
-              />
             </div>
             {/* Um painel só, com o que muda conforme o cartão marcado. A busca e a lista
                 rolável de provedores saíram: com o modo escolhido, o que resta cabe em
@@ -674,16 +708,46 @@ export function OnboardingPage() {
                   </div>
                 ) : null}
                 {acceptsKey ? (
-                  <label className="mt-4 block text-[var(--qb-t-xs)] text-[var(--qb-muted)]">
-                    {tokenSource === "local" ? "URL do modelo" : "Chave de API"}
-                    <input
-                      value={apiKey}
-                      onChange={(e) => setApiKey(e.target.value)}
-                      placeholder={tokenSource === "local" ? localModelUrl(provider) : "sk-…"}
-                      type={tokenSource === "local" ? "url" : "password"}
-                      className="mt-1.5 h-11 w-full rounded-[var(--qb-r-sm)] px-3 text-[var(--qb-t-lg)] text-[var(--qb-ink)]"
-                    />
-                  </label>
+                  <div className="mt-4">
+                    <label className="block text-[var(--qb-t-xs)] text-[var(--qb-muted)]">
+                      {tokenSource === "local" ? "URL do modelo" : "Chave de API"}
+                      <input
+                        value={apiKey}
+                        onChange={(e) => {
+                          setApiKey(e.target.value);
+                          setKeyStatus(null);
+                        }}
+                        placeholder={tokenSource === "local" ? localModelUrl(provider) : "sk-…"}
+                        type={tokenSource === "local" ? "url" : "password"}
+                        aria-invalid={keyStatus?.kind === "error" || undefined}
+                        className="mt-1.5 h-11 w-full rounded-[var(--qb-r-sm)] px-3 text-[var(--qb-t-lg)] text-[var(--qb-ink)]"
+                      />
+                    </label>
+                    {provider === "openrouter" ? (
+                      <p className="mt-2 text-[13px] leading-[1.45] text-[var(--qb-muted)]">
+                        Crie a chave em{" "}
+                        <a
+                          href="https://openrouter.ai/keys"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[var(--qb-accent)] underline"
+                        >
+                          openrouter.ai/keys
+                        </a>
+                        . Você paga por uso na sua conta OpenRouter.
+                      </p>
+                    ) : null}
+                    {keyStatus?.kind === "ok" ? (
+                      <p role="status" className="mt-2 text-[13px] font-medium text-[#2C8A4B]">
+                        {tokenSource === "local" ? "Servidor confirmado ✓" : "Chave confirmada ✓"}
+                      </p>
+                    ) : null}
+                    {keyStatus?.kind === "error" ? (
+                      <p role="alert" className="mt-2 text-[13px] leading-[1.45] text-[#E65707]">
+                        {keyStatus.message}
+                      </p>
+                    ) : null}
+                  </div>
                 ) : selected?.signIn === "device-code" ? null : (
                   <p className="mt-4 text-[13px] leading-[1.45] text-[var(--qb-muted)]">
                     {selected?.oauthLabel ?? selected?.providerName ?? provider} usa OAuth ou
