@@ -74,6 +74,7 @@ import {
   scheduleControlReap,
   scopeApprovalDecision,
   titleFromMessage,
+  touchControlLease,
   UNTITLED_TASK,
 } from "@quibt/core";
 import {
@@ -1326,6 +1327,12 @@ export function createRouter(deps: RouterDeps) {
             message: controlDenialMessage(check.reason),
           });
         }
+        // Cada tecla é prova de que a pessoa ainda está lá: o prazo anda com o uso, em vez de
+        // vencer no meio de um formulário. Renovar falhando não pode segurar a tecla.
+        await touchControlLease({ db: deps.prisma, wakeup: deps.wakeup }, desktop, {
+          botId: bot.id,
+          userId: context.actor.userId,
+        }).catch(() => undefined);
         const providerRef = desktop ? workspaceProviderRef(desktop) : undefined;
         if (!computer || !providerRef) return { ok: true as const };
         const mapped =
@@ -1545,6 +1552,14 @@ export function createRouter(deps: RouterDeps) {
         const desktop = bot.desktopSession;
         const computer = desktop?.computer;
         const providerRef = desktop ? workspaceProviderRef(desktop) : undefined;
+        // O app manda o heartbeat enquanto a pessoa está com o controle: além de acordar o
+        // container, ele empurra o prazo do lease do próprio dono (só do dono).
+        if (desktop) {
+          await touchControlLease({ db: deps.prisma, wakeup: deps.wakeup }, desktop, {
+            botId: bot.id,
+            userId: context.actor.userId,
+          }).catch(() => undefined);
+        }
         if (desktop?.state === "running" && computer && providerRef) {
           await touchRunningComputer(
             { sandbox: deps.sandbox, wakeup: deps.wakeup },

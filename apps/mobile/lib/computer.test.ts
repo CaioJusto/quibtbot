@@ -227,6 +227,48 @@ describe("computer copy", () => {
       controlLabel({ state: "suspended", controlHolder: "none", screenAvailable: false }, "Chief"),
     ).toBe("Dormindo");
   });
+
+  it("diz até quando o controle é seu, a partir do prazo que o status devolve", () => {
+    const deadline = new Date(2026, 7, 25, 14, 35);
+    const now = new Date(2026, 7, 25, 14, 20);
+    expect(
+      controlLabel(
+        {
+          state: "running",
+          controlHolder: "user",
+          controlLeaseExpiresAt: deadline.toISOString(),
+          screenAvailable: true,
+        },
+        "Chief",
+        now,
+      ),
+    ).toBe("Você tem o controle até 14:35");
+    // Prazo já passado ou ausente: a frase de sempre, sem hora errada.
+    expect(
+      controlLabel(
+        {
+          state: "running",
+          controlHolder: "user",
+          controlLeaseExpiresAt: deadline.toISOString(),
+          screenAvailable: true,
+        },
+        "Chief",
+        new Date(2026, 7, 25, 14, 36),
+      ),
+    ).toBe("Você tem o controle");
+    expect(
+      controlLabel(
+        {
+          state: "running",
+          controlHolder: "user",
+          controlLeaseExpiresAt: null,
+          screenAvailable: true,
+        },
+        "Chief",
+        now,
+      ),
+    ).toBe("Você tem o controle");
+  });
 });
 
 describe("mobile computer screen", () => {

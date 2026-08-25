@@ -12,6 +12,7 @@ import type {
 } from "@quibt/contracts";
 import type { LiveFeedStatus } from "@quibt/core";
 import {
+  controlUntilLabel,
   createPointerMoveCoalescer,
   cronFromPreset,
   defaultCronPreset,
@@ -2195,7 +2196,7 @@ export function ShellPage() {
                 <div className="qb-dash__screen-meta">
                   <span>
                     {computer?.controlHolder === "user"
-                      ? "Você tem o controle"
+                      ? `Você tem o controle ${controlUntilLabel(computer.controlLeaseExpiresAt) ?? ""}`.trim()
                       : computer?.state === "suspended"
                         ? "Dormindo"
                         : `tela de ${active.name}`}

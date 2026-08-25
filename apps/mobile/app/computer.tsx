@@ -612,7 +612,7 @@ export default function Computer() {
                 </Text>
                 {hasControl ? (
                   <Text style={{ color: "#4ECB71", fontSize: 13, marginTop: 1 }}>
-                    Você tem o controle
+                    {controlLabel(computer, name)}
                   </Text>
                 ) : null}
               </View>

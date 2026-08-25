@@ -1,5 +1,6 @@
 import { call, ORPCError } from "@orpc/server";
 import type { Actor } from "@quibt/contracts";
+import { CONTROL_LEASE_MS, CONTROL_LEASE_RENEW_GAP_MS } from "@quibt/core";
 import type { PrismaClient } from "@quibt/db";
 import { describe, expect, it } from "vitest";
 import { createRouter, type RouterDeps } from "./router.js";
@@ -73,6 +74,15 @@ function harness(overrides: Partial<DesktopRow> = {}) {
           return { count: 0 };
         }
         if (where.controlHolder && where.controlHolder !== desktop.controlHolder) {
+          return { count: 0 };
+        }
+        if (where.controlLeaseId !== undefined && where.controlLeaseId !== desktop.controlLeaseId) {
+          return { count: 0 };
+        }
+        if (
+          where.controlLeaseUserId !== undefined &&
+          where.controlLeaseUserId !== desktop.controlLeaseUserId
+        ) {
           return { count: 0 };
         }
         Object.assign(desktop, data);
@@ -215,6 +225,70 @@ describe("computer.input", () => {
     expect(inputs).toEqual([]);
     expect(desktop.controlHolder).toBe("bot");
     expect(desktop.controlLeaseId).toBeNull();
+  });
+});
+
+/** Um lease do dono com parte do prazo já consumida — o caso de quem está usando há um tempo. */
+function usedLease(consumedMs: number) {
+  return {
+    controlHolder: "user",
+    controlLeaseId: "ctl_live",
+    controlLeaseUserId: "user-1",
+    controlLeaseExpiresAt: new Date(Date.now() + CONTROL_LEASE_MS - consumedMs),
+    controlFence: 2,
+  };
+}
+
+describe("computer.heartbeat", () => {
+  it("renova o prazo do dono e reagenda o reap, sem mexer no fence nem no id", async () => {
+    const { router, desktop, jobs, keepAlives } = harness(
+      usedLease(2 * CONTROL_LEASE_RENEW_GAP_MS),
+    );
+    const before = desktop.controlLeaseExpiresAt?.getTime() ?? 0;
+    await call(router.computer.heartbeat, { botId: "bot-1" }, { context: { actor: owner } });
+    const after = desktop.controlLeaseExpiresAt?.getTime() ?? 0;
+    expect(after).toBeGreaterThan(before);
+    expect(after).toBeGreaterThanOrEqual(Date.now() + CONTROL_LEASE_MS - 1_000);
+    expect(desktop.controlLeaseId).toBe("ctl_live");
+    expect(desktop.controlFence).toBe(2);
+    const reap = jobs.find((job) => job.name === "control.reap");
+    expect(reap?.runAt?.getTime()).toBe(after);
+    // E continua acordando o container, como antes.
+    expect(keepAlives).toEqual([{ botId: "bot-1", workspaceId: "ws-1" }]);
+  });
+
+  it("não renova a cada batida: um lease recém-concedido fica como está", async () => {
+    const { router, desktop, jobs } = harness(usedLease(0));
+    const before = desktop.controlLeaseExpiresAt;
+    await call(router.computer.heartbeat, { botId: "bot-1" }, { context: { actor: owner } });
+    expect(desktop.controlLeaseExpiresAt).toEqual(before);
+    expect(jobs.map((job) => job.name)).not.toContain("control.reap");
+  });
+
+  it("o heartbeat de quem não é o dono não estica o lease de ninguém", async () => {
+    const { router, desktop, jobs } = harness(usedLease(2 * CONTROL_LEASE_RENEW_GAP_MS));
+    const before = desktop.controlLeaseExpiresAt;
+    await call(router.computer.heartbeat, { botId: "bot-1" }, { context: { actor: teammate } });
+    expect(desktop.controlLeaseExpiresAt).toEqual(before);
+    expect(desktop.controlLeaseUserId).toBe("user-1");
+    expect(jobs.map((job) => job.name)).not.toContain("control.reap");
+  });
+});
+
+describe("computer.input renova pelo uso", () => {
+  it("cada tecla depois da folga empurra o prazo e a tecla chega mesmo assim", async () => {
+    const { router, desktop, inputs, jobs } = harness(usedLease(2 * CONTROL_LEASE_RENEW_GAP_MS));
+    const before = desktop.controlLeaseExpiresAt?.getTime() ?? 0;
+    await call(
+      router.computer.input,
+      { ...keypress, leaseId: "ctl_live" },
+      { context: { actor: owner } },
+    );
+    expect(inputs).toEqual([{ leaseId: "ctl_live", fence: 2 }]);
+    expect(desktop.controlLeaseExpiresAt?.getTime() ?? 0).toBeGreaterThan(before);
+    expect(jobs.find((job) => job.name === "control.reap")?.runAt).toEqual(
+      desktop.controlLeaseExpiresAt,
+    );
   });
 });
 

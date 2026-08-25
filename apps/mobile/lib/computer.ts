@@ -1,3 +1,5 @@
+import { controlUntilLabel } from "@quibt/core";
+
 export const COMPUTER_HEARTBEAT_MS = 60_000;
 export const COMPUTER_STATUS_POLL_MS = 2_000;
 export const COMPUTER_CONTROL_POLL_MS = 800;
@@ -17,6 +19,8 @@ export function computerPollMs(hasControl: boolean) {
 export type ComputerStatus = {
   state: string;
   controlHolder: string;
+  /** Até quando o lease vale (ISO). O prazo anda com o uso: cada tecla e cada heartbeat renovam. */
+  controlLeaseExpiresAt?: string | null;
   screenAvailable: boolean;
   screenUrl?: string | null;
 };
@@ -139,8 +143,12 @@ export function screenNotice(input: {
   return { title: "O computador está parado", action: "boot", actionLabel: "Ligar o computador" };
 }
 
-export function controlLabel(computer: ComputerStatus | null, name: string) {
-  if (computer?.controlHolder === "user") return "Você tem o controle";
+export function controlLabel(computer: ComputerStatus | null, name: string, now?: Date) {
+  if (computer?.controlHolder === "user") {
+    // "até 14:35": a pessoa sabe até quando é dela sem precisar se surpreender depois.
+    const until = controlUntilLabel(computer.controlLeaseExpiresAt, now);
+    return until ? `Você tem o controle ${until}` : "Você tem o controle";
+  }
   if (computer?.state === "suspended") return "Dormindo";
   return `tela de ${name}`;
 }
