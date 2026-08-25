@@ -26,7 +26,7 @@ function validCustomDump(): Buffer {
 function seedInstalledState(dataDir: string): void {
   ensureInstallEnvironment(dataDir, PUBLIC_URL);
   saveInstallState(dataDir, {
-    ...initialInstallState("0.2.10", new Date("2026-08-17T00:00:00.000Z")),
+    ...initialInstallState("0.2.11", new Date("2026-08-17T00:00:00.000Z")),
     completed: [
       "requirements",
       "environment",
@@ -145,7 +145,7 @@ describe("deploymentNeedsFirstOwner probe", () => {
 describe("update target allowlist", () => {
   it("defaults to embedded release and rejects env-driven external versions", () => {
     expect(resolveUpdateTarget(undefined).ok).toBe(true);
-    expect(resolveUpdateTarget("0.2.10").ok).toBe(true);
+    expect(resolveUpdateTarget("0.2.11").ok).toBe(true);
     expect(resolveUpdateTarget("9.9.9").ok).toBe(false);
   });
 });
@@ -272,7 +272,7 @@ describe("complete rollback", () => {
     const result = await runUpdate({
       dataDir,
       composeFile: COMPOSE_FILE,
-      targetRelease: "0.2.10",
+      targetRelease: "0.2.11",
       run: makeUpdateRunner("migrate-fail"),
       fetch: async (url) => {
         if (String(url).endsWith("/ready")) {
@@ -306,7 +306,7 @@ describe("complete rollback", () => {
     const result = await runUpdate({
       dataDir,
       composeFile: COMPOSE_FILE,
-      targetRelease: "0.2.10",
+      targetRelease: "0.2.11",
       run: makeUpdateRunner("rollback-db-fail"),
       fetch: async () => new Response("down", { status: 503 }),
       clock: { now: () => new Date("2026-08-17T01:00:00.000Z"), sleep: async () => undefined },

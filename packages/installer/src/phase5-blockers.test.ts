@@ -28,7 +28,7 @@ function seedInstalledState(dataDir: string): void {
   writeFileSync(
     path.join(dataDir, "install-state.json"),
     `${JSON.stringify({
-      ...initialInstallState("0.2.10", new Date("2026-08-17T00:00:00.000Z")),
+      ...initialInstallState("0.2.11", new Date("2026-08-17T00:00:00.000Z")),
       completed: [
         "requirements",
         "environment",
@@ -114,7 +114,7 @@ describe("embedded release validation", () => {
     writeFileSync(
       env.path,
       readFileSync(env.path, "utf8").replace(
-        "QUIBT_STACK_VERSION=0.2.10",
+        "QUIBT_STACK_VERSION=0.2.11",
         "QUIBT_STACK_VERSION=0.1.0",
       ),
       { mode: 0o600 },
@@ -182,7 +182,7 @@ describe("finalizePairingInstall lock", () => {
       path.join(dataDir, "install-state.json"),
       `${JSON.stringify({
         version: 1,
-        release: "0.2.10",
+        release: "0.2.11",
         completed: ["requirements", "environment", "images", "services", "database", "health"],
         updatedAt: "2026-08-17T00:00:00.000Z",
       })}\n`,
@@ -249,7 +249,7 @@ describe("update recovery preparation", () => {
     const result = await runUpdate({
       dataDir,
       composeFile: COMPOSE_FILE,
-      targetRelease: "0.2.10",
+      targetRelease: "0.2.11",
       run: runner,
       fetch: async (url) =>
         String(url).endsWith("/ready")
@@ -298,11 +298,11 @@ describe("restore container cleanup", () => {
           : new Response("down", { status: 503 }),
       clock: { now: () => new Date(), sleep: async () => undefined },
       rollback: {
-        release: "0.2.10",
+        release: "0.2.11",
         images: [
-          { reference: "ghcr.io/quibt/quibt-stack:0.2.10", id: "sha256:id" },
-          { reference: "ghcr.io/quibt/quibt-supervisor:0.2.10", id: "sha256:id" },
-          { reference: "ghcr.io/quibt/quibt-computer:0.2.10", id: "sha256:id" },
+          { reference: "ghcr.io/quibt/quibt-stack:0.2.11", id: "sha256:id" },
+          { reference: "ghcr.io/quibt/quibt-supervisor:0.2.11", id: "sha256:id" },
+          { reference: "ghcr.io/quibt/quibt-computer:0.2.11", id: "sha256:id" },
         ],
         envSnapshotPath,
         backupBundleDir: bundle.dir,
@@ -328,7 +328,7 @@ describe("doctor embedded release", () => {
     writeFileSync(
       env.path,
       readFileSync(env.path, "utf8").replace(
-        "QUIBT_STACK_VERSION=0.2.10",
+        "QUIBT_STACK_VERSION=0.2.11",
         "QUIBT_STACK_VERSION=0.1.0",
       ),
       { mode: 0o600 },

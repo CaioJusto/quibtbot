@@ -19,7 +19,7 @@ function validCustomDump(): Buffer {
 function seedInstalledState(dataDir: string): void {
   ensureInstallEnvironment(dataDir, "http://127.0.0.1:5173");
   saveInstallState(dataDir, {
-    ...initialInstallState("0.2.10", new Date("2026-08-17T00:00:00.000Z")),
+    ...initialInstallState("0.2.11", new Date("2026-08-17T00:00:00.000Z")),
     completed: [
       "requirements",
       "environment",
@@ -95,7 +95,7 @@ describe("runUpdate", () => {
     const result = await runUpdate({
       dataDir,
       composeFile: COMPOSE_FILE,
-      targetRelease: "0.2.10",
+      targetRelease: "0.2.11",
       run: makeRunner("success"),
       fetch: async (url) => {
         if (String(url).endsWith("/ready")) {
@@ -114,11 +114,11 @@ describe("runUpdate", () => {
     const rollback = JSON.parse(
       readFileSync(path.join(dataDir, "rollback-images.json"), "utf8"),
     ) as { release: string; images: Array<{ reference: string; id: string }> };
-    expect(rollback.release).toBe("0.2.10");
+    expect(rollback.release).toBe("0.2.11");
     expect(rollback.images).toEqual([
-      { reference: "ghcr.io/quibt/quibt-stack:0.2.10", id: "sha256:stack-old" },
-      { reference: "ghcr.io/quibt/quibt-supervisor:0.2.10", id: "sha256:supervisor-old" },
-      { reference: "ghcr.io/quibt/quibt-computer:0.2.10", id: "sha256:computer-old" },
+      { reference: "ghcr.io/quibt/quibt-stack:0.2.11", id: "sha256:stack-old" },
+      { reference: "ghcr.io/quibt/quibt-supervisor:0.2.11", id: "sha256:supervisor-old" },
+      { reference: "ghcr.io/quibt/quibt-computer:0.2.11", id: "sha256:computer-old" },
     ]);
     expect(readFileSync(path.join(dataDir, "quibt.env"), "utf8")).toBe(envBefore);
   });
@@ -148,7 +148,7 @@ describe("runUpdate", () => {
     const result = await runUpdate({
       dataDir,
       composeFile: COMPOSE_FILE,
-      targetRelease: "0.2.10",
+      targetRelease: "0.2.11",
       run: makeRunner("up-fail"),
       fetch: async (url) => {
         if (String(url).endsWith("/ready")) {
@@ -173,7 +173,7 @@ describe("runUpdate", () => {
     const result = await runUpdate({
       dataDir,
       composeFile: COMPOSE_FILE,
-      targetRelease: "0.2.10",
+      targetRelease: "0.2.11",
       run: makeRunner("migrate-fail"),
       fetch: async (url) => {
         if (String(url).endsWith("/ready")) {
@@ -197,7 +197,7 @@ describe("runUpdate", () => {
     const result = await runUpdate({
       dataDir,
       composeFile: COMPOSE_FILE,
-      targetRelease: "0.2.10",
+      targetRelease: "0.2.11",
       run: makeRunner("health-fail"),
       fetch: async () => new Response("down", { status: 503 }),
       clock: { now: () => new Date("2026-08-17T01:00:00.000Z"), sleep: async () => undefined },

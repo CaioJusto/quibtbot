@@ -1,6 +1,6 @@
 import { PUBLIC_PROFILE } from "./public-access.js";
 
-export const INSTALL_RELEASE = "0.2.10";
+export const INSTALL_RELEASE = "0.2.11";
 export const QUIBT_IMAGE_PREFIX = "ghcr.io/quibt";
 
 export function requiredQuibtImages(release = INSTALL_RELEASE): string[] {

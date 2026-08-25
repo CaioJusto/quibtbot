@@ -24,8 +24,8 @@ Escolha um caminho.
 **Por um comando** (Mac ou Linux, sem o app): cole no terminal
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CaioJusto/quibtbot/v0.2.10/scripts/install.sh \
-  | QUIBT_RELEASE=0.2.10 sh
+curl -fsSL https://raw.githubusercontent.com/CaioJusto/quibtbot/v0.2.11/scripts/install.sh \
+  | QUIBT_RELEASE=0.2.11 sh
 ```
 
 Ele baixa o `quibtbot` certo para a sua máquina, confere o SHA-256 publicado e roda `quibtbot install`. No fim imprime o endereço e o código para o celular. Para sair: `quibtbot uninstall` (ou, no app, **Quibt Bot → Desinstalar**).

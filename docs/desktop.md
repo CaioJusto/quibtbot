@@ -71,9 +71,9 @@ The bot does **not** click your host desktop. Navigation inside the computer pan
 
 | Platform | Release status                                                                                                                  | What is still missing                                                                                                                                       |
 | -------- | ------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| macOS    | The `v0.2.10` Apple-silicon `.dmg` is Developer ID signed, notarized and stapled: `spctl` reports `accepted / source=Notarized Developer ID`. | Intel (x64) is not published; Apple silicon only.                                                            |
+| macOS    | The `v0.2.11` Apple-silicon `.dmg` is Developer ID signed, notarized and stapled: `spctl` reports `accepted / source=Notarized Developer ID`. | Intel (x64) is not published; Apple silicon only.                                                            |
 | Windows  | No desktop installer is published. Run from source (`pnpm dev` + `pnpm desktop`).                                                            | Authenticode certificate. Until it exists, SmartScreen would call any build an unknown publisher.            |
-| Linux    | No desktop AppImage is published; `v0.2.10` ships the x64/arm64 `quibtbot` CLI binaries for server installs.                                  | No store signature. Mark the downloaded binary executable before running it.                                 |
+| Linux    | No desktop AppImage is published; `v0.2.11` ships the x64/arm64 `quibtbot` CLI binaries for server installs.                                  | No store signature. Mark the downloaded binary executable before running it.                                 |
 
 For a maintainer release on macOS, the project-local hooks sign both the app and DMG, submit each
 to Apple, wait for acceptance, and staple the tickets:

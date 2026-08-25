@@ -20,12 +20,12 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="Apache-2.0" /></a>
   <a href="package.json"><img src="https://img.shields.io/badge/node-%3E%3D22.19-brightgreen.svg" alt="Node.js >= 22.19" /></a>
   <a href="package.json"><img src="https://img.shields.io/badge/pnpm-9-F69220.svg" alt="pnpm 9" /></a>
-  <a href="https://github.com/CaioJusto/quibtbot/releases/latest"><img src="https://img.shields.io/badge/release-v0.2.10-brightgreen.svg" alt="v0.2.10" /></a>
+  <a href="https://github.com/CaioJusto/quibtbot/releases/latest"><img src="https://img.shields.io/badge/release-v0.2.11-brightgreen.svg" alt="v0.2.11" /></a>
 </p>
 
 Each bot has one thread, one computer, memory, routines, and history. You run the stack on your machine. Packages live under `@quibt/*`. This repository is the complete product.
 
-> **Where this is:** `v0.2.10` is published and running. What that means concretely: the
+> **Where this is:** `v0.2.11` is published and running. What that means concretely: the
 > Apple-silicon DMG is Developer ID signed **and** notarized (`spctl` reports
 > `accepted / source=Notarized Developer ID`), the three container images are public and
 > multi-architecture, and CI proves the Linux path on every run — a real Docker host boots a bot
@@ -44,7 +44,7 @@ The desktop app wraps the same UI the browser shows. The API, worker, and bot co
 
 | Platform | Installer |
 | --- | --- |
-| macOS (Apple silicon) | [`QuibtBot.dmg` (v0.2.10)](https://github.com/CaioJusto/quibtbot/releases/download/v0.2.10/QuibtBot.dmg) |
+| macOS (Apple silicon) | [`QuibtBot.dmg` (v0.2.11)](https://github.com/CaioJusto/quibtbot/releases/download/v0.2.11/QuibtBot.dmg) |
 | Linux / macOS (server) | `quibtbot` CLI — the one-line install below |
 | Windows | Run from source (`pnpm dev`) until a signed installer ships |
 
@@ -53,12 +53,12 @@ The Apple-silicon DMG is Developer ID signed **and notarized**: macOS opens it w
 the Windows one needs an Authenticode certificate, and until then SmartScreen would call it an
 unknown publisher. See [`docs/desktop.md`](docs/desktop.md).
 
-The `v0.2.10` release publishes that signed Apple-silicon app, standalone macOS/Linux
+The `v0.2.11` release publishes that signed Apple-silicon app, standalone macOS/Linux
 `quibtbot` binaries, matching SHA-256 files, and public multi-architecture Docker images from
 the same tag. Use the immutable, version-matched command below:
 
 ```bash
-release=0.2.10
+release=0.2.11
 curl -fsSL "https://raw.githubusercontent.com/CaioJusto/quibtbot/v${release}/scripts/install.sh" \
   | QUIBT_RELEASE="${release}" sh
 ```
@@ -80,7 +80,7 @@ The QR always follows the server currently open in the desktop app. If Electron 
 laptop. Only a desktop using its local stack offers the LAN / user-owned HTTPS tunnel choice.
 
 ```bash
-release=0.2.10
+release=0.2.11
 curl -fsSL "https://github.com/CaioJusto/quibtbot/releases/download/v${release}/quibtbot-linux-x64" -o /tmp/quibtbot
 curl -fsSL "https://github.com/CaioJusto/quibtbot/releases/download/v${release}/quibtbot-linux-x64.sha256" -o /tmp/quibtbot.sha256
 echo "$(awk '{print $1}' /tmp/quibtbot.sha256)  /tmp/quibtbot" | sha256sum -c -
