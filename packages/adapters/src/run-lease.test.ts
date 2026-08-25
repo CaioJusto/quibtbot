@@ -8,9 +8,11 @@ import {
   busyRetryJobKey,
   deferRunForBusyBot,
   LEGACY_LEASE_GRACE_MS,
+  PROVIDER_RETRY_DELAY_MS,
   RUN_LEASE_MS,
   reapExpiredLeases,
   renewRunLease,
+  requeueRunAfterProviderError,
   scheduleRunReap,
   wakeNextRunForBot,
   watchRunLease,
@@ -455,5 +457,72 @@ describe("one agent per bot", () => {
     const store = runStore([queuedRun({ id: "run-a" })]);
     expect(await wakeNextRunForBot(store, { botId: "b", exceptRunId: "run-a" })).toBeNull();
     expect(store.enqueued).toEqual([]);
+  });
+});
+
+describe("requeue after a provider error", () => {
+  it("puts the run back in the queue once and marks the attempt as retried", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-25T12:00:00.000Z"));
+    const store = runStore([
+      queuedRun({ status: "running", leaseOwner: "worker-1", leaseFence: 3 }),
+    ]);
+    const requeued = await requeueRunAfterProviderError(
+      { prisma: store.prisma, wakeup: store.wakeup },
+      { runId: "run-1", fence: 3, reason: "O provedor parou de responder. Tente de novo." },
+    );
+    expect(requeued).toBe(true);
+    expect(store.rows[0]!).toMatchObject({
+      status: "queued",
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      leaseFence: 3,
+    });
+    expect(store.attempts.updated).toEqual([{ runId: "run-1", fence: 3, status: "running" }]);
+    expect(store.enqueued).toEqual([
+      {
+        name: "run.continue",
+        payload: { runId: "run-1" },
+        runAt: new Date(Date.now() + PROVIDER_RETRY_DELAY_MS),
+        jobKey: busyRetryJobKey("run-1"),
+      },
+    ]);
+  });
+
+  it("does not retry a second time: the failure reaches the chat instead", async () => {
+    const store = runStore([
+      queuedRun({ status: "running", leaseOwner: "worker-1", leaseFence: 4 }),
+    ]);
+    store.attempts.count = 1;
+    const requeued = await requeueRunAfterProviderError(
+      { prisma: store.prisma, wakeup: store.wakeup },
+      { runId: "run-1", fence: 4, reason: "429" },
+    );
+    expect(requeued).toBe(false);
+    expect(store.rows[0]!.status).toBe("running");
+    expect(store.enqueued).toEqual([]);
+  });
+
+  it("does not touch a run another worker already took over", async () => {
+    const store = runStore([
+      queuedRun({ status: "running", leaseOwner: "worker-2", leaseFence: 9 }),
+    ]);
+    const requeued = await requeueRunAfterProviderError(
+      { prisma: store.prisma, wakeup: store.wakeup },
+      { runId: "run-1", fence: 8, reason: "502" },
+    );
+    expect(requeued).toBe(false);
+    expect(store.rows[0]!).toMatchObject({ status: "running", leaseOwner: "worker-2" });
+    expect(store.attempts.updated).toEqual([]);
+  });
+
+  it("cannot requeue without a wakeup driver", async () => {
+    const store = runStore([queuedRun({ status: "running", leaseFence: 1 })]);
+    expect(
+      await requeueRunAfterProviderError(
+        { prisma: store.prisma },
+        { runId: "run-1", fence: 1, reason: "x" },
+      ),
+    ).toBe(false);
   });
 });

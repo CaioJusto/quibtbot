@@ -10,10 +10,25 @@ import type {
 } from "@quibt/adapter-kit";
 import { ApprovalPause } from "./approval-wait.js";
 import { builtinAgentTools, DELEGATION_TOOL_NAMES } from "./builtin-tools.js";
+import {
+  isRetryableLlmError,
+  LLM_IDLE_TIMEOUT_MS,
+  llmStreamOptions,
+  PROVIDER_STALLED_MESSAGE,
+} from "./llm-retry.js";
 
 const running = new Map<string, AbortController>();
 const models = builtinModels();
 const MAX_PARALLEL_SUBAGENTS = 4;
+
+type RunModels = ReturnType<typeof builtinModels>;
+
+export interface PiAgentRuntimeOptions {
+  /** Só para testes: troca a coleção de modelos (e o `streamSimple`) de cada run. */
+  modelsForRun?: (oauthCredential: string | undefined, provider: string) => RunModels;
+  /** Silêncio máximo do agente antes de o turno ser abortado como "provedor parou". */
+  idleTimeoutMs?: number;
+}
 
 /**
  * Provedores de assinatura (Codex, Claude, Copilot, xAI) só resolvem auth a
@@ -22,7 +37,7 @@ const MAX_PARALLEL_SUBAGENTS = 4;
  * a sua própria coleção de modelos com um cofre em memória, para que a
  * credencial de uma pessoa nunca vaze para o run de outra.
  */
-function modelsForRun(oauthCredential: string | undefined, provider: string) {
+function modelsForRun(oauthCredential: string | undefined, provider: string): RunModels {
   if (!oauthCredential) return models;
   let credential: unknown;
   try {
@@ -57,6 +72,8 @@ function modelsForRun(oauthCredential: string | undefined, provider: string) {
 }
 
 export class PiAgentRuntime implements AgentRuntime {
+  constructor(private readonly options: PiAgentRuntimeOptions = {}) {}
+
   describe() {
     return {
       id: "pi",
@@ -106,7 +123,10 @@ export class PiAgentRuntime implements AgentRuntime {
           }
           return;
         }
-        const runModels = modelsForRun(request.model.oauthCredential, provider);
+        const runModels = (this.options.modelsForRun ?? modelsForRun)(
+          request.model.oauthCredential,
+          provider,
+        );
         const model =
           runModels.getModel(provider, modelId) ?? runModels.getModel("openrouter", modelId);
         if (!model) {
@@ -121,11 +141,19 @@ export class PiAgentRuntime implements AgentRuntime {
         const apiKey = request.model.apiKey ?? process.env.OPENROUTER_API_KEY;
         const toolDefs = request.tools.length ? request.tools : builtinAgentTools;
         const nestedAgents = new Set<Agent>();
+        const idleTimeoutMs = this.options.idleTimeoutMs ?? LLM_IDLE_TIMEOUT_MS;
         const host: ToolHost = {
           queue,
           request,
           model,
+          models: runModels,
           apiKey,
+          // Com credencial de assinatura, o token já está no cofre do run: mandar
+          // a chave por cima faria o provedor tentar o caminho de API key. O
+          // subagente usa exatamente esta função, para não cair no "Provider is
+          // not configured" que o token cru provocava.
+          getApiKey: async () => (request.model.oauthCredential ? undefined : apiKey),
+          idleTimeoutMs,
           nestedAgents,
           subagentGate: createGate(MAX_PARALLEL_SUBAGENTS),
           signal,
@@ -136,10 +164,10 @@ export class PiAgentRuntime implements AgentRuntime {
         const history = toHistory(request.history, request.prompt, model);
 
         const agent = new Agent({
-          streamFn: (m, ctx, options) => runModels.streamSimple(m, ctx, options),
-          // Com credencial de assinatura, o token já está no cofre do run: mandar
-          // a chave por cima faria o provedor tentar o caminho de API key.
-          getApiKey: async () => (request.model.oauthCredential ? undefined : apiKey),
+          // O Agent repassa o próprio config como opções do stream; retry e timeout
+          // entram por cima, porque o pi-ai não tenta de novo nem espera por padrão.
+          streamFn: (m, ctx, options) => runModels.streamSimple(m, ctx, llmStreamOptions(options)),
+          getApiKey: host.getApiKey,
           initialState: {
             systemPrompt:
               request.instructions ||
@@ -192,13 +220,34 @@ export class PiAgentRuntime implements AgentRuntime {
         });
 
         queue.push({ type: "progress", text: "Trabalhando…" });
-        await agent.prompt(request.prompt);
-        await agent.waitForIdle();
-        signal.removeEventListener("abort", onAbort);
+        // Um socket pendurado não gera erro nenhum: sem o vigia, o bot ficava em
+        // "Trabalhando…" até alguém cancelar, com o lease sendo renovado o tempo todo.
+        let stalled = false;
+        const stopWatchdog = watchIdle(agent, idleTimeoutMs, () => {
+          stalled = true;
+          controller.abort();
+        });
+        try {
+          await agent.prompt(request.prompt);
+          await agent.waitForIdle();
+        } finally {
+          stopWatchdog();
+          signal.removeEventListener("abort", onAbort);
+        }
 
+        if (stalled) {
+          queue.push({ type: "error", message: PROVIDER_STALLED_MESSAGE, retryable: true });
+          queue.push({ type: "done", text: PROVIDER_STALLED_MESSAGE });
+          return;
+        }
         const error = agent.state.errorMessage;
         if (error) {
-          queue.push({ type: "text", text: userFacingError(error) });
+          queue.push({
+            type: "error",
+            message: userFacingError(error),
+            // Um cancelamento também chega como "aborted"; ele não é erro do provedor.
+            retryable: !signal.aborted && isRetryableLlmError(error),
+          });
           queue.push({ type: "done", text: sanitizeError(error) });
           return;
         }
@@ -211,7 +260,11 @@ export class PiAgentRuntime implements AgentRuntime {
       } catch (error) {
         const raw = error instanceof Error ? error.message : String(error);
         const message = sanitizeError(raw);
-        queue.push({ type: "text", text: userFacingError(raw) });
+        queue.push({
+          type: "error",
+          message: userFacingError(raw),
+          retryable: !signal.aborted && isRetryableLlmError(raw),
+        });
         queue.push({ type: "done", text: message });
       } finally {
         queue.close();
@@ -446,8 +499,10 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
   );
   const nestedHost: ToolHost = { ...host, depth: 1 };
   const nested = new Agent({
-    streamFn: (m, ctx, options) => models.streamSimple(m, ctx, options),
-    getApiKey: async () => host.apiKey,
+    // Mesma coleção (com o cofre da credencial de assinatura) e mesma regra de
+    // chave do pai: a coleção global sem cofre respondia "Provider is not configured".
+    streamFn: (m, ctx, options) => host.models.streamSimple(m, ctx, llmStreamOptions(options)),
+    getApiKey: host.getApiKey,
     initialState: {
       systemPrompt: [
         `You are a Quibt subagent named "${name}".`,
@@ -526,10 +581,19 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
     }
     const onAbort = () => nested.abort();
     host.signal.addEventListener("abort", onAbort);
-    await nested.prompt(task || "Complete the delegated task.");
-    await nested.waitForIdle();
-    host.signal.removeEventListener("abort", onAbort);
-    const error = nested.state.errorMessage;
+    let stalled = false;
+    const stopWatchdog = watchIdle(nested, host.idleTimeoutMs, () => {
+      stalled = true;
+      nested.abort();
+    });
+    try {
+      await nested.prompt(task || "Complete the delegated task.");
+      await nested.waitForIdle();
+    } finally {
+      stopWatchdog();
+      host.signal.removeEventListener("abort", onAbort);
+    }
+    const error = stalled ? PROVIDER_STALLED_MESSAGE : nested.state.errorMessage;
     if (error) {
       const message = sanitizeError(error);
       host.queue.push({
@@ -724,11 +788,46 @@ export interface ToolHost {
   calls?: { count: number };
   request: AgentRunRequest;
   model: NonNullable<ReturnType<typeof models.getModel>>;
+  /** A coleção do run, com o cofre da credencial de assinatura quando há uma. */
+  models: RunModels;
   apiKey: string | undefined;
+  /** Como o agente principal resolve a chave; o subagente usa a mesma função. */
+  getApiKey: () => Promise<string | undefined>;
+  idleTimeoutMs: number;
   nestedAgents: Set<Agent>;
   subagentGate: { acquire(): Promise<void>; release(): void };
   signal: AbortSignal;
   depth: number;
+}
+
+/**
+ * Vigia de inatividade: qualquer evento do agente rearma o relógio, e uma ferramenta em
+ * execução (um `shell` demorado, um subagente) pausa a contagem — o que se vigia é o
+ * provedor mudo, não o trabalho lento. Exportado para testes.
+ */
+export function watchIdle(agent: Agent, idleMs: number, onIdle: () => void): () => void {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let toolsRunning = 0;
+  let stopped = false;
+  const arm = () => {
+    if (timer) clearTimeout(timer);
+    timer = undefined;
+    if (stopped || toolsRunning > 0) return;
+    timer = setTimeout(onIdle, idleMs);
+    timer.unref?.();
+  };
+  const unsubscribe = agent.subscribe((event) => {
+    if (event.type === "tool_execution_start") toolsRunning += 1;
+    if (event.type === "tool_execution_end") toolsRunning = Math.max(0, toolsRunning - 1);
+    arm();
+  });
+  arm();
+  return () => {
+    stopped = true;
+    if (timer) clearTimeout(timer);
+    timer = undefined;
+    unsubscribe();
+  };
 }
 
 function createGate(max: number) {

@@ -1,6 +1,27 @@
+/**
+ * Tempo até o provedor responder os cabeçalhos da chamada. O SDK só conta até a
+ * resposta começar; o silêncio no meio do stream é vigiado por LLM_IDLE_TIMEOUT_MS.
+ */
 export const LLM_TIMEOUT_MS = 120_000;
+/** Tentativas a mais que o pi-ai faz por chamada em 408/409/429/5xx (o padrão dele é 0). */
+export const LLM_MAX_RETRIES = 3;
+/** Um `retry-after` maior que isto falha na hora, em vez de deixar o bot parado esperando. */
+export const LLM_MAX_RETRY_DELAY_MS = 20_000;
+/** Sem nenhum evento do agente por este tempo, o turno é abortado como "provedor parou". */
+export const LLM_IDLE_TIMEOUT_MS = 180_000;
+export const PROVIDER_STALLED_MESSAGE = "O provedor parou de responder. Tente de novo.";
 export const LLM_RETRY_ATTEMPTS = 2;
 export const LLM_RETRY_BASE_MS = 500;
+
+/** As opções que toda chamada de modelo (agente principal e subagente) leva ao pi-ai. */
+export function llmStreamOptions<T extends object | undefined>(options: T) {
+  return {
+    ...options,
+    maxRetries: LLM_MAX_RETRIES,
+    maxRetryDelayMs: LLM_MAX_RETRY_DELAY_MS,
+    timeoutMs: LLM_TIMEOUT_MS,
+  };
+}
 
 export function isRetryableLlmError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
