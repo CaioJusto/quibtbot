@@ -70,6 +70,7 @@ import {
   acquireRunLease,
   botBusyWith,
   deferRunForBusyBot,
+  requeueRunAfterProviderError,
   wakeNextRunForBot,
   watchRunLease,
 } from "./run-lease.js";
@@ -1314,6 +1315,31 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 paidBy: credential ? "user" : "plan",
               },
             });
+          } else if (event.type === "error") {
+            // Erro passageiro do provedor (429, 502, socket mudo): o run volta para a fila
+            // uma vez em vez de virar uma resposta de erro no chat.
+            if (
+              event.retryable &&
+              !scripted &&
+              (await requeueRunAfterProviderError(deps, {
+                runId,
+                fence,
+                reason: redactSecrets(event.message, runSecrets),
+              }))
+            ) {
+              await publishLiveProgress(deps.prisma, {
+                workspaceId: run.workspaceId,
+                threadId: thread.id,
+                botId: bot.id,
+                runId,
+                payload: {
+                  text: `${redactSecrets(event.message, runSecrets)} Vou tentar de novo em instantes…`,
+                },
+              });
+              await stopRuntime();
+              return;
+            }
+            assembled += event.message;
           } else if (event.type === "done") {
             assembled = assembled || event.text || assembled;
           }

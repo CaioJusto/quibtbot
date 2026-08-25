@@ -220,6 +220,11 @@ export type AgentRuntimeEvent =
       progress?: string;
       result?: string;
     }
+  /**
+   * O turno falhou no provedor. `message` já vem em português, pronta para o chat;
+   * `retryable` diz se o executor pode tentar o run de novo antes de mostrar a falha.
+   */
+  | { type: "error"; message: string; retryable: boolean }
   | { type: "done"; text?: string };
 
 export interface AgentRuntimeCapabilities {

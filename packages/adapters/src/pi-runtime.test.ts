@@ -1,13 +1,182 @@
+import type { Agent } from "@earendil-works/pi-agent-core";
+import type {
+  AssistantMessage,
+  AssistantMessageEvent,
+  Model,
+  SimpleStreamOptions,
+} from "@earendil-works/pi-ai";
+import { builtinModels } from "@earendil-works/pi-ai/providers/all";
+import type { AgentRuntimeEvent } from "@quibt/adapter-kit";
 import { describe, expect, it, vi } from "vitest";
 import { APPROVAL_WAIT_TEXT, ApprovalPause } from "./approval-wait.js";
+import {
+  LLM_MAX_RETRIES,
+  LLM_MAX_RETRY_DELAY_MS,
+  LLM_TIMEOUT_MS,
+  PROVIDER_STALLED_MESSAGE,
+} from "./llm-retry.js";
 import { PEER_WAIT_TEXT, PeerPause } from "./peer-wait.js";
 import {
   enqueueRuntimeEvent,
   PiAgentRuntime,
+  type PiAgentRuntimeOptions,
   type ToolHost,
   toAgentTool,
   userFacingError,
+  watchIdle,
 } from "./pi-runtime.js";
+
+const catalog = builtinModels();
+
+type Reply =
+  | { text: string }
+  | { toolCall: { id: string; name: string; arguments: Record<string, unknown> } }
+  | { hang: true };
+
+function assistantMessage(model: Model<never>, content: AssistantMessage["content"]) {
+  return {
+    role: "assistant" as const,
+    content,
+    api: model.api,
+    provider: model.provider,
+    model: model.id,
+    usage: {
+      input: 3,
+      output: 2,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 5,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    stopReason: "stop" as const,
+    timestamp: Date.now(),
+  } satisfies AssistantMessage;
+}
+
+/** O que o Agent consome de um stream do pi-ai: os eventos e a mensagem final. */
+function fakeStream() {
+  const queue: AssistantMessageEvent[] = [];
+  let wake: (() => void) | undefined;
+  let final: ((message: AssistantMessage) => void) | undefined;
+  const result = new Promise<AssistantMessage>((resolve) => {
+    final = resolve;
+  });
+  let ended = false;
+  return {
+    push(event: AssistantMessageEvent) {
+      queue.push(event);
+      if (event.type === "done") {
+        ended = true;
+        final?.(event.message);
+      }
+      if (event.type === "error") {
+        ended = true;
+        final?.(event.error);
+      }
+      wake?.();
+    },
+    result: () => result,
+    async *[Symbol.asyncIterator]() {
+      while (true) {
+        if (queue.length) {
+          const next = queue.shift()!;
+          yield next;
+          if (next.type === "done" || next.type === "error") return;
+          continue;
+        }
+        if (ended) return;
+        await new Promise<void>((resolve) => {
+          wake = resolve;
+        });
+      }
+    },
+  };
+}
+
+/**
+ * Uma coleção de modelos com o catálogo real e um `streamSimple` roteirizado: cada chamada
+ * consome a próxima resposta. `hang` emite o começo e fica mudo até o signal abortar.
+ */
+function scriptedModels(replies: Reply[]) {
+  const calls: Array<SimpleStreamOptions | undefined> = [];
+  const streamSimple = vi.fn(
+    (model: Model<never>, _ctx: unknown, options?: SimpleStreamOptions) => {
+      calls.push(options);
+      const stream = fakeStream();
+      const reply = replies.shift() ?? { text: "acabou o roteiro" };
+      const partial = { ...assistantMessage(model, []), stopReason: "pending" as const };
+      stream.push({ type: "start", partial });
+      if ("hang" in reply) {
+        options?.signal?.addEventListener("abort", () => {
+          stream.push({
+            type: "error",
+            reason: "aborted",
+            error: {
+              ...assistantMessage(model, []),
+              stopReason: "aborted",
+              errorMessage: "Request aborted",
+            },
+          });
+        });
+        return stream;
+      }
+      if ("toolCall" in reply) {
+        stream.push({
+          type: "done",
+          reason: "toolUse",
+          message: {
+            ...assistantMessage(model, [{ type: "toolCall", ...reply.toolCall }]),
+            stopReason: "toolUse",
+          },
+        });
+        return stream;
+      }
+      stream.push({ type: "text_delta", contentIndex: 0, delta: reply.text, partial });
+      stream.push({
+        type: "done",
+        reason: "stop",
+        message: assistantMessage(model, [{ type: "text", text: reply.text }]),
+      });
+      return stream;
+    },
+  );
+  const models = {
+    getModel: (provider: string, id: string) => catalog.getModel(provider, id),
+    streamSimple,
+  };
+  const modelsForRun: PiAgentRuntimeOptions["modelsForRun"] = () => models as never;
+  return { modelsForRun, streamSimple, calls };
+}
+
+async function collect(
+  runtime: PiAgentRuntime,
+  model: { apiKey?: string; oauthCredential?: string },
+) {
+  const events: AgentRuntimeEvent[] = [];
+  for await (const event of runtime.run(
+    {
+      botId: "b",
+      threadId: "t",
+      runId: `r-${Math.random().toString(36).slice(2)}`,
+      prompt: "oi",
+      instructions: "teste",
+      history: [],
+      tools: [],
+      model: { provider: "openrouter", id: "openai/gpt-4o-mini", ...model },
+      executeTool: async () => ({ ok: true }),
+    },
+    {
+      operationId: "1",
+      traceId: "1",
+      workspaceId: "w",
+      userId: "u",
+      signal: new AbortController().signal,
+    },
+  )) {
+    events.push(event);
+  }
+  return events;
+}
 
 describe("runtime event queue", () => {
   it("coalesces consecutive text deltas", () => {
@@ -198,6 +367,136 @@ describe("Pi agent runtime", () => {
     // Sharing a key makes the effect ledger answer the second command with the first result.
     expect(new Set(ids).size).toBe(2);
     expect(ids.every((id) => id.startsWith("r:shell"))).toBe(true);
+  });
+});
+
+describe("chamadas ao provedor", () => {
+  it("manda retry e timeout em toda chamada ao modelo", async () => {
+    const fake = scriptedModels([{ text: "olá" }]);
+    const events = await collect(new PiAgentRuntime({ modelsForRun: fake.modelsForRun }), {
+      apiKey: "sk-or-v1-abc",
+    });
+    expect(fake.streamSimple).toHaveBeenCalledOnce();
+    expect(fake.calls[0]).toMatchObject({
+      maxRetries: LLM_MAX_RETRIES,
+      maxRetryDelayMs: LLM_MAX_RETRY_DELAY_MS,
+      timeoutMs: LLM_TIMEOUT_MS,
+      apiKey: "sk-or-v1-abc",
+    });
+    expect(fake.calls[0]?.signal).toBeInstanceOf(AbortSignal);
+    expect(events).toContainEqual({ type: "text", text: "olá" });
+    expect(events.at(-1)).toEqual({ type: "done", text: "olá" });
+  });
+
+  it("aborta um provedor mudo e pede ao executor para tentar de novo", async () => {
+    const fake = scriptedModels([{ hang: true }]);
+    const events = await collect(
+      new PiAgentRuntime({ modelsForRun: fake.modelsForRun, idleTimeoutMs: 40 }),
+      { apiKey: "sk-or-v1-abc" },
+    );
+    expect(fake.calls[0]?.signal?.aborted).toBe(true);
+    expect(events).toContainEqual({
+      type: "error",
+      message: PROVIDER_STALLED_MESSAGE,
+      retryable: true,
+    });
+    expect(events.at(-1)).toEqual({ type: "done", text: PROVIDER_STALLED_MESSAGE });
+    expect(events.some((event) => event.type === "text")).toBe(false);
+  });
+
+  it("classifica um 429 do provedor como retryable, mas não um cancelamento", async () => {
+    const runtime = new PiAgentRuntime({
+      modelsForRun: () =>
+        ({
+          getModel: (provider: string, id: string) => catalog.getModel(provider, id),
+          streamSimple: () => {
+            throw new Error("429 Too Many Requests: rate limit exceeded");
+          },
+        }) as never,
+    });
+    const events = await collect(runtime, { apiKey: "sk-or-v1-abc" });
+    const error = events.find((event) => event.type === "error");
+    expect(error).toMatchObject({ retryable: true });
+    expect(error && "message" in error ? error.message : "").toMatch(/^Não consegui concluir: 429/);
+  });
+
+  it("o subagente usa a coleção do run e nunca recebe o token cru de uma assinatura", async () => {
+    const fake = scriptedModels([
+      {
+        toolCall: {
+          id: "call-1",
+          name: "run_subagent",
+          arguments: { name: "ajudante", task: "conta até 3" },
+        },
+      },
+      { text: "1 2 3" },
+      { text: "pronto" },
+    ]);
+    const events = await collect(new PiAgentRuntime({ modelsForRun: fake.modelsForRun }), {
+      apiKey: "sk-or-v1-cru",
+      oauthCredential: JSON.stringify({ type: "oauth", access: "tok", refresh: "r", expires: 0 }),
+    });
+    // Pai, subagente e pai de novo — todos na mesma coleção, todos sem chave por cima.
+    expect(fake.streamSimple).toHaveBeenCalledTimes(3);
+    expect(fake.calls.map((call) => call?.apiKey)).toEqual([undefined, undefined, undefined]);
+    expect(fake.calls.every((call) => call?.maxRetries === LLM_MAX_RETRIES)).toBe(true);
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: "subagent", status: "completed", result: "1 2 3" }),
+    );
+    expect(events.at(-1)).toEqual({ type: "done", text: "pronto" });
+    expect(JSON.stringify(fake.calls)).not.toContain("sk-or-v1-cru");
+  });
+});
+
+describe("watchIdle", () => {
+  function fakeAgent() {
+    const listeners: Array<(event: { type: string }) => void> = [];
+    return {
+      agent: {
+        subscribe: (listener: (event: { type: string }) => void) => {
+          listeners.push(listener);
+          return () => listeners.splice(listeners.indexOf(listener), 1);
+        },
+      } as unknown as Agent,
+      emit: (type: string) => {
+        for (const listener of listeners) listener({ type });
+      },
+    };
+  }
+
+  it("dispara só depois de um silêncio inteiro, e não enquanto uma ferramenta roda", () => {
+    vi.useFakeTimers();
+    try {
+      const { agent, emit } = fakeAgent();
+      const onIdle = vi.fn();
+      const stop = watchIdle(agent, 100, onIdle);
+      vi.advanceTimersByTime(80);
+      emit("message_update");
+      vi.advanceTimersByTime(80);
+      expect(onIdle).not.toHaveBeenCalled();
+      emit("tool_execution_start");
+      vi.advanceTimersByTime(1000);
+      expect(onIdle).not.toHaveBeenCalled();
+      emit("tool_execution_end");
+      vi.advanceTimersByTime(100);
+      expect(onIdle).toHaveBeenCalledOnce();
+      stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("parar o vigia cancela o relógio", () => {
+    vi.useFakeTimers();
+    try {
+      const { agent } = fakeAgent();
+      const onIdle = vi.fn();
+      watchIdle(agent, 50, onIdle)();
+      vi.advanceTimersByTime(200);
+      expect(onIdle).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

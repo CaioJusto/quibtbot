@@ -311,6 +311,45 @@ export async function deferRunForBusyBot(
   return true;
 }
 
+/** Quanto esperar antes de tentar o run de novo depois de um erro passageiro do provedor. */
+export const PROVIDER_RETRY_DELAY_MS = 5_000;
+
+/**
+ * Um 429, um 502 ou um socket pendurado do provedor não viram falha na primeira vez: o
+ * run volta para a fila e roda de novo uma única vez. A tentativa atual fica marcada como
+ * "retried"; se já houver uma, a falha vai para o chat como sempre.
+ */
+export async function requeueRunAfterProviderError(
+  deps: { prisma: PrismaClient; wakeup?: WakeupDriver },
+  input: { runId: string; fence: number; reason: string },
+): Promise<boolean> {
+  if (!deps.wakeup) return false;
+  const retried = await deps.prisma.attempt.count({
+    where: { runId: input.runId, status: "retried" },
+  });
+  if (retried >= 1) return false;
+  const requeue = await deps.prisma.run.updateMany({
+    where: { id: input.runId, leaseFence: input.fence, status: "running" },
+    data: { status: "queued", leaseOwner: null, leaseExpiresAt: null },
+  });
+  if (requeue.count !== 1) return false;
+  await deps.prisma.attempt
+    .updateMany({
+      where: { runId: input.runId, fence: input.fence, status: "running" },
+      data: { status: "retried", finishedAt: new Date(), error: input.reason },
+    })
+    .catch(() => undefined);
+  await deps.wakeup
+    .enqueue({
+      name: "run.continue",
+      payload: { runId: input.runId },
+      runAt: new Date(Date.now() + PROVIDER_RETRY_DELAY_MS),
+      jobKey: busyRetryJobKey(input.runId),
+    })
+    .catch((error) => console.error("run.continue", error));
+  return true;
+}
+
 /** FIFO: when a turn ends, the bot's oldest queued run gets its chance right away. */
 export async function wakeNextRunForBot(
   deps: { prisma: PrismaClient; wakeup?: WakeupDriver },
