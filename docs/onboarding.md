@@ -40,15 +40,17 @@ Abra o app e toque em **Começar agora**: a primeira conta pede só o seu nome �
 
 Depois do nome, o app vai direto às decisões — modelo, máquina e o primeiro bot. A tela da máquina confirma o Docker desta máquina; quem já instalou apontando para Box, E2B ou um supervisor remoto pula esse passo (a escolha já está feita, e continua em Ajustes → Máquina). Não há telas de apresentação no meio.
 
-Três jeitos. Pode pular e configurar depois, mas sem modelo o bot não responde.
+Três jeitos, nesta ordem na tela. Pode pular e configurar depois, mas sem modelo o bot não responde.
 
 | Jeito | O que fazer | Quem paga |
 | --- | --- | --- |
-| Chave OpenRouter | Crie conta em [openrouter.ai](https://openrouter.ai), copie a chave, cole no Quibt. | A sua conta OpenRouter |
+| Minha assinatura | Entre com ChatGPT Plus/Pro, GitHub Copilot ou SuperGrok. O app mostra um código para você colar no site deles. | A assinatura que você já paga |
+| Chave OpenRouter | Crie a chave em [openrouter.ai/keys](https://openrouter.ai/keys), copie e cole no Quibt. | A sua conta OpenRouter, por uso |
 | Modelo local | Instale [Ollama](https://ollama.com) (ou LM Studio). A URL padrão é `http://127.0.0.1:11434`. | Ninguém. Roda no seu PC |
-| Assinatura | Entre com ChatGPT Plus/Pro, GitHub Copilot ou SuperGrok. O app mostra um código para você colar no site deles. | A assinatura que você já paga |
 
-Na assinatura, **Continuar só libera depois que o login termina** — antes disso o botão diz “Entre na assinatura primeiro”. Salvar o provedor sem credencial fazia o bot responder “não tenho um modelo conectado” no primeiro recado.
+Na assinatura, **Continuar só libera depois que o login termina** — antes disso o botão diz “Entre na assinatura primeiro”. Salvar o provedor sem credencial fazia o bot responder “não tenho um modelo conectado” no primeiro recado. A aba só lista as três assinaturas acima: são as que o app sabe entrar.
+
+A chave é conferida no provedor **antes** de ser guardada. Colada errada, a tela diz “Chave recusada pelo OpenRouter”; sem saldo, “Sem crédito na OpenRouter”; com o Ollama fechado, “O Ollama não respondeu em http://127.0.0.1:11434”. Nada é salvo até o provedor confirmar — e aí aparece “Chave confirmada ✓”.
 
 O modelo sugerido evita os que a OpenAI recusa em conta ChatGPT (a família `codex-spark` só responde a quem paga por chave de API). Você troca no seletor de modelo dessa mesma tela.
 
@@ -97,7 +99,7 @@ Instalar põe containers, um container por computador de bot, três imagens e um
 | Sintoma | O que tentar |
 | --- | --- |
 | “Docker não responde” | Clique em **Começar instalação** novamente. No Mac o Quibt abre o Docker e espera automaticamente; confira apenas se há uma confirmação de senha do macOS atrás da janela. |
-| Bot não responde | Volte em modelo e cole a chave, ou confirme que o Ollama está aberto. |
+| Bot não responde | Toque em **Conectar modelo** no aviso da conversa (ou abra **Conta → Modelo**) e cole a chave, entre na assinatura, ou confirme que o Ollama está aberto. |
 | Tela preta no computador | Mande outra mensagem, ou toque em Assumir controle. No Docker, o desktop só sobe quando o bot precisa dele. |
 | Celular não conecta | No computador, abra **Conta → Conectar o celular**. No app móvel, **Ler o QR do computador** é a primeira opção. Os dois aparelhos devem estar no mesmo Wi-Fi; no iPhone, aceite **Rede Local** ou libere em **Ajustes → Privacidade e Segurança → Rede Local → Quibt Bot**. Fora dessa rede, ative o acesso por Tailscale no computador e gere outro QR. |
 | Quero entrar em outro aparelho | Num aparelho já conectado: **Conta → Celular → Liberar entrada**. Leia o QR ou digite o código de oito caracteres em **Entrar com código**. Vale cinco minutos, uma vez só. |

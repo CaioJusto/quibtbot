@@ -4,10 +4,12 @@ import { AccountSettingsBody } from "./Account";
 import { MachineSettingsBody } from "./MachineSettings";
 import { PhoneConnectBody } from "./PhoneConnect";
 
-export type SettingsPage = "account" | "machine" | "phone";
+/** "models" é a Conta aberta direto na aba Modelo — o destino de "Conectar modelo". */
+export type SettingsPage = "account" | "models" | "machine" | "phone";
 
 const TITLES: Record<SettingsPage, string> = {
   account: "Conta",
+  models: "Modelo",
   machine: "Máquina",
   phone: "Conectar o celular",
 };
@@ -100,7 +102,10 @@ function PanelPage({
   if (page === "phone") return <PhoneConnectBody onConnected={onDone} />;
   return (
     <>
-      <AccountSettingsBody onSignedOut={onSignedOut} />
+      <AccountSettingsBody
+        initialTab={page === "models" ? "models" : "profile"}
+        onSignedOut={onSignedOut}
+      />
       {/* Atalhos para as outras páginas do mesmo painel: `>` leva, "Voltar" traz. */}
       <div className="qb-settings-panel__links">
         <button type="button" className="qb-settings-panel__link" onClick={() => onOpen("machine")}>

@@ -209,9 +209,13 @@ export function AccountSettingsBody({
       // antiga: quem troca de provedor está trocando o que roda, não colecionando chaves.
       await rpc.models.setDefault({ provider, modelId: selectedModel.id });
       setCredentials(await rpc.models.credentials().catch(() => []));
-      setNotice(`Agora os bots usam ${selectedModel.label ?? selectedModel.id}.`);
+      // O servidor conferiu a chave no provedor antes de gravar: dá para afirmar.
+      setNotice(
+        `${tokenSource === "local" ? "Servidor confirmado ✓" : "Chave confirmada ✓"} Agora os bots usam ${selectedModel.label ?? selectedModel.id}.`,
+      );
       setApiKey("");
     } catch (err) {
+      // Chave recusada ou sem crédito: o probe explica em português e nada foi gravado.
       setError(err instanceof Error ? err.message : "Não foi possível conectar o modelo");
     } finally {
       setPending(null);
@@ -437,11 +441,12 @@ export function AccountSettingsBody({
 
           <fieldset className="qb-account__tabs">
             <legend className="sr-only">Fonte do modelo</legend>
+            {/* Mesma ordem do onboarding: a assinatura que a pessoa já paga vem primeiro. */}
             {(
               [
+                ["subscription", "Minha assinatura"],
                 ["key", "Chave OpenRouter"],
                 ["local", "Modelo local"],
-                ["subscription", "Minha assinatura"],
               ] as Array<[TokenSource, string]>
             ).map(([mode, title]) => (
               <button
@@ -500,6 +505,20 @@ export function AccountSettingsBody({
                   className={field}
                 />
               </label>
+              {provider === "openrouter" ? (
+                <p className="qb-account__hint">
+                  Crie a chave em{" "}
+                  <a
+                    href="https://openrouter.ai/keys"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[var(--qb-accent)] underline"
+                  >
+                    openrouter.ai/keys
+                  </a>
+                  . Você paga por uso na sua conta OpenRouter.
+                </p>
+              ) : null}
               <button
                 type="button"
                 disabled={pending !== null || !apiKey.trim() || !selectedModel}

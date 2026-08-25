@@ -89,3 +89,38 @@ describe("onboarding wiring", () => {
     expect(src).toContain("machineStepNeeded({ sandbox: runningSandbox })");
   });
 });
+
+describe("etapa do modelo", () => {
+  it("põe a assinatura primeiro, a chave OpenRouter depois e o modelo local por último", () => {
+    const subscription = src.indexOf('title="Minha assinatura"');
+    const key = src.indexOf('title="Chave OpenRouter"');
+    const local = src.indexOf('title="Modelo local"');
+    expect(subscription).toBeGreaterThan(-1);
+    expect(subscription).toBeLessThan(key);
+    expect(key).toBeLessThan(local);
+    // E o cartão que começa marcado segue a mesma ordem.
+    expect(src).toContain("initialTokenSource({");
+  });
+
+  it("promete só as assinaturas que o app sabe entrar: nada de Claude", () => {
+    expect(src).not.toContain("Claude");
+    expect(src).toContain("ChatGPT Plus/Pro, Copilot ou SuperGrok");
+    expect(src).toContain('entry.signIn === "device-code"\n    ? "Entre com a assinatura');
+  });
+
+  it("diz onde a chave OpenRouter nasce e quem paga", () => {
+    expect(src).toContain('href="https://openrouter.ai/keys"');
+    expect(src).toContain("Você paga por uso na sua conta OpenRouter");
+  });
+
+  it("mostra a recusa do provedor junto do campo e confirma a chave boa", () => {
+    expect(src).toContain('setKeyStatus({ kind: "ok" })');
+    expect(src).toContain("Chave confirmada ✓");
+    expect(src).toContain('kind: "error",');
+    expect(src).toContain("Não foi possível confirmar a chave");
+    // A recusa não vira o erro genérico do rodapé nem avança a etapa.
+    expect(src).toContain(
+      "setKeyStatus(null);\n          try {\n            await rpc.models.connect({",
+    );
+  });
+});

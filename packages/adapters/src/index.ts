@@ -32,6 +32,7 @@ export * from "./lifecycle-cleanup-intent.js";
 export * from "./llm-retry.js";
 export * from "./mcp-emulator.js";
 export * from "./mcp-http.js";
+export * from "./model-probe.js";
 export * from "./peer-wait.js";
 export * from "./permissions.js";
 export * from "./pi-models.js";

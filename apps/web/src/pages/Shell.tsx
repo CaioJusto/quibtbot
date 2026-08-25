@@ -20,6 +20,7 @@ import {
   formatCron,
   isPlanLimitError,
   lessonPrompt,
+  needsModelConnection,
   presetFromCron,
   startLiveFeed,
   startPolling,
@@ -89,7 +90,7 @@ import { Inbox } from "./Inbox";
 import { BurstSummary, MessageView } from "./MessageView";
 import { PluginsOverlay } from "./PluginsOverlay";
 import { RoutineSchedule } from "./RoutineSchedule";
-import { SettingsPanel } from "./SettingsPanel";
+import { type SettingsPage, SettingsPanel } from "./SettingsPanel";
 import { WebhooksPanel } from "./WebhooksPanel";
 
 type Panel =
@@ -167,7 +168,7 @@ export function ShellPage() {
   const [computer, setComputer] = useState<ComputerStatus | null>(null);
   const [pluginsOpen, setPluginsOpen] = useState(false);
   /** Máquina e celular abrem sobre o app, como plugins — não como página à parte. */
-  const [settingsModal, setSettingsModal] = useState<"machine" | "phone" | "account" | null>(null);
+  const [settingsModal, setSettingsModal] = useState<SettingsPage | null>(null);
   const [accountOpen, setAccountOpen] = useState(false);
   const [booting, setBooting] = useState(false);
   const [routineDraft, setRoutineDraft] = useState({
@@ -1941,6 +1942,20 @@ export function ShellPage() {
                   Ver planos
                 </button>
               ) : null}
+              {/* Modelo ausente, chave recusada ou sem crédito: o conserto é um só lugar,
+                  Conta → Modelo. Sem o botão a pessoa lia "401" e ficava parada. */}
+              {needsModelConnection(actionError.message) ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActionError(null);
+                    setSettingsModal("models");
+                  }}
+                  className="font-semibold text-[#8F1712]"
+                >
+                  Conectar modelo
+                </button>
+              ) : null}
             </div>
           ) : null}
           {attachments.length || attaching || transcribing.state !== "idle" ? (
@@ -2640,6 +2655,10 @@ export function ShellPage() {
             setAccountOpen(false);
             if (billing?.enabled) navigate("/billing");
             else navigate("/settings/machine");
+          }}
+          onModel={() => {
+            setAccountOpen(false);
+            setSettingsModal("models");
           }}
           onMachine={() => {
             setAccountOpen(false);

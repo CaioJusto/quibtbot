@@ -34,6 +34,23 @@ describe("mobile onboarding screen", () => {
     expect(screen).toContain("models/connect");
   });
 
+  it("põe a assinatura primeiro, a chave OpenRouter depois e o modelo local por último", () => {
+    const subscription = screen.indexOf('title="Minha assinatura"');
+    const key = screen.indexOf('title="Chave OpenRouter"');
+    const local = screen.indexOf('title="Modelo local"');
+    expect(subscription).toBeGreaterThan(-1);
+    expect(subscription).toBeLessThan(key);
+    expect(key).toBeLessThan(local);
+    // O cartão que começa marcado segue a mesma regra do web (@quibt/core).
+    expect(screen).toContain("initialTokenSource({");
+    expect(screen).not.toContain("Claude");
+  });
+
+  it("diz onde a chave OpenRouter nasce e quem paga", () => {
+    expect(screen).toContain('Linking.openURL("https://openrouter.ai/keys")');
+    expect(screen).toContain("Você paga por uso na sua conta OpenRouter");
+  });
+
   it("lets the owner pick Docker, VPS, E2B or Box before the first bot", () => {
     expect(screen).toContain("MachineSettingsBody");
     expect(screen).toContain('step === "machine"');

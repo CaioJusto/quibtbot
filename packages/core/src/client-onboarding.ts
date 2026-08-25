@@ -3,9 +3,26 @@ import type { QuibtEdition } from "./edition.js";
 
 export type ClientOnboardingStep = "plan" | "model" | "machine" | "bot";
 
-/** What the chat shows when a turn has no model key and no subscription. */
+/**
+ * What the chat shows when a turn has no model key and no subscription. It names the
+ * two places that really exist: the "Conectar modelo" button next to this error and
+ * Conta → Modelo (the menu never had a "Conta" model item to paste a key into).
+ */
 export const MISSING_MODEL_MESSAGE =
-  "Não tenho um modelo conectado. Cole uma chave em Conta, ou volte no onboarding.";
+  "Não tenho um modelo conectado. Toque em Conectar modelo, ou vá em Conta → Modelo.";
+
+/**
+ * Erros de chave, crédito ou modelo ausente que um botão "Conectar modelo" resolve.
+ * O run.failed chega cru do provedor ("401 Unauthorized", "insufficient credits"); o
+ * probe do connect já chega em português. Todos caem no mesmo lugar: Conta → Modelo.
+ */
+const MODEL_CONNECTION_ERROR =
+  /não tenho um modelo|provider is not configured|chave recusada|sem crédito|\b40[12]\b|unauthorized|invalid api key|incorrect api key|authentication|insufficient credits|run out of credits|spending-limit|no auth credentials/i;
+
+export function needsModelConnection(message: string | null | undefined): boolean {
+  if (!message) return false;
+  return MODEL_CONNECTION_ERROR.test(message);
+}
 
 /**
  * Docker is the default install path — still confirm it once so the owner sees
@@ -50,12 +67,17 @@ export type ProviderEntry = {
   signIn?: "device-code";
 };
 
-/** Providers that can actually pay for a model in the chosen way. */
+/**
+ * Providers that can actually pay for a model in the chosen way.
+ *
+ * A aba Assinatura lista só quem tem o login implementado no app (device code:
+ * ChatGPT Plus/Pro, Copilot, SuperGrok). O catálogo do Pi marca outros provedores como
+ * assinatura, mas sem fluxo de login o "Continuar" gravava um provedor sem credencial
+ * e o bot nascia mudo.
+ */
 export function providersForMode<T extends ProviderEntry>(providers: T[], mode: TokenSource): T[] {
   if (mode === "subscription") {
-    return providers.filter(
-      (entry) => entry.subscription || entry.signIn === "device-code" || entry.auth === "oauth",
-    );
+    return providers.filter((entry) => entry.signIn === "device-code");
   }
   if (mode === "local") {
     return providers.filter((entry) => LOCAL_PROVIDERS.has(entry.provider));
@@ -77,9 +99,27 @@ export function providersForMode<T extends ProviderEntry>(providers: T[], mode: 
  */
 export function modeForProvider(entry: ProviderEntry): TokenSource {
   if (LOCAL_PROVIDERS.has(entry.provider)) return "local";
-  if (entry.subscription || entry.signIn === "device-code") return "subscription";
-  if (entry.auth === "oauth" && entry.provider !== "openrouter") return "subscription";
+  if (entry.signIn === "device-code") return "subscription";
   return "key";
+}
+
+/**
+ * Which card starts selected on the model step. "Minha assinatura" comes first and is
+ * the default when the catalog has a sign-in to offer — unless this account already
+ * connected the deploy's default provider, which then opens on its own card.
+ */
+export function initialTokenSource<T extends ProviderEntry>(input: {
+  catalog: T[];
+  preferred?: T;
+  connected: Iterable<string>;
+  fallback: TokenSource;
+}): TokenSource {
+  if (input.fallback === "plan") return "plan";
+  const connected = new Set(input.connected);
+  if (input.preferred && connected.has(input.preferred.provider)) {
+    return modeForProvider(input.preferred);
+  }
+  return input.catalog.some((entry) => entry.signIn === "device-code") ? "subscription" : "key";
 }
 
 export function localModelUrl(provider: string): string {
