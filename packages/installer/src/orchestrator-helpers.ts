@@ -142,19 +142,14 @@ export async function deploymentNeedsFirstOwner(
   return probe.needsFirstOwner;
 }
 
-export function apiReadyUrl(envValues: Record<string, string>, publicUrl: string): string {
-  const api = envValues.API_URL?.replace(/\/+$/, "");
-  if (api) return `${api}/ready`;
-  try {
-    const origin = new URL(publicUrl);
-    origin.port = "3100";
-    return `${origin.toString().replace(/\/$/, "")}/ready`;
-  } catch {
-    return "http://127.0.0.1:3100/ready";
-  }
-}
-
+/**
+ * A API que o INSTALADOR sonda, sempre no próprio host. `API_URL` é o endereço dos
+ * clientes (navegador, celular) e numa instalação pública vira `https://…sslip.io` —
+ * atrás do Caddy, que só sobe depois da migração. Sondar esse endereço aqui derrubava
+ * o passo `health` em toda instalação pública: nada servia https ainda.
+ */
 export function apiBaseUrl(envValues: Record<string, string>, publicUrl: string): string {
+  if (envValues.QUIBT_PUBLIC_HOST) return "http://127.0.0.1:3100";
   const api = envValues.API_URL?.replace(/\/+$/, "");
   if (api) return api;
   try {
@@ -164,6 +159,10 @@ export function apiBaseUrl(envValues: Record<string, string>, publicUrl: string)
   } catch {
     return "http://127.0.0.1:3100";
   }
+}
+
+export function apiReadyUrl(envValues: Record<string, string>, publicUrl: string): string {
+  return `${apiBaseUrl(envValues, publicUrl)}/ready`;
 }
 
 export const CLAIMED_PAIRING_INSTRUCTION =
