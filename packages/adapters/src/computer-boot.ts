@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises";
 import type {
   AdapterContext,
   AgentHomeStore,
+  ComputerPresence,
   ComputerRef,
   SandboxProvider,
   WakeupDriver,
@@ -35,6 +36,7 @@ import {
   runProvisionWithTimeout,
 } from "./computer-boot-provision.js";
 import { scheduleComputerSleep } from "./computer-idle.js";
+import { isComputerMissingError } from "./docker-sandbox.js";
 import { resolveAgentHomePath } from "./home.js";
 import {
   claimComputerSessionStartGate,
@@ -240,18 +242,20 @@ export async function ensureWorkspaceComputer(
 
   let existing = await deps.prisma.computer.findUnique({ where: { workspaceId } });
   const kind = existing?.kind ?? envKind;
-  if (
-    existing?.state === "running" &&
-    existing.providerRef &&
-    !existing.bootClaimToken &&
-    deps.sandbox.exists &&
-    !(await deps.sandbox.exists(computerRefFromComputer(existing as never), context))
-  ) {
-    // O container do workspace sumiu (imagem nova, Docker reiniciado, `rm`): a linha
-    // "running" apontava para nada, e uma sessão suspensa que acordava aqui ganhava um
-    // computador fantasma — cada comando voltava "computer not found". Esquece e provisiona.
-    await forgetVanishedWorkspaceComputer(deps.prisma, existing.id);
-    existing = await deps.prisma.computer.findUnique({ where: { workspaceId } });
+  if (existing?.state === "running" && existing.providerRef && !existing.bootClaimToken) {
+    const ref = computerRefFromComputer(existing as never);
+    const presence = await computerPresence(deps, ref, context);
+    const gone =
+      presence === "missing" ||
+      (presence === "stopped" && !(await reviveStoppedWorkspaceComputer(deps, ref, context)));
+    if (gone) {
+      // O container do workspace sumiu (imagem nova, `rm`), ou parou e não deu para
+      // religar este mesmo: a linha "running" apontava para nada, e uma sessão suspensa
+      // que acordava aqui ganhava um computador fantasma — cada comando voltava
+      // "computer not found". Esquece e provisiona (que retoma o container se ainda existir).
+      await forgetVanishedWorkspaceComputer(deps.prisma, existing.id);
+      existing = await deps.prisma.computer.findUnique({ where: { workspaceId } });
+    }
   }
   if (existing?.state === "running" && existing.providerRef) {
     if (existing.bootClaimToken) {
@@ -588,20 +592,30 @@ export async function bootComputer(
   });
   if (!existing) throw new Error("Bot is missing its desktop session");
 
-  if (
-    existing.state === "running" &&
-    workspaceProviderRef(existing) &&
-    (await workspaceComputerVanished(deps, existing, context))
-  ) {
-    // O container sumiu por baixo do banco (imagem nova, Docker reiniciado, `rm` manual):
-    // sem isto cada comando voltava "computer not found" até o sono por ociosidade zerar a
-    // linha. Esquece o que está escrito e segue pelo caminho normal de boot, que recria.
-    await forgetVanishedWorkspaceComputer(deps.prisma, existing.computerId);
-    existing = await deps.prisma.desktopSession.findUnique({
-      where: { botId },
-      include: { computer: true },
-    });
-    if (!existing) throw new Error("Bot is missing its desktop session");
+  if (existing.state === "running" && workspaceProviderRef(existing)) {
+    const presence = await workspaceComputerPresence(deps, existing, context);
+    // Parado (reboot, `docker stop`) não é sumido: o container está lá, com a casa do bot
+    // dentro. Religa no lugar e a linha continua "running" — o atalho abaixo só pede a
+    // tela de novo, que o supervisor reabre. Nada de esquecer a sessão nem provisionar.
+    const gone =
+      presence === "missing" ||
+      (presence === "stopped" &&
+        !(await reviveStoppedWorkspaceComputer(deps, computerRefFromSession(existing), {
+          ...context,
+          botId: existing.botId,
+        })));
+    if (gone) {
+      // O container sumiu por baixo do banco (imagem nova, `rm` manual), ou parou e não
+      // deu para religar este mesmo: sem isto cada comando voltava "computer not found"
+      // até o sono por ociosidade zerar a linha. Esquece o que está escrito e segue pelo
+      // caminho normal de boot, que recria (ou retoma, se o container ainda existir).
+      await forgetVanishedWorkspaceComputer(deps.prisma, existing.computerId);
+      existing = await deps.prisma.desktopSession.findUnique({
+        where: { botId },
+        include: { computer: true },
+      });
+      if (!existing) throw new Error("Bot is missing its desktop session");
+    }
   }
 
   if (existing.state === "running" && workspaceProviderRef(existing)) {
@@ -642,16 +656,51 @@ export async function bootComputer(
   return bootPerBotDesktopSession(deps, botId, existing, homePath, context, options);
 }
 
-/** Only a workspace-scoped computer (docker / VPS) that the provider says is gone. */
-async function workspaceComputerVanished(
+/** Onde o provedor está em relação ao computador; "unknown" quando ele não sabe dizer. */
+async function computerPresence(
+  deps: Pick<BootComputerDeps, "sandbox">,
+  ref: ComputerRef,
+  context: AdapterContext,
+): Promise<ComputerPresence> {
+  if (deps.sandbox.presence) return deps.sandbox.presence(ref, context);
+  if (deps.sandbox.exists) return (await deps.sandbox.exists(ref, context)) ? "unknown" : "missing";
+  return "unknown";
+}
+
+/** Only a workspace-scoped computer (docker / VPS) can be stopped or gone under the row. */
+async function workspaceComputerPresence(
   deps: Pick<BootComputerDeps, "sandbox">,
   session: DesktopSessionWithComputer,
   context: AdapterContext,
+): Promise<ComputerPresence> {
+  if (!isWorkspaceScopedSandbox(session.computer.kind)) return "unknown";
+  return computerPresence(deps, computerRefFromSession(session), {
+    ...context,
+    botId: session.botId,
+  });
+}
+
+/**
+ * Religa no lugar um container que só está parado: mesma casa, mesmas linhas no banco.
+ * Devolve `false` quando não deu para religar *este* container — o provedor não sabe
+ * (supervisor antigo, sem a rota), o container sumiu no meio, ou voltou com outro id —
+ * e aí o caminho normal de boot provisiona, que também retoma um container existente.
+ * Qualquer outra falha (Docker fechado) sobe com a mensagem: provisionar de novo
+ * esbarraria na mesma parede, e a pessoa precisa ler "abra o Docker".
+ */
+async function reviveStoppedWorkspaceComputer(
+  deps: Pick<BootComputerDeps, "sandbox">,
+  ref: ComputerRef,
+  context: AdapterContext,
 ): Promise<boolean> {
-  if (!isWorkspaceScopedSandbox(session.computer.kind)) return false;
-  if (!deps.sandbox.exists) return false;
-  const ref = computerRefFromSession(session);
-  return !(await deps.sandbox.exists(ref, { ...context, botId: session.botId }));
+  if (!deps.sandbox.start) return false;
+  try {
+    const started = await deps.sandbox.start(ref, context);
+    return started.id === ref.id;
+  } catch (error) {
+    if (isComputerMissingError(error)) return false;
+    throw error;
+  }
 }
 
 /**

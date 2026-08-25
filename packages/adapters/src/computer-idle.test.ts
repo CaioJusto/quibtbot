@@ -2,6 +2,7 @@ import type { SandboxProvider } from "@quibt/adapter-kit";
 import type { PrismaClient } from "@quibt/db";
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_SANDBOX_IDLE_MS, sandboxIdleMs, sleepComputerIfIdle } from "./computer-idle.js";
+import { SupervisorRequestError } from "./docker-sandbox.js";
 import {
   e2bCreateOptions,
   isUnrecoverableSandboxError,
@@ -314,6 +315,24 @@ describe("sleepComputerIfIdle", () => {
       }),
     );
   });
+
+  it.each(["docker", "box"] as const)(
+    "%s: stop que responde 404 marca suspended em vez de oscilar",
+    async (kind) => {
+      // Container parado depois de um reboot: o provedor não tem a sessão para parar. Antes
+      // o erro subia, a linha ficava "suspending" com o claim, o recover devolvia a
+      // "running" e o sono tentava de novo — para sempre.
+      const { prisma, sandbox, stop, desktop } = makeIdleHarness(kind);
+      stop.mockRejectedValueOnce(
+        new SupervisorRequestError("stop", 404, '{"error":"session not found"}'),
+      );
+      await sleepComputerIfIdle({ prisma, sandbox }, "bot-a");
+      expect(stop).toHaveBeenCalledTimes(1);
+      expect(desktop.state).toBe("suspended");
+      expect(desktop.bootClaimToken).toBeNull();
+      expect(desktop.controlHolder).toBe("none");
+    },
+  );
 
   it("keeps suspending claim and pending stop intent when provider stop fails", async () => {
     const { prisma, sandbox, stop, desktop, orphanCreate } = makeIdleHarness("box");

@@ -17,6 +17,7 @@ import {
   destroyBot,
   type EncryptedSecretStore,
   ensureDesktopScreenUrl,
+  isComputerAlreadyStoppedError,
   lessonCaptureCommand,
   lessonStartCommand,
   listPiCatalog,
@@ -1169,23 +1170,30 @@ export function createRouter(deps: RouterDeps) {
         const computer = desktop?.computer;
         const providerRef = desktop ? workspaceProviderRef(desktop) : undefined;
         if (desktop && computer && providerRef) {
-          await deps.sandbox.stop(
-            {
-              id: providerRef,
-              botId: bot.id,
-              kind: computer.kind as never,
-              providerRef,
-              display: desktop.display,
-              screenUrl: desktop.screenUrl ?? undefined,
-            },
-            {
-              operationId: "stop",
-              traceId: "stop",
-              workspaceId: context.actor.workspaceId,
-              userId: context.actor.userId,
-              signal: new AbortController().signal,
-            },
-          );
+          try {
+            await deps.sandbox.stop(
+              {
+                id: providerRef,
+                botId: bot.id,
+                kind: computer.kind as never,
+                providerRef,
+                display: desktop.display,
+                screenUrl: desktop.screenUrl ?? undefined,
+              },
+              {
+                operationId: "stop",
+                traceId: "stop",
+                workspaceId: context.actor.workspaceId,
+                userId: context.actor.userId,
+                signal: new AbortController().signal,
+              },
+            );
+          } catch (error) {
+            // O provedor já não tem o que parar (container parado depois de um reboot,
+            // bot que nunca abriu a tela): para quem apertou "Desligar", já está
+            // desligado. Antes a rota lançava aqui e o banco seguia dizendo "ligado".
+            if (!isComputerAlreadyStoppedError(error)) throw error;
+          }
         }
         await deps.prisma.desktopSession.update({
           where: { botId: bot.id },

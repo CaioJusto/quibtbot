@@ -33,6 +33,15 @@ import type {
   WakeupJob,
 } from "./types.js";
 
+/**
+ * Onde o provedor está em relação a um computador que já provisionou. "stopped" é um
+ * container que existe mas não roda (reboot, `docker stop`): dá para religar no lugar,
+ * com `start`, sem provisionar de novo nem mexer nas linhas do banco. "unknown" é o
+ * provedor sem resposta (rede, supervisor reiniciando) — e nunca vira motivo para
+ * derrubar uma sessão boa.
+ */
+export type ComputerPresence = "running" | "stopped" | "missing" | "unknown";
+
 export interface SandboxProvider {
   describe(): AdapterDescriptor<SandboxCapabilities>;
   provision(
@@ -57,11 +66,20 @@ export interface SandboxProvider {
   ): Promise<void>;
   snapshot(computer: ComputerRef, context: AdapterContext): Promise<SnapshotRef>;
   /**
-   * Whether the provider still has this computer at all. `false` only when it is
-   * positively gone (the container was removed, the box deleted); a provider that cannot
-   * answer must say `true` so a blip never tears down a healthy session.
+   * Whether the provider can still serve this computer as it stands. `false` only when
+   * it is positively gone (the container was removed, the box deleted) or stopped and
+   * waiting for a boot; a provider that cannot answer must say `true` so a blip never
+   * tears down a healthy session. Callers that need to tell "stopped" from "gone" use
+   * `presence`.
    */
   exists?(computer: ComputerRef, context: AdapterContext): Promise<boolean>;
+  /** Finer-grained `exists`: see {@link ComputerPresence}. */
+  presence?(computer: ComputerRef, context: AdapterContext): Promise<ComputerPresence>;
+  /**
+   * Religa no lugar um computador que `presence` disse "stopped": mesma casa, mesmo id
+   * quando possível. Devolve a referência viva; lança quando não deu (Docker fechado).
+   */
+  start?(computer: ComputerRef, context: AdapterContext): Promise<ComputerRef>;
   stop(computer: ComputerRef, context: AdapterContext): Promise<void>;
   destroy(computer: ComputerRef, context: AdapterContext): Promise<void>;
   /** Removes a bot session; when `preserveComputer` is true the shared container stays up. */

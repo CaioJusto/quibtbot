@@ -66,6 +66,7 @@ segunda janela (nem morre no "No usable sandbox" do Chromium puro em container).
 **O que o sistema faz de verdade**
 
 - O supervisor (`:7091`) cria **um** container por workspace, com cota de CPU/RAM, home persistente e rede própria quando `SANDBOX_SCREEN_NETWORK=internal`.
+- O container nasce com `restart: unless-stopped`: depois de reiniciar a máquina ou o Docker ele volta sozinho, e um `docker stop` dado na mão é desfeito pelo próximo comando do bot ou ao abrir a tela. As janelas de antes se perdem; a pasta de casa, não.
 - `quibt-session start <botId> <display>` sobe Xvfb, gerenciador de janelas, Chromium (perfil persistente no volume privado `/quibt-desktops/<bot>/chrome`) e noVNC numa porta por display.
 - A barra embaixo da mesa é o `tint2` (`/etc/quibt/tint2rc`), com três atalhos: **Navegador** (Chromium), **Terminal** (xterm) e **Arquivos** (pcmanfm, abrindo `/home/quibt`). Cada um vem de um `.desktop` em `/usr/share/applications`; mexer neles pede `pnpm sandbox:build` para a imagem voltar a bater.
 - `DISPLAY` é da sessão, nunca do pedido do bot — um bot não dirige a tela do colega.

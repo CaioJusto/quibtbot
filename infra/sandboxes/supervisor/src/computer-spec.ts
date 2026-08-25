@@ -10,6 +10,13 @@ export const SCREEN_HOST = process.env.SANDBOX_SCREEN_HOST ?? "127.0.0.1";
 export const SCREEN_BIND_HOST = process.env.SANDBOX_SCREEN_BIND_HOST ?? "127.0.0.1";
 
 export const MAX_WORKSPACE_SESSIONS = 32;
+
+/**
+ * O container do workspace volta sozinho depois de reiniciar a máquina ou o Docker.
+ * `unless-stopped`, e não `always`: um `docker stop` dado de propósito é respeitado até
+ * o próximo comando do bot religar (o supervisor faz isso em `/exec` e ao abrir a tela).
+ */
+export const WORKSPACE_RESTART_POLICY = "unless-stopped";
 export const NOVNC_PORT_BASE = 6080;
 export const VNC_PORT_BASE = 5900;
 export const COMPUTER_MEMORY_BYTES = 2 * 1024 * 1024 * 1024;
@@ -120,6 +127,9 @@ export function containerCreateOptions(input: ComputerCreateInput) {
       ],
       ReadonlyPaths: ["/usr/share/novnc"],
       AutoRemove: false,
+      // Sem isto o container ficava `Exited` depois de um reboot: todo comando do bot
+      // falhava, a tela dizia "ligado" e só `docker start` na mão resolvia.
+      RestartPolicy: { Name: WORKSPACE_RESTART_POLICY },
       NetworkMode: input.networkMode ?? "bridge",
     },
     WorkingDir: "/home/quibt",
