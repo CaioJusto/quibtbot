@@ -150,7 +150,7 @@ curl -s http://127.0.0.1:3100/health
 curl -s http://127.0.0.1:3100/ready
 ```
 
-`/health` should show `"runtime":"pi"`, `"sandbox":"docker"`, and `"wakeup":"graphile"`. `/ready` checks that Postgres answers.
+`/health` should show `"runtime":"pi"`, `"sandbox":"docker"`, `"wakeup":"graphile"`, and `"worker":{"alive":true,...}` — the worker writes a heartbeat every 15 s; `alive:false` means nothing will pick up the queue, and the app says so in the chat. `/ready` checks that Postgres answers.
 
 Product defaults are Pi + Docker + Graphile. `pnpm verify:fast` pins emulators (`AGENT_RUNTIME=scripted`, `SANDBOX_PROVIDER=fake`, `WAKEUP_DRIVER=memory`) so default tests never call live models or Composio.
 
@@ -186,8 +186,8 @@ With `SANDBOX_SCREEN_NETWORK=internal` (what `infra/compose` sets) each workspac
 - Packaged releases pin the three Quibt container images by immutable digest. Source checkout
   Compose builds the code in the checkout. The API host port is loopback-only; browsers and phones
   reach `/api`, `/rpc`, and `/novnc` through the web origin.
-- Generated self-host environments keep registration closed (`SIGNUPS_ENABLED=false`) until the
-  owner explicitly opens it. Never expose Postgres, the supervisor, or port `3100` publicly.
+- Registration is closed by default (`SIGNUPS_ENABLED=false`) on every path until the owner
+  explicitly opens it. Never expose Postgres, the supervisor, or port `3100` publicly.
 - Docker and `remote-supervisor` are for a trusted, single-owner workspace. Bots in one workspace
   share a Unix/container boundary. Use one sandbox/VM per bot (E2B or Box) when bots or tenants are
   mutually untrusted.

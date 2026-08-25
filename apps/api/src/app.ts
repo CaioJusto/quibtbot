@@ -9,6 +9,7 @@ import {
   type DestinationEmulator,
   EncryptedSecretStore,
   ExpoPushProvider,
+  failRunsQueuedWithoutWorker,
   GraphileWakeupDriver,
   InMemoryWakeupDriver,
   isComposioEnabled,
@@ -27,7 +28,9 @@ import {
   emailAllowed,
   normalizeRemoteConnectApi,
   parseAllowlist,
+  QUEUED_RUN_RECONCILE_MS,
   reapControl,
+  signupsOpen,
 } from "@quibt/core";
 import { isAuthorizedBootstrapSecret } from "@quibt/core/bootstrap-invite-server";
 import {
@@ -53,6 +56,7 @@ import { createBilling, createStripeGateway } from "./billing.js";
 import {
   claimBootstrapInvite,
   claimBootstrapInviteToken,
+  deploymentNeedsFirstOwner,
   mintBootstrapInvite,
   prepareFirstOwnerEnrollment,
 } from "./bootstrap.js";
@@ -92,6 +96,7 @@ import {
   WebhookPayloadError,
   webhookPrompt,
 } from "./webhooks.js";
+import { createWorkerPresenceReader } from "./worker-presence.js";
 
 export { isTrustedOrigin } from "./origins.js";
 
@@ -139,10 +144,16 @@ export async function createApp(overrides: CreateAppOverrides = {}): Promise<App
     : createDb(env.databaseUrl);
   const { prisma } = created;
   created.pool?.on("error", () => undefined);
+  // O interruptor de cadastro mora em `deployment_settings` e nasce fechado; mas quem instala
+  // mexe no .env, não no banco. Com SIGNUPS_ENABLED definido, o .env manda nos dois portões a
+  // cada subida (é assim que se abre — ou fecha — sem tela); sem ele, vale o que está salvo.
+  const signupsFromEnv =
+    env.signupsEnabled === undefined ? undefined : signupsOpen(env.signupsEnabled);
+  const signupsPatch = signupsFromEnv === undefined ? {} : { signupsEnabled: signupsFromEnv };
   await prisma.deploymentSettings.upsert({
     where: { id: "default" },
-    create: { id: "default" },
-    update: {},
+    create: { id: "default", ...signupsPatch },
+    update: signupsPatch,
   });
   await prisma.deploymentClaim.upsert({
     where: { id: "default" },
@@ -294,6 +305,25 @@ export async function createApp(overrides: CreateAppOverrides = {}): Promise<App
     });
   }
 
+  // Com Graphile, quem executa os runs é o processo do worker: a API só o enxerga pelo
+  // batimento. Com o driver em memória, a própria API é o worker.
+  const workerPresence = createWorkerPresenceReader({
+    prisma,
+    inProcess: wakeupKind !== "graphile",
+  });
+  // Reconciliador leve: um run parado na fila sem worker vira erro legível em vez de
+  // silêncio. O reaper do worker não serve para isso — ele roda no worker que não subiu.
+  const queueReconciler =
+    wakeupKind === "graphile"
+      ? setInterval(() => {
+          void failRunsQueuedWithoutWorker({
+            prisma,
+            workerSeenAt: () => workerPresence.seenAt(),
+          }).catch((error) => console.error("queued run reconcile", error));
+        }, QUEUED_RUN_RECONCILE_MS)
+      : undefined;
+  queueReconciler?.unref();
+
   const billing = env.billingEnabled
     ? createBilling({
         prisma,
@@ -334,6 +364,7 @@ export async function createApp(overrides: CreateAppOverrides = {}): Promise<App
     webhookService,
     dataDir: env.dataDir,
     pool: created.pool,
+    workerPresence,
     onDeploymentSettingsChanged: () => {
       sandbox.invalidate();
       stack.composio?.invalidateKey();
@@ -953,6 +984,7 @@ export async function createApp(overrides: CreateAppOverrides = {}): Promise<App
       sandbox: env.sandboxProvider,
       composio: (await stack.composio?.available().catch(() => false)) ?? false,
       wakeup: wakeupKind,
+      worker: await workerPresence.read(),
     }),
   );
   app.get("/ready", async (c) => {
@@ -977,6 +1009,7 @@ export async function createApp(overrides: CreateAppOverrides = {}): Promise<App
     webhookService,
     stop: async () => {
       oauthLogins.abortAll();
+      if (queueReconciler) clearInterval(queueReconciler);
       await wakeup.stop();
       await connector.stop();
       await prisma.$disconnect().catch(() => undefined);
@@ -1168,13 +1201,20 @@ function requestClientIp(
 /**
  * Whether the deployment's own settings refuse this sign-up. Env stays in force too (better-auth
  * still applies it), so the two gates are an AND: whichever says "no" wins.
+ *
+ * O cadastro nasce fechado, e o primeiro dono não pode ficar do lado de fora por causa disso:
+ * enquanto o deploy não tem dono, o interruptor ainda não vale — quem entra prova o controle
+ * da máquina com o código do instalador, checado logo depois desta porta.
  */
 export function deploymentSignupDenial(
   settings: { signupsEnabled: boolean; signupAllowlist: string | null } | null,
   email: string,
+  options: { firstOwner?: boolean } = {},
 ): string | null {
   if (!settings) return null;
-  if (!settings.signupsEnabled) return "Este deploy não está aceitando novas contas.";
+  if (!settings.signupsEnabled && !options.firstOwner) {
+    return "Este deploy não está aceitando novas contas.";
+  }
   const allowlist = parseAllowlist(settings.signupAllowlist ?? undefined);
   if (email && !emailAllowed(email, allowlist)) return "Este e-mail não pode criar conta";
   return null;
@@ -1189,11 +1229,15 @@ async function signupDenial(
     signupsEnabled: boolean;
     signupAllowlist: string | null;
   } | null;
+  let firstOwner: boolean;
   try {
-    settings = await prisma.deploymentSettings.findUnique({
-      where: { id: "default" },
-      select: { signupsEnabled: true, signupAllowlist: true },
-    });
+    [settings, firstOwner] = await Promise.all([
+      prisma.deploymentSettings.findUnique({
+        where: { id: "default" },
+        select: { signupsEnabled: true, signupAllowlist: true },
+      }),
+      deploymentNeedsFirstOwner(prisma),
+    ]);
   } catch {
     return {
       message: "Não foi possível verificar se este deploy aceita novas contas.",
@@ -1208,7 +1252,7 @@ async function signupDenial(
     body && typeof body === "object" && "email" in body
       ? String((body as { email?: string }).email ?? "")
       : "";
-  const message = deploymentSignupDenial(settings, email);
+  const message = deploymentSignupDenial(settings, email, { firstOwner });
   return message ? { message, status: 403 } : null;
 }
 

@@ -74,8 +74,10 @@ WEB_ORIGIN=https://app.example.com
 API_URL=https://app.example.com
 ```
 
-Cookies and CORS follow those origins. Generated installs default to `SIGNUPS_ENABLED=false`.
-Open registration deliberately, and keep `SIGNUP_ALLOWLIST` tight on a public host.
+Cookies and CORS follow those origins. Registration is closed by default on every path
+(`SIGNUPS_ENABLED=false` in `.env.example`, generated installs, and the database switch): only the
+first owner gets in, through the installer code. To accept more accounts, set `SIGNUPS_ENABLED=true`
+in `.env` and restart the API; keep `SIGNUP_ALLOWLIST` tight on a public host.
 Set `TRUSTED_WEB_ORIGINS` to a comma-separated list only when additional browser origins must call the API. Production does not implicitly trust `localhost` or `127.0.0.1`.
 Set `TRUSTED_PROXY_IPS` only to the transport addresses of reverse proxies that overwrite forwarding headers; forwarded client-IP headers are ignored for all other peers.
 
@@ -88,7 +90,7 @@ Password reset and verification use Resend. Production requires `RESEND_API_KEY`
 Optional:
 
 ```env
-SIGNUPS_ENABLED=true
+SIGNUPS_ENABLED=true      # closed by default; true lets people beyond the first owner sign up
 SIGNUP_ALLOWLIST=you@example.com,@company.com
 SANDBOX_PROVIDER=docker   # or e2b / box. Keep fake only for pnpm verify:fast.
 AGENT_RUNTIME=pi          # Keep scripted only for pnpm verify:fast.

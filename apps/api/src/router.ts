@@ -17,6 +17,7 @@ import {
   destroyBot,
   type EncryptedSecretStore,
   ensureDesktopScreenUrl,
+  failRunsQueuedWithoutWorker,
   lessonCaptureCommand,
   lessonStartCommand,
   listPiCatalog,
@@ -69,6 +70,7 @@ import {
   parseApprovalDecision,
   parseRunCheckpoint,
   projectMessages,
+  QUEUED_RUN_PATIENCE_MS,
   type ResolvedMachine,
   releaseControlLease,
   resolveDeploymentMachine,
@@ -116,6 +118,7 @@ import {
   normalizeWebhookBaseUrl,
   resolveWebhookPublicBase,
 } from "./webhooks.js";
+import { createWorkerPresenceReader, type WorkerPresenceReader } from "./worker-presence.js";
 
 export interface RouterDeps {
   prisma: PrismaClient;
@@ -135,6 +138,8 @@ export interface RouterDeps {
   onDeploymentSettingsChanged?: () => void;
   /** O fetch da sondagem da chave do modelo em `models.connect`; os testes injetam um falso. */
   probeFetch?: typeof fetch;
+  /** Quem diz se há worker vivo; sem ele, lê o batimento direto do banco. */
+  workerPresence?: WorkerPresenceReader;
   env: TrustedOriginEnv & {
     defaultProvider: string;
     defaultModel: string;
@@ -156,6 +161,13 @@ export interface RouterDeps {
     /** AGENT_RUNTIME: "pi" no produto; "scripted" só no emulador dos testes. */
     agentRuntime?: string;
   };
+}
+
+/** Quem diz se há worker: o leitor injetado pela API, ou o batimento lido direto do banco. */
+function workerPresenceFor(deps: RouterDeps): WorkerPresenceReader {
+  return (
+    deps.workerPresence ?? createWorkerPresenceReader({ prisma: deps.prisma, inProcess: false })
+  );
 }
 
 /** The one gate: every edition question in this router answers through it. */
@@ -209,6 +221,7 @@ export function createRouter(deps: RouterDeps) {
     screenOrigin?: string;
   }>();
   const repos = createRepos(deps.prisma);
+  const workerPresence = workerPresenceFor(deps);
 
   const isolated = os.use(async ({ next }) => {
     try {
@@ -242,6 +255,7 @@ export function createRouter(deps: RouterDeps) {
         endpoint: saved?.sandboxEndpoint,
       });
       const needsFirstOwner = await deploymentNeedsFirstOwner(deps.prisma).catch(() => false);
+      const worker = await workerPresence.read();
       return {
         ok: true as const,
         version: "0.1.0",
@@ -255,6 +269,7 @@ export function createRouter(deps: RouterDeps) {
           resendApiKey: deps.env.resendApiKey,
         }),
         needsFirstOwner,
+        worker,
       };
     }),
     me: authed.me.handler(async ({ context }): Promise<Me> => {
@@ -296,6 +311,7 @@ export function createRouter(deps: RouterDeps) {
           hasCredential: Boolean(settings?.sandboxCredentialCipher),
           endpoint: settings?.sandboxEndpoint,
         }).machine,
+        worker: await workerPresence.read(),
       };
     }),
     deployment: {
@@ -2566,6 +2582,25 @@ async function persistModelCredential(
   };
 }
 
+/**
+ * Um run parado na fila sem worker por perto é o silêncio que esta tela mais confunde: a
+ * pessoa mandou, nada acontece, e o composer diz "trabalhando". Em vez de esperar a varredura
+ * periódica da API, o snapshot resolve na hora — o run vira `failed` (com o evento que leva a
+ * frase até o chat) e deixa de contar como ativo. Um run recém-enfileirado nem é olhado.
+ */
+async function reconcileQueuedRun<
+  T extends { id: string; botId: string; status: string; updatedAt: Date },
+>(deps: RouterDeps, run: T | null): Promise<T | null> {
+  if (run?.status !== "queued") return run;
+  if (Date.now() - run.updatedAt.getTime() <= QUEUED_RUN_PATIENCE_MS) return run;
+  const presence = workerPresenceFor(deps);
+  const failed = await failRunsQueuedWithoutWorker(
+    { prisma: deps.prisma, workerSeenAt: () => presence.seenAt() },
+    { botId: run.botId },
+  ).catch(() => [] as string[]);
+  return failed.includes(run.id) ? null : run;
+}
+
 async function snapshot(
   deps: RouterDeps,
   actor: Actor,
@@ -2576,7 +2611,7 @@ async function snapshot(
   const bot = await createRepos(deps.prisma).getBot(actor, botId);
   if (!bot.thread) throw new IsolationError();
   const threadId = bot.thread.id;
-  const [conversation, conversations, events, run, last, home] = await Promise.all([
+  const [conversation, conversations, events, queued, last, home] = await Promise.all([
     activeConversationForBot(deps.prisma, botId),
     deps.prisma.conversation.findMany({
       where: { botId },
@@ -2603,6 +2638,7 @@ async function snapshot(
       data: { unread: false },
     }),
   ]);
+  const run = await reconcileQueuedRun(deps, queued);
   const projected = projectMessages(events);
   const rows = await deps.prisma.message.findMany({
     where: {
