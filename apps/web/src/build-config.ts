@@ -30,3 +30,26 @@ export function screenProxySecretFor(command: "build" | "serve", env: NodeJS.Pro
   }
   return value;
 }
+
+/**
+ * Hosts que o `vite preview` aceita no cabeçalho Host, além dos locais que ele já
+ * libera sozinho. O preview protege contra DNS rebinding recusando qualquer Host
+ * desconhecido — e numa instalação pública ele não conhece o nome sslip.io que o Caddy
+ * repassa: respondia 403 "Blocked request" a tudo, inclusive ao /rpc/health que o
+ * celular chama. O nome vem de `WEB_ORIGIN`, que o instalador já grava como
+ * `https://<host>`; fora do Docker essa variável não existe e nada muda.
+ */
+export function previewAllowedHosts(env: Record<string, string | undefined>): string[] {
+  const hosts: string[] = [];
+  for (const key of ["WEB_ORIGIN", "BETTER_AUTH_URL"]) {
+    const raw = env[key]?.trim();
+    if (!raw) continue;
+    try {
+      const host = new URL(raw).hostname;
+      if (host && !hosts.includes(host)) hosts.push(host);
+    } catch {
+      // Uma origem malformada não pode derrubar o build; o preview segue estrito.
+    }
+  }
+  return hosts;
+}

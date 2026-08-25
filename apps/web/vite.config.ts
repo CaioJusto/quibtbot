@@ -5,7 +5,7 @@ import path from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv, type PreviewServer, type ViteDevServer } from "vite";
-import { screenProxySecretFor } from "./src/build-config.js";
+import { previewAllowedHosts, screenProxySecretFor } from "./src/build-config.js";
 import {
   bindProxySocketLifetime,
   resolveNovncTarget,
@@ -166,6 +166,9 @@ export default defineConfig(({ command, mode }) => {
     preview: {
       host: process.env.WEB_HOST ?? "127.0.0.1",
       port: Number(process.env.WEB_PORT ?? 5173),
+      // O nome público (sslip.io ou domínio próprio) chega pelo Caddy; sem isto o
+      // preview responde 403 a ele. Ver previewAllowedHosts.
+      allowedHosts: previewAllowedHosts({ ...rootEnv, ...process.env }),
       proxy: {
         // `xfwd` manda o host que o navegador realmente usou. Sem ele, `changeOrigin`
         // reescreve o Host para o alvo interno e a API assina a URL da tela como
