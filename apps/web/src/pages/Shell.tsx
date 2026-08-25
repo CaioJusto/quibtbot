@@ -55,6 +55,13 @@ import {
   mentionedTargets,
 } from "../lib/mentions";
 import { versionsByParent, versionsOf } from "../lib/message-versions";
+import {
+  type PreviewFrame,
+  previewAgeLabel,
+  previewAgeMs,
+  previewPollDelayMs,
+  shouldPollPreview,
+} from "../lib/preview-poll";
 import { rpc } from "../lib/rpc";
 import { errorMessage } from "../lib/rpc-errors";
 import {
@@ -1180,6 +1187,85 @@ export function ShellPage() {
     }
   }, [screenVisible, embeddedScreenUrl, active?.id, screenDrop, screenLost, pinnedScreenUrl]);
 
+  /**
+   * Sem o controle não há stream (a capacidade do noVNC é interativa, só vai para quem
+   * tem a posse), mas há a tela: um retrato a cada 3 s, o TTL do cache da API, mostrado
+   * no lugar da ilustração de mesa enquanto o bot trabalha. Quem pede "abre o site e
+   * manda print" vê o site abrindo, em vez de um desenho parado que parece travamento.
+   * O poll para com o painel fechado, a aba escondida, o controle na mão do usuário (o
+   * iframe assume) ou o computador desligado; uma falha volta à ilustração e tenta de
+   * novo com espera crescente.
+   */
+  const [preview, setPreview] = useState<PreviewFrame | null>(null);
+  const [previewFailed, setPreviewFailed] = useState(false);
+  const [previewNow, setPreviewNow] = useState(() => Date.now());
+  const [documentHidden, setDocumentHidden] = useState(
+    () => typeof document !== "undefined" && document.visibilityState === "hidden",
+  );
+  useEffect(() => {
+    const onVisibility = () => setDocumentHidden(document.visibilityState === "hidden");
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
+  const wantsPreview =
+    Boolean(active) &&
+    shouldPollPreview({
+      state: computer?.state,
+      controlHolder: computer?.controlHolder,
+      shown: panel === "computer" || computerOpen,
+      hidden: documentHidden,
+      streaming: pinnedScreenUrl !== null,
+    });
+  const previewBotId = active?.id ?? null;
+  useEffect(() => {
+    if (!wantsPreview || !previewBotId) {
+      setPreview(null);
+      setPreviewFailed(false);
+      return;
+    }
+    let alive = true;
+    let failures = 0;
+    let timer: number | null = null;
+    const tick = async () => {
+      try {
+        const result = await rpc.computer.preview({ botId: previewBotId });
+        if (!alive) return;
+        if (result.image) {
+          failures = 0;
+          setPreview({
+            image: result.image,
+            capturedAt: result.capturedAt,
+            receivedAt: Date.now(),
+          });
+          setPreviewFailed(false);
+        } else {
+          failures += 1;
+          setPreview(null);
+          setPreviewFailed(true);
+        }
+      } catch {
+        if (!alive) return;
+        failures += 1;
+        setPreview(null);
+        setPreviewFailed(true);
+      }
+      if (alive) timer = window.setTimeout(() => void tick(), previewPollDelayMs(failures));
+    };
+    void tick();
+    return () => {
+      alive = false;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [wantsPreview, previewBotId]);
+  // O selo "há Ns" anda a cada segundo, independente de quando chega o próximo retrato.
+  useEffect(() => {
+    if (!preview) return;
+    setPreviewNow(Date.now());
+    const timer = window.setInterval(() => setPreviewNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [preview]);
+  const previewLabel = preview ? previewAgeLabel(previewAgeMs(preview, previewNow)) : null;
+
   async function pasteToComputer() {
     if (!active) return;
     const text = await navigator.clipboard.readText().catch(() => "");
@@ -2159,24 +2245,47 @@ export function ShellPage() {
                         style={{ pointerEvents: "none" }}
                       />
                     </ComputerPreview>
+                  ) : computer?.state === "running" && preview && !screenLost ? (
+                    // Sem o controle: o retrato mais recente, com a idade em cima, para
+                    // ninguém tomar uma tela velha por atual.
+                    <ComputerPreview bare host="desktop" title={`tela de ${active.name}`}>
+                      <img
+                        className="qb-dash__window-image"
+                        src={preview.image}
+                        alt={`Tela do computador de ${active.name}`}
+                      />
+                      <span className="qb-live-badge" aria-live="off">
+                        <span className="qb-live-badge__dot" aria-hidden="true" />
+                        {previewLabel}
+                      </span>
+                    </ComputerPreview>
+                  ) : computer?.state === "running" && !screenLost ? (
+                    // Ainda sem retrato (ou a prévia falhou): a ilustração de mesa, com o
+                    // selo dizendo por quê — sem ele parecia a tela de verdade, travada.
+                    <ComputerPreview bare host="desktop" title={`tela de ${active.name}`}>
+                      <img
+                        className="qb-dash__window-image"
+                        src={computerDesktopImage}
+                        alt={`Tela do computador de ${active.name}`}
+                      />
+                      <span className="qb-live-badge is-muted">
+                        {previewFailed ? "sem prévia · tentando de novo" : "buscando a tela…"}
+                      </span>
+                    </ComputerPreview>
                   ) : (
                     <ComputerPreview
                       bare
                       host="desktop"
-                      imageSrc={computer?.state === "running" ? computerDesktopImage : undefined}
-                      imageAlt={`Tela do computador de ${active.name}`}
                       title={
                         screenLost
                           ? "A tela caiu e não voltou"
                           : computer?.state === "booting" || booting
                             ? `Abrindo a tela de ${active.name}…`
-                            : computer?.state === "running"
-                              ? "Assuma o controle para ver a tela"
-                              : computer?.state === "suspended"
-                                ? "Computador dormindo"
-                                : computer?.state === "error"
-                                  ? "Não conseguiu ligar"
-                                  : "Computador parado"
+                            : computer?.state === "suspended"
+                              ? "Computador dormindo"
+                              : computer?.state === "error"
+                                ? "Não conseguiu ligar"
+                                : "Computador parado"
                       }
                       lines={
                         screenLost
@@ -2758,6 +2867,32 @@ export function ShellPage() {
                   </button>
                 ) : null}
               </div>
+            ) : computer?.state === "running" && preview && !screenLost ? (
+              // Sem o controle: o retrato mais recente ocupa a tela, com a idade no canto e
+              // a pílula de assumir — o clique continua oferecendo entrar, como no stream.
+              <div className="relative h-full w-full">
+                <img
+                  className="qb-screen-still"
+                  src={preview.image}
+                  alt={`Tela do computador de ${active.name}`}
+                />
+                <span className="qb-live-badge qb-live-badge--overlay">
+                  <span className="qb-live-badge__dot" aria-hidden="true" />
+                  {previewLabel}
+                </span>
+                {!trackpadMode ? (
+                  <button
+                    type="button"
+                    className="qb-screen-claim"
+                    aria-label="Assumir controle do computador"
+                    onClick={() => void takeOverComputer()}
+                  >
+                    <span className="qb-screen-claim__pill">
+                      {active.name} está com o mouse · Assumir controle
+                    </span>
+                  </button>
+                ) : null}
+              </div>
             ) : (
               // Nunca a ilustração de mesa aqui: em tela cheia ela passava por tela de verdade,
               // e quem clicava nela achava que o controle tinha quebrado.
@@ -2770,11 +2905,13 @@ export function ShellPage() {
                         ? "Este computador está dormindo."
                         : computer?.state === "running" && computer?.controlHolder === "user"
                           ? `Procurando a tela de ${active.name}…`
-                          : computer?.state === "running"
-                            ? `A tela ao vivo de ${active.name} abre para quem está com o controle.`
-                            : booting || computer?.state === "booting"
-                              ? "Ligando o computador…"
-                              : "O computador está parado."}
+                          : computer?.state === "running" && previewFailed
+                            ? `Sem prévia da tela de ${active.name} por enquanto. Tentando de novo…`
+                            : computer?.state === "running"
+                              ? `Buscando a tela de ${active.name}…`
+                              : booting || computer?.state === "booting"
+                                ? "Ligando o computador…"
+                                : "O computador está parado."}
                   </p>
                   {screenLost ? (
                     <Button
