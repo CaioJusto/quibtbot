@@ -1231,7 +1231,7 @@ function toSandboxInput(input: {
   x?: number;
   y?: number;
   button?: "left" | "right";
-  type?: "move" | "down" | "up" | "click";
+  type?: "move" | "moveRelative" | "down" | "up" | "click" | "tap";
   text?: string;
 }): SandboxInput {
   if (input.kind === "key")

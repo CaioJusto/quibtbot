@@ -123,3 +123,31 @@ describe("graphical computer spec", () => {
     ]);
   });
 });
+
+describe("xdotoolCommand — trackpad", () => {
+  it("moveRelative desloca pelo delta (mousemove_relative), não teleporta", () => {
+    expect(xdotoolCommand({ kind: "pointer", type: "moveRelative", x: 12, y: -7 })).toEqual([
+      "xdotool",
+      "mousemove_relative",
+      "--",
+      "12",
+      "-7",
+    ]);
+  });
+
+  it("tap clica onde o cursor está, sem mover", () => {
+    expect(xdotoolCommand({ kind: "pointer", type: "tap", x: 0, y: 0, button: "left" })).toEqual([
+      "xdotool",
+      "click",
+      "1",
+    ]);
+    // move continua absoluto, para o toque direto na tela.
+    expect(xdotoolCommand({ kind: "pointer", type: "move", x: 300, y: 200 })).toEqual([
+      "xdotool",
+      "mousemove",
+      "--",
+      "300",
+      "200",
+    ]);
+  });
+});

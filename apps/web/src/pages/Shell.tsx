@@ -1193,7 +1193,7 @@ export function ShellPage() {
     void rpc.computer.input({
       botId: active.id,
       kind: "pointer",
-      payload: { x: event.movementX, y: event.movementY, type: "move" },
+      payload: { x: event.movementX, y: event.movementY, type: "moveRelative" },
     });
   }
 

@@ -1342,7 +1342,14 @@ export function createRouter(deps: RouterDeps) {
                   y: Number(input.payload.y ?? 0),
                   button: (input.payload.button as "left" | "right" | undefined) ?? "left",
                   type:
-                    (input.payload.type as "move" | "down" | "up" | "click" | undefined) ?? "click",
+                    (input.payload.type as
+                      | "move"
+                      | "moveRelative"
+                      | "down"
+                      | "up"
+                      | "click"
+                      | "tap"
+                      | undefined) ?? "click",
                 };
         await deps.sandbox.sendInput(
           {

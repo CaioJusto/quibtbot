@@ -215,7 +215,18 @@ export class E2BSandboxProvider implements SandboxProvider {
       await desktop.press(input.key);
     } else if (input.kind === "pointer") {
       if (input.type === "move") await desktop.moveMouse(input.x, input.y);
-      else if (input.type === "click" || input.type === "down") {
+      else if (input.type === "moveRelative") {
+        // O SDK do E2B só move em coordenada absoluta; some a posição atual com o
+        // delta do trackpad. Sem `getCursorPosition`, cai para um no-op seguro.
+        const pos =
+          typeof desktop.getCursorPosition === "function"
+            ? await desktop.getCursorPosition().catch(() => null)
+            : null;
+        if (pos) await desktop.moveMouse(pos.x + input.x, pos.y + input.y);
+      } else if (input.type === "tap") {
+        if (input.button === "right") await desktop.rightClick();
+        else await desktop.leftClick();
+      } else if (input.type === "click" || input.type === "down") {
         if (input.button === "right") await desktop.rightClick(input.x, input.y);
         else await desktop.leftClick(input.x, input.y);
       }

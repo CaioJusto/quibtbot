@@ -36,7 +36,9 @@ export interface PointerInput {
   x: number;
   y: number;
   button?: "left" | "right";
-  type: "move" | "down" | "up" | "click";
+  // move/click usam x,y absolutos (tela inteira). moveRelative desloca o cursor
+  // pelo delta (modo trackpad); tap clica onde o cursor já está, sem mover.
+  type: "move" | "moveRelative" | "down" | "up" | "click" | "tap";
 }
 
 export type SandboxInput =
@@ -160,6 +162,9 @@ export function xdotoolCommand(input: SandboxInput): string[] {
     const btn = input.button === "right" ? "3" : "1";
     if (input.type === "move")
       return ["xdotool", "mousemove", "--", String(input.x), String(input.y)];
+    if (input.type === "moveRelative")
+      return ["xdotool", "mousemove_relative", "--", String(input.x), String(input.y)];
+    if (input.type === "tap") return ["xdotool", "click", btn];
     if (input.type === "down") {
       return ["xdotool", "mousemove", "--", String(input.x), String(input.y), "mousedown", btn];
     }

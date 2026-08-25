@@ -827,10 +827,12 @@ function TrackpadLayer({
     () =>
       createPointerMoveCoalescer(({ x, y }) => {
         if (!botId || !hasControl) return;
+        // moveRelative, não move: o trackpad manda o DESLOCAMENTO do dedo. Com "move"
+        // (absoluto) o cursor pulava para perto do canto a cada toque.
         void rpc("computer/input", {
           botId,
           kind: "pointer",
-          payload: { x, y, type: "move" },
+          payload: { x, y, type: "moveRelative" },
         });
       }),
     [botId, hasControl],
@@ -861,10 +863,12 @@ function TrackpadLayer({
       onResponderRelease={() => {
         pointerMoves.flush();
         if (botId && hasControl && trackpadReleaseAction(moved.current) === "click") {
+          // tap: clica onde o cursor parou. Antes era um click em (0,0) — teleportava
+          // o cursor para o canto e clicava lá.
           void rpc("computer/input", {
             botId,
             kind: "pointer",
-            payload: { x: 0, y: 0, type: "click", button: "left" },
+            payload: { x: 0, y: 0, type: "tap", button: "left" },
           });
         }
         last.current = null;
