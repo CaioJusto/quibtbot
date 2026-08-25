@@ -203,10 +203,24 @@ describe("thread screen list", () => {
     expect(screen).not.toContain("tailSpaceFor");
   });
 
-  it("keeps old VPS proxies fresh while the chat is active", () => {
-    expect(screen).toContain("LIVE_FALLBACK_POLL_MS = 1_500");
-    expect(screen).toContain("if (!paused) void reload()");
-    expect(screen).toContain("clearInterval(fallbackPoll)");
+  it("polla só com o fio caído ou com o bot mudo há tempo, e funde o snapshot em vez de trocá-lo", () => {
+    // O poll incondicional a cada 1,5 s trocava o snapshot e a lista tremia.
+    expect(screen).not.toContain("LIVE_FALLBACK_POLL_MS");
+    expect(screen).not.toContain("if (!paused) void reload()");
+    expect(screen).toContain("shouldSafetyPoll({");
+    expect(screen).toContain("status: feed.status()");
+    expect(screen).toContain("working: workingRef.current");
+    expect(screen).toContain("lastEventAt = Date.now()");
+    expect(screen).toContain("clearInterval(safetyPoll)");
+    expect(screen).toContain("mergeThreadSnapshot(prev, next)");
+  });
+
+  it("mostra o estado do fio num chip e traduz a rede caída em vez de 'Network request failed'", () => {
+    expect(screen).toContain("onStatus: setFeedStatus");
+    expect(screen).toContain("{ onOpen: opened }");
+    expect(screen).toContain("connectionChipLabel({ status: feedStatus, pollFailed })");
+    expect(screen).toContain("userFacingError(err,");
+    expect(screen).not.toContain('setError(err instanceof Error ? err.message : "');
   });
 
   it("sends the user to the login on the first 401 instead of reconnecting", () => {

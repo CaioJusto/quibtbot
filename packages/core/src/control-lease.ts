@@ -17,6 +17,13 @@ import type { WakeupDriver } from "@quibt/adapter-kit";
 export const CONTROL_LEASE_MS = 15 * 60_000;
 
 /**
+ * Usar o teclado renova o prazo, mas não a cada tecla: o modo trackpad manda dezenas de
+ * movimentos por segundo, e cada renovação é uma escrita no banco mais um reagendamento do
+ * `control.reap`. Só vale renovar depois que este tanto do prazo já foi consumido.
+ */
+export const CONTROL_LEASE_RENEW_GAP_MS = 60_000;
+
+/**
  * An unguessable lease id. `lease-<botId>` was guessable by anyone who could see a bot id, and
  * nothing checked it anyway.
  */
@@ -82,6 +89,38 @@ export function canTakeControl(
     return { ok: false, holderUserId: session.controlLeaseUserId };
   }
   return { ok: true, renew: true };
+}
+
+/**
+ * Se vale renovar o prazo agora. Quem está preenchendo um formulário há 15 minutos via a
+ * tela virar "Assuma o controle para ver a tela" e as teclas seguintes falharem em silêncio:
+ * o prazo era fixo desde o takeover, e o heartbeat só acordava o container. Cada uso
+ * (heartbeat, tecla, mouse) do próprio dono empurra o prazo — mas só depois de consumido
+ * `gapMs`, para não escrever no banco a cada movimento do trackpad.
+ */
+export function controlLeaseWantsRenewal(
+  session: ControlLeaseSnapshot,
+  now: Date,
+  gapMs: number = CONTROL_LEASE_RENEW_GAP_MS,
+): boolean {
+  if (!controlLeaseLive(session, now)) return false;
+  const remaining = (session.controlLeaseExpiresAt as Date).getTime() - now.getTime();
+  return remaining <= CONTROL_LEASE_MS - gapMs;
+}
+
+/**
+ * "controle até 14:35", no fuso do aparelho. `null` quando não há prazo ou ele já passou —
+ * a tela mostra então só "Você tem o controle", como antes.
+ */
+export function controlUntilLabel(
+  expiresAt: string | Date | null | undefined,
+  now: Date = new Date(),
+): string | null {
+  if (!expiresAt) return null;
+  const deadline = expiresAt instanceof Date ? expiresAt : new Date(expiresAt);
+  if (Number.isNaN(deadline.getTime()) || deadline.getTime() <= now.getTime()) return null;
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `até ${pad(deadline.getHours())}:${pad(deadline.getMinutes())}`;
 }
 
 /** Prisma shape this module needs, so @quibt/core stays free of a database dependency. */
@@ -178,6 +217,58 @@ export async function grantControlLease(
   });
   if (claimed.count !== 1) return null;
   return { leaseId, expiresAt, fence };
+}
+
+/**
+ * Empurra o prazo do lease que o dono já tem, sem mexer no fence nem no id: o app guarda o
+ * `leaseId` e o sandbox confere o fence, então trocar qualquer um dos dois no meio do uso
+ * derrubaria a pessoa. Guardado pelo id e pelo dono: um lease que outra pessoa acabou de
+ * tomar (id novo) não é renovado por engano.
+ */
+export async function renewControlLease(
+  db: ControlLeaseDb,
+  input: { botId: string; leaseId: string; userId: string; now?: Date; leaseMs?: number },
+): Promise<{ expiresAt: Date } | null> {
+  const now = input.now ?? new Date();
+  const expiresAt = new Date(now.getTime() + (input.leaseMs ?? CONTROL_LEASE_MS));
+  const renewed = await db.desktopSession.updateMany({
+    where: {
+      botId: input.botId,
+      controlHolder: "user",
+      controlLeaseId: input.leaseId,
+      controlLeaseUserId: input.userId,
+    },
+    data: { controlLeaseExpiresAt: expiresAt },
+  });
+  if (renewed.count !== 1) return null;
+  return { expiresAt };
+}
+
+/**
+ * O que cada uso do dono (heartbeat, tecla, mouse) faz com o lease: nada enquanto a folga não
+ * foi consumida; depois dela, empurra o prazo e reagenda o `control.reap` para o prazo novo
+ * (mesmo `jobKey`, então o agendamento antigo é substituído, não somado). Quem não é o dono
+ * não renova nada — o lease é de quem assumiu.
+ */
+export async function touchControlLease(
+  deps: { db: ControlLeaseDb; wakeup?: WakeupDriver },
+  session: ControlLeaseSnapshot,
+  input: { botId: string; userId: string; now?: Date; leaseMs?: number },
+): Promise<{ expiresAt: Date } | null> {
+  const now = input.now ?? new Date();
+  const check = checkControlLease(session, { userId: input.userId }, now);
+  if (!check.ok) return null;
+  if (!controlLeaseWantsRenewal(session, now)) return null;
+  const renewed = await renewControlLease(deps.db, {
+    botId: input.botId,
+    leaseId: check.leaseId,
+    userId: input.userId,
+    now,
+    leaseMs: input.leaseMs,
+  });
+  if (!renewed) return null;
+  scheduleControlReap(deps.wakeup, input.botId, renewed.expiresAt);
+  return renewed;
 }
 
 /** Hands the keyboard back to the bot. Guarded by the fence so it cannot cancel a newer lease. */

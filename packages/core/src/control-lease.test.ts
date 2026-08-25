@@ -1,14 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
   CONTROL_LEASE_MS,
+  CONTROL_LEASE_RENEW_GAP_MS,
   type ControlLeaseSnapshot,
   canTakeControl,
   checkControlLease,
   controlLeaseLive,
+  controlLeaseWantsRenewal,
+  controlUntilLabel,
   grantControlLease,
   newControlLeaseId,
   reapExpiredControlLeases,
   releaseControlLease,
+  renewControlLease,
+  touchControlLease,
 } from "./control-lease.js";
 
 const now = new Date("2026-08-14T12:00:00Z");
@@ -34,6 +39,15 @@ function fakeDb(row: ControlLeaseSnapshot & { botId: string; state?: string }) {
       return false;
     }
     if (where.controlHolder && where.controlHolder !== state.row.controlHolder) return false;
+    if (where.controlLeaseId !== undefined && where.controlLeaseId !== state.row.controlLeaseId) {
+      return false;
+    }
+    if (
+      where.controlLeaseUserId !== undefined &&
+      where.controlLeaseUserId !== state.row.controlLeaseUserId
+    ) {
+      return false;
+    }
     const stateFilter = where.state as { not?: string } | undefined;
     if (stateFilter?.not && "state" in state.row && state.row.state === stateFilter.not) {
       return false;
@@ -175,6 +189,118 @@ describe("reapExpiredControlLeases", () => {
     });
     expect(await reapExpiredControlLeases(db, { now })).toEqual(["bot-1"]);
     expect(state.row.controlHolder).toBe("bot");
+  });
+});
+
+describe("controlLeaseWantsRenewal", () => {
+  it("só pede renovação depois de consumir a folga, e nunca para um lease morto", () => {
+    // Acabou de ser concedido: renovar agora seria uma escrita por tecla.
+    expect(controlLeaseWantsRenewal(session(), now)).toBe(false);
+    const almostGap = new Date(now.getTime() + CONTROL_LEASE_RENEW_GAP_MS - 1);
+    expect(controlLeaseWantsRenewal(session(), almostGap)).toBe(false);
+    const pastGap = new Date(now.getTime() + CONTROL_LEASE_RENEW_GAP_MS);
+    expect(controlLeaseWantsRenewal(session(), pastGap)).toBe(true);
+    // Faltando um minuto para vencer, com certeza.
+    const nearEnd = new Date(now.getTime() + CONTROL_LEASE_MS - 60_000);
+    expect(controlLeaseWantsRenewal(session(), nearEnd)).toBe(true);
+    // Vencido ou sem prazo não se renova: o caminho é o takeover de novo.
+    expect(controlLeaseWantsRenewal(session(), later)).toBe(false);
+    expect(controlLeaseWantsRenewal(session({ controlLeaseExpiresAt: null }), pastGap)).toBe(false);
+    expect(controlLeaseWantsRenewal(session({ controlHolder: "bot" }), pastGap)).toBe(false);
+  });
+});
+
+describe("renewControlLease", () => {
+  it("empurra o prazo do dono sem mexer no fence nem no id", async () => {
+    const { db, state } = fakeDb({ ...session(), botId: "bot-1" });
+    const at = new Date(now.getTime() + 5 * 60_000);
+    const renewed = await renewControlLease(db, {
+      botId: "bot-1",
+      leaseId: "ctl_live",
+      userId: "user-1",
+      now: at,
+    });
+    expect(renewed).toEqual({ expiresAt: new Date(at.getTime() + CONTROL_LEASE_MS) });
+    expect(state.row.controlLeaseExpiresAt).toEqual(new Date(at.getTime() + CONTROL_LEASE_MS));
+    expect(state.row.controlFence).toBe(3);
+    expect(state.row.controlLeaseId).toBe("ctl_live");
+  });
+
+  it("não renova um lease que já é de outra pessoa nem um id que não é mais o atual", async () => {
+    const { db, state } = fakeDb({ ...session(), botId: "bot-1" });
+    const before = state.row.controlLeaseExpiresAt;
+    expect(
+      await renewControlLease(db, { botId: "bot-1", leaseId: "ctl_live", userId: "user-2", now }),
+    ).toBeNull();
+    expect(
+      await renewControlLease(db, { botId: "bot-1", leaseId: "ctl_old", userId: "user-1", now }),
+    ).toBeNull();
+    const { db: botDb } = fakeDb({ ...session({ controlHolder: "bot" }), botId: "bot-1" });
+    expect(
+      await renewControlLease(botDb, {
+        botId: "bot-1",
+        leaseId: "ctl_live",
+        userId: "user-1",
+        now,
+      }),
+    ).toBeNull();
+    expect(state.row.controlLeaseExpiresAt).toEqual(before);
+  });
+});
+
+describe("touchControlLease", () => {
+  it("renova o dono depois da folga e reagenda o reap para o prazo novo", async () => {
+    const { db, state } = fakeDb({ ...session(), botId: "bot-1" });
+    const jobs: Array<{ name: string; runAt?: Date; jobKey?: string }> = [];
+    const wakeup = {
+      enqueue: async (job: { name: string; runAt?: Date; jobKey?: string }) => {
+        jobs.push(job);
+      },
+    } as never;
+    // Acabou de assumir: nada a fazer, nem escrita nem job.
+    expect(
+      await touchControlLease({ db, wakeup }, state.row, { botId: "bot-1", userId: "user-1", now }),
+    ).toBeNull();
+    expect(jobs).toEqual([]);
+    const at = new Date(now.getTime() + CONTROL_LEASE_RENEW_GAP_MS);
+    const renewed = await touchControlLease({ db, wakeup }, state.row, {
+      botId: "bot-1",
+      userId: "user-1",
+      now: at,
+    });
+    expect(renewed?.expiresAt).toEqual(new Date(at.getTime() + CONTROL_LEASE_MS));
+    expect(state.row.controlLeaseExpiresAt).toEqual(renewed?.expiresAt);
+    expect(jobs).toEqual([
+      {
+        name: "control.reap",
+        payload: { botId: "bot-1" },
+        runAt: renewed?.expiresAt,
+        jobKey: "control.reap:bot-1",
+      },
+    ]);
+  });
+
+  it("ignora quem não é o dono", async () => {
+    const { db, state } = fakeDb({ ...session(), botId: "bot-1" });
+    const at = new Date(now.getTime() + CONTROL_LEASE_RENEW_GAP_MS);
+    const before = state.row.controlLeaseExpiresAt;
+    expect(
+      await touchControlLease({ db }, state.row, { botId: "bot-1", userId: "user-2", now: at }),
+    ).toBeNull();
+    expect(state.row.controlLeaseExpiresAt).toEqual(before);
+  });
+});
+
+describe("controlUntilLabel", () => {
+  it("escreve a hora local do prazo e some quando não há prazo ou ele já passou", () => {
+    const deadline = new Date(2026, 7, 14, 9, 5); // 09:05 no fuso do aparelho
+    const before = new Date(2026, 7, 14, 8, 50);
+    expect(controlUntilLabel(deadline, before)).toBe("até 09:05");
+    expect(controlUntilLabel(deadline.toISOString(), before)).toBe("até 09:05");
+    expect(controlUntilLabel(deadline, new Date(2026, 7, 14, 9, 5))).toBeNull();
+    expect(controlUntilLabel(null, before)).toBeNull();
+    expect(controlUntilLabel(undefined, before)).toBeNull();
+    expect(controlUntilLabel("não é data", before)).toBeNull();
   });
 });
 

@@ -303,6 +303,96 @@ describe("mobile thread streaming", () => {
     vi.doUnmock("expo/fetch");
   });
 
+  it("avisa que o stream abriu (o 'connected' do feed) só quando a resposta veio com corpo", async () => {
+    vi.resetModules();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.close();
+      },
+    });
+    vi.doMock("expo/fetch", () => ({
+      fetch: vi.fn().mockResolvedValue({ ok: true, status: 200, body }),
+    }));
+    const { subscribeThread } = await import("./api");
+    const onOpen = vi.fn();
+    await subscribeThread("bot-1", -1, () => undefined, new AbortController().signal, { onOpen });
+    expect(onOpen).toHaveBeenCalledOnce();
+
+    vi.doMock("expo/fetch", () => ({
+      fetch: vi.fn().mockResolvedValue({ ok: false, status: 502, body: null }),
+    }));
+    vi.resetModules();
+    const failing = await import("./api");
+    const notOpened = vi.fn();
+    await expect(
+      failing.subscribeThread("bot-1", -1, () => undefined, new AbortController().signal, {
+        onOpen: notOpened,
+      }),
+    ).rejects.toThrow(/failed \(502\)/);
+    expect(notOpened).not.toHaveBeenCalled();
+    vi.doUnmock("expo/fetch");
+  });
+
+  it("derruba um socket meio-aberto: sem byte nenhum por stallMs, a leitura termina e o feed reconecta", async () => {
+    vi.resetModules();
+    const cancel = vi.fn();
+    // Um stream que abriu e nunca mais mandou nada — a troca Wi-Fi → 4G com o app aberto.
+    const body = new ReadableStream<Uint8Array>({
+      cancel,
+    });
+    vi.doMock("expo/fetch", () => ({
+      fetch: vi.fn().mockResolvedValue({ ok: true, status: 200, body }),
+    }));
+    const { subscribeThread } = await import("./api");
+    const startedAt = Date.now();
+    const abort = new AbortController();
+    await subscribeThread("bot-1", -1, () => undefined, abort.signal, { stallMs: 40 });
+    // Terminou sozinho, sem abort e sem erro: para o live-feed é "o servidor fechou".
+    expect(abort.signal.aborted).toBe(false);
+    expect(Date.now() - startedAt).toBeLessThan(2_000);
+    expect(cancel).toHaveBeenCalled();
+    vi.doUnmock("expo/fetch");
+  });
+
+  it("um keepalive conta como sinal de vida: o vigia não derruba um stream que só manda ':'", async () => {
+    vi.resetModules();
+    const encoder = new TextEncoder();
+    let ticker: ReturnType<typeof setInterval> | undefined;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        ticker = setInterval(() => {
+          try {
+            controller.enqueue(encoder.encode(": keepalive\n\n"));
+          } catch {
+            // já cancelado
+          }
+        }, 10);
+      },
+      cancel() {
+        if (ticker) clearInterval(ticker);
+      },
+    });
+    vi.doMock("expo/fetch", () => ({
+      fetch: vi.fn().mockResolvedValue({ ok: true, status: 200, body }),
+    }));
+    const { subscribeThread } = await import("./api");
+    const events: unknown[] = [];
+    const abort = new AbortController();
+    let endedOnItsOwn = false;
+    const done = subscribeThread("bot-1", -1, (event) => events.push(event), abort.signal, {
+      stallMs: 60,
+    }).then(() => {
+      if (!abort.signal.aborted) endedOnItsOwn = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(endedOnItsOwn).toBe(false);
+    abort.abort();
+    await done;
+    expect(events).toEqual([]);
+    if (ticker) clearInterval(ticker);
+    vi.doUnmock("expo/fetch");
+  });
+
   it("tags a 401 on the event stream so the feed stops reconnecting", async () => {
     vi.resetModules();
     vi.doMock("expo/fetch", () => {
@@ -467,6 +557,55 @@ describe("mergeThreadSnapshot", () => {
     };
     const next = { cursor: 5, messages: [msg("m1")] };
     expect(mergeThreadSnapshot(prev, next).messages.map((m) => m.id)).toEqual(["m1"]);
+  });
+});
+
+describe("mergeThreadSnapshot — bolha de um run que acabou", () => {
+  const msg = (id: string, runId?: string) => ({ id, role: "bot" as const, blocks: [], runId });
+  type Snap = {
+    cursor: number;
+    messages: ReturnType<typeof msg>[];
+    run?: { id: string } | null;
+    runs?: Array<{ id: string }>;
+  };
+
+  it("solta a bolha quando o snapshot diz que não há mais run vivo (falhou sem resposta)", async () => {
+    const { mergeThreadSnapshot } = await import("./api");
+    const prev: Snap = {
+      cursor: 5,
+      messages: [msg("m1"), msg("progress:r1", "r1")],
+      run: { id: "r1" },
+    };
+    const next: Snap = { cursor: 6, messages: [msg("m1")], run: null };
+    expect(mergeThreadSnapshot(prev, next).messages.map((m) => m.id)).toEqual(["m1"]);
+  });
+
+  it("mantém a bolha enquanto o run dela está vivo no snapshot", async () => {
+    const { mergeThreadSnapshot } = await import("./api");
+    const prev: Snap = { cursor: 5, messages: [msg("progress:r1", "r1")], run: null };
+    const next: Snap = { cursor: 5, messages: [msg("m1")], run: { id: "r1" } };
+    expect(mergeThreadSnapshot(prev, next).messages.map((m) => m.id)).toEqual([
+      "m1",
+      "progress:r1",
+    ]);
+  });
+
+  it("no grupo, vale a lista de runs vivos", async () => {
+    const { mergeThreadSnapshot } = await import("./api");
+    const prev: Snap = {
+      cursor: 5,
+      messages: [msg("progress:r1", "r1"), msg("progress:r2", "r2")],
+      runs: [],
+    };
+    const next: Snap = { cursor: 5, messages: [], runs: [{ id: "r2" }] };
+    expect(mergeThreadSnapshot(prev, next).messages.map((m) => m.id)).toEqual(["progress:r2"]);
+  });
+
+  it("um snapshot que não fala de runs não decide nada", async () => {
+    const { mergeThreadSnapshot } = await import("./api");
+    const prev = { cursor: 5, messages: [msg("progress:r1", "r1")] };
+    const next = { cursor: 5, messages: [] };
+    expect(mergeThreadSnapshot(prev, next).messages.map((m) => m.id)).toEqual(["progress:r1"]);
   });
 });
 
