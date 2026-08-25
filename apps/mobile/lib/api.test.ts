@@ -469,3 +469,39 @@ describe("mergeThreadSnapshot", () => {
     expect(mergeThreadSnapshot(prev, next).messages.map((m) => m.id)).toEqual(["m1"]);
   });
 });
+
+describe("mergeThreadSnapshot — mensagem otimista", () => {
+  const msg = (id: string, extra: Record<string, unknown> = {}) => ({
+    id,
+    role: "user" as const,
+    blocks: [],
+    ...extra,
+  });
+
+  it("preserva a mensagem recém-enviada que o servidor ainda não gravou", async () => {
+    const { mergeThreadSnapshot } = await import("./api");
+    const prev = { cursor: 3, messages: [msg("m1"), msg("optimistic", { clientNonce: "n1" })] };
+    const next = { cursor: 3, messages: [msg("m1")] }; // poll sem a msg enviada
+    expect(mergeThreadSnapshot(prev, next).messages.map((m) => m.id)).toEqual(["m1", "optimistic"]);
+  });
+
+  it("solta a otimista quando o servidor grava a mensagem com o mesmo clientNonce", async () => {
+    const { mergeThreadSnapshot } = await import("./api");
+    const prev = { cursor: 3, messages: [msg("optimistic", { clientNonce: "n1" })] };
+    const next = { cursor: 4, messages: [msg("server-id", { clientNonce: "n1" })] };
+    expect(mergeThreadSnapshot(prev, next).messages.map((m) => m.id)).toEqual(["server-id"]);
+  });
+
+  it("carrega a mensagem enviada E a bolha de trabalhando juntas, na ordem", async () => {
+    const { mergeThreadSnapshot } = await import("./api");
+    const prev = {
+      cursor: 3,
+      messages: [msg("optimistic", { clientNonce: "n1" }), msg("progress:r1", { runId: "r1" })],
+    };
+    const next = { cursor: 3, messages: [] };
+    expect(mergeThreadSnapshot(prev, next).messages.map((m) => m.id)).toEqual([
+      "optimistic",
+      "progress:r1",
+    ]);
+  });
+});
