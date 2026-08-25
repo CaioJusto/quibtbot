@@ -34,6 +34,7 @@ import {
   type MobileBot,
   type MobileGroup,
   type MobileMessage,
+  mergeThreadSnapshot,
   rpc,
   sendToGroup,
   subscribeGroupThread,
@@ -207,12 +208,12 @@ export default function Thread() {
     if (isDemo) return null;
     if (groupId) {
       const next = await getGroupThread(groupId);
-      setSnap(next);
+      setSnap((prev) => mergeThreadSnapshot(prev, next));
       return next;
     }
     if (!botId) return null;
     const next = await rpc<ThreadState>("threads/get", { botId });
-    setSnap(next);
+    setSnap((prev) => mergeThreadSnapshot(prev, next));
     return next;
   }, [botId, groupId, isDemo]);
 

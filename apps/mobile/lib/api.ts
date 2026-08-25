@@ -731,6 +731,35 @@ async function subscribeEvents(
   }
 }
 
+/**
+ * Funde o snapshot do servidor (poll de segurança) com o que o feed ao vivo já mostra.
+ *
+ * O `refresh` trocava o snapshot inteiro pelo do servidor, que não traz a bolha de
+ * streaming (`progress:<runId>`) que o SSE acabou de adicionar. Sobre o proxy público o
+ * SSE vem bufferizado e o poll vira o caminho principal: bolha aparece pelo SSE, some no
+ * poll, reaparece no próximo evento — a resposta "piscando". Aqui o servidor continua
+ * sendo a verdade das mensagens já gravadas; só reenxertamos as bolhas vivas cujo run
+ * ainda não virou mensagem final. Assim que o servidor materializa a resposta (uma
+ * mensagem com aquele runId), a bolha some sozinha, sem tremer.
+ */
+export function mergeThreadSnapshot<T extends { messages: MobileMessage[]; cursor?: number }>(
+  prev: T | null,
+  next: T,
+): T {
+  if (!prev) return next;
+  const committedRunIds = new Set(
+    next.messages.map((message) => message.runId).filter((id): id is string => Boolean(id)),
+  );
+  const liveProgress = prev.messages.filter(
+    (message) =>
+      message.id.startsWith("progress:") &&
+      Boolean(message.runId) &&
+      !committedRunIds.has(message.runId as string),
+  );
+  if (liveProgress.length === 0) return next;
+  return { ...next, messages: [...next.messages, ...liveProgress] };
+}
+
 export function applyMobileThreadEvent<
   T extends { messages: MobileMessage[]; run?: unknown; cursor?: number },
 >(prev: T | null, event: ThreadEvent): T | null {

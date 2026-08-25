@@ -426,3 +426,46 @@ describe("askText", () => {
     );
   });
 });
+
+describe("mergeThreadSnapshot", () => {
+  const msg = (id: string, runId?: string) => ({ id, role: "bot" as const, blocks: [], runId });
+
+  it("preserva a bolha de streaming que o servidor ainda não materializou", async () => {
+    const { mergeThreadSnapshot } = await import("./api");
+    const prev = { cursor: 5, messages: [msg("m1"), msg("progress:r1", "r1")] };
+    const next = { cursor: 5, messages: [msg("m1")] };
+    expect(mergeThreadSnapshot(prev, next).messages.map((m) => m.id)).toEqual([
+      "m1",
+      "progress:r1",
+    ]);
+  });
+
+  it("solta a bolha quando a resposta final chega com o mesmo runId", async () => {
+    const { mergeThreadSnapshot } = await import("./api");
+    const prev = { cursor: 5, messages: [msg("progress:r1", "r1")] };
+    const next = { cursor: 6, messages: [msg("msg-final", "r1")] };
+    expect(mergeThreadSnapshot(prev, next).messages.map((m) => m.id)).toEqual(["msg-final"]);
+  });
+
+  it("sem bolha viva devolve o snapshot do servidor intacto", async () => {
+    const { mergeThreadSnapshot } = await import("./api");
+    const next = { cursor: 9, messages: [msg("a"), msg("b")] };
+    expect(mergeThreadSnapshot({ cursor: 8, messages: [] }, next)).toBe(next);
+  });
+
+  it("prev nulo (primeira carga) devolve o servidor", async () => {
+    const { mergeThreadSnapshot } = await import("./api");
+    const next = { cursor: 1, messages: [msg("a")] };
+    expect(mergeThreadSnapshot(null, next)).toBe(next);
+  });
+
+  it("não reenxerta bolha sem runId", async () => {
+    const { mergeThreadSnapshot } = await import("./api");
+    const prev = {
+      cursor: 5,
+      messages: [{ id: "progress:live", role: "bot" as const, blocks: [] }],
+    };
+    const next = { cursor: 5, messages: [msg("m1")] };
+    expect(mergeThreadSnapshot(prev, next).messages.map((m) => m.id)).toEqual(["m1"]);
+  });
+});
