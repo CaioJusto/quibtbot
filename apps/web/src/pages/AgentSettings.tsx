@@ -242,7 +242,7 @@ export function AgentSettings({
         <p className="mt-2 px-1 text-[13px] leading-[1.4] text-[var(--qb-muted-2)]">
           Ligado, ele age sozinho e só para em comando perigoso, senha e criar ou apagar bot.
           Desligado, pede aprovação para quase tudo. No card de aprovação, “Sempre permitir” libera
-          só aquele programa daí em diante.
+          só aquele comando, exatamente como está escrito, daí em diante.
         </p>
 
         <div className="mt-8 flex flex-col items-start gap-3">
