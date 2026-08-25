@@ -372,7 +372,18 @@ export async function runCliAsync(args: string[], deps: RunCliDeps = {}): Promis
         return report.ok ? 0 : 1;
       }
       case "pair": {
-        const paired = await runPair({ dataDir, publicUrl, fetch: fetchImpl });
+        // Mesmas deps do install: a rota de mint só responde ao loopback de DENTRO do
+        // container da API (pelo docker-proxy o par não é loopback e ela devolve 404).
+        // Sem run/composeFile o runPair não tinha como cair no exec dentro do container
+        // e o `quibtbot pair` morria em "mint failed with status 404" numa VPS.
+        const paired = await runPair({
+          dataDir,
+          publicUrl,
+          fetch: fetchImpl,
+          composeMode: "packaged",
+          composeFile,
+          run,
+        });
         if (!paired.ok) {
           error(paired.message);
           return 1;

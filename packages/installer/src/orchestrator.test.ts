@@ -564,3 +564,65 @@ describe("retomada numa instalação pública", () => {
     );
   });
 });
+
+describe("quibtbot pair numa VPS", () => {
+  it("cai para o mint dentro do container quando o loopback do host devolve 404", async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), "quibt-pair-vps-"));
+    ensureInstallEnvironment(dataDir, PUBLIC_URL, {
+      publicHost: "quibt-4d2a48dc.46.224.84.18.sslip.io",
+    });
+    // Pelo docker-proxy o par não é loopback: a API esconde a rota como 404.
+    const fetchImpl = (async (input: string, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/bootstrap/invites") && init?.method === "POST") {
+        return new Response("Not found", { status: 404 });
+      }
+      if (url.endsWith("/rpc/health")) {
+        return new Response(JSON.stringify({ json: { ok: true, needsFirstOwner: true } }), {
+          status: 200,
+        });
+      }
+      return new Response("not found", { status: 404 });
+    }) as typeof fetch;
+    let execMinted = false;
+    const run: ProcessRunner = {
+      async run(command, args) {
+        const joined = [command, ...args].join(" ");
+        if (command === "docker" && args[0] === "info") {
+          return { code: 0, stdout: "Server Version: 27.0.0", stderr: "" };
+        }
+        if (joined.includes("exec") && joined.includes("api")) {
+          execMinted = true;
+          return {
+            code: 0,
+            stdout: JSON.stringify({
+              code: "VPS12345",
+              token: "t",
+              expiresAt: "2026-08-17T01:00:00.000Z",
+            }),
+            stderr: "",
+          };
+        }
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    };
+
+    const result = await runPair({
+      dataDir,
+      publicUrl: PUBLIC_URL,
+      fetch: fetchImpl,
+      composeMode: "packaged",
+      composeFile: COMPOSE_FILE,
+      run,
+      platform: "linux",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(execMinted).toBe(true);
+    if (result.ok) {
+      expect(result.pairing.code).toBe("VPS12345");
+      // E o celular recebe o https, não o loopback.
+      expect(result.pairing.url).toBe("https://quibt-4d2a48dc.46.224.84.18.sslip.io");
+    }
+  });
+});
