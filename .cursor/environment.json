@@ -1,0 +1,16 @@
+{
+  "name": "Quibt Bot",
+  "install": "bash .cursor/install.sh",
+  "start": "bash .cursor/start.sh",
+  "terminals": [
+    {
+      "name": "dev",
+      "command": "bash .cursor/dev.sh"
+    }
+  ],
+  "ports": [
+    { "name": "api", "port": 3100 },
+    { "name": "web", "port": 5173 },
+    { "name": "sandbox-supervisor", "port": 7091 }
+  ]
+}

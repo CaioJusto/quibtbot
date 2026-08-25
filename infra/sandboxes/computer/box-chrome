@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ACTION="${1:-}"
+PROFILE="${2:-}"
+SHARED="${3:-}"
+
+if [[ -z "$ACTION" || -z "$PROFILE" || -z "$SHARED" ]]; then
+  echo "usage: box-chrome seed-chrome-session|save-chrome-session <profile> <shared-store>" >&2
+  exit 1
+fi
+
+# Cookie and login files only. Never Local State — that is the per-screen Chrome lock.
+paths=(
+  "Default/Cookies"
+  "Default/Cookies-journal"
+  "Default/Cookies-wal"
+  "Default/Cookies-shm"
+  "Default/Network/Cookies"
+  "Default/Network/Cookies-journal"
+  "Default/Network/Cookies-wal"
+  "Default/Network/Cookies-shm"
+  "Default/Login Data"
+  "Default/Login Data-journal"
+  "Default/Login Data-wal"
+  "Default/Login Data-shm"
+  "Default/Web Data"
+  "Default/Web Data-journal"
+  "Default/Web Data-wal"
+  "Default/Web Data-shm"
+)
+
+copy_files() {
+  local from="$1" to="$2"
+  mkdir -p "$from" "$to"
+  for rel in "${paths[@]}"; do
+    local source="$from/$rel"
+    local target="$to/$rel"
+    mkdir -p "$(dirname "$target")"
+    if [[ -f "$source" && ! -L "$source" ]]; then
+      cp -a "$source" "$target"
+    fi
+  done
+}
+
+case "$ACTION" in
+  seed-chrome-session)
+    mkdir -p "$PROFILE"
+    copy_files "$SHARED" "$PROFILE"
+    ;;
+  save-chrome-session)
+    copy_files "$PROFILE" "$SHARED"
+    ;;
+  *)
+    echo "usage: box-chrome seed-chrome-session|save-chrome-session <profile> <shared-store>" >&2
+    exit 1
+    ;;
+esac

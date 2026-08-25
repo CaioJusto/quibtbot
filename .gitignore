@@ -1,0 +1,41 @@
+node_modules
+.turbo
+dist
+build
+coverage
+.playwright-report
+test-results
+playwright-report
+*.tsbuildinfo
+.env
+.env.local
+.env.*.local
+data
+apps/**/data
+.tmp
+.DS_Store
+apps/web/dist
+apps/desktop/dist
+apps/desktop/out
+apps/mobile/.expo
+apps/mobile/dist
+# Projeto nativo gerado por `expo prebuild` para o dev build; o app é CNG.
+apps/mobile/ios
+apps/mobile/android
+packages/db/src/generated
+infra/sandboxes/supervisor/dist
+*.log
+.vercel
+.cache
+artifacts
+.codex-artifacts
+backups
+verify-report
+.astro
+design/
+PRODUCT_PLAN.md
+.playwright-mcp
+
+# Saída do build da libssh2 para iOS (apps/mobile/scripts/build-ios-libssh2.sh):
+# binários grandes, reconstruídos por quem for empacotar o app.
+apps/mobile/ios-libssh2

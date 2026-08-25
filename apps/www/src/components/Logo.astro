@@ -1,0 +1,18 @@
+---
+type Props = {
+  href?: string;
+  label?: string;
+};
+
+const { href = "/", label = "Quibt Bot, home" } = Astro.props as Props;
+---
+
+<a class="brand-lockup" href={href} aria-label={label}>
+  <img
+    class="brand-lockup__image"
+    src="/quibt-logo.png"
+    alt="Quibt"
+    width="538"
+    height="199"
+  />
+</a>

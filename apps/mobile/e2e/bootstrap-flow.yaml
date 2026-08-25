@@ -1,0 +1,51 @@
+# Deterministic mobile system journey for Quibt Bot.
+#
+# This is the spec the harness in `bootstrap-flow.e2e.test.ts` executes: no Maestro, no
+# Detox, no Expo Go, and no phone or emulator. Every step drives a real mobile lib module
+# (`apps/mobile/lib/*`) against a real API app booted with the scripted / fake emulator
+# stack (see README.md), so the journey stays deterministic in this environment and in CI.
+#
+# Steps run in the exact order below. The harness fails if a step is missing, out of
+# order, or renamed here without a matching runner.
+name: Mobile bootstrap system journey
+description: >
+  Launch a clean app, configure the server, claim a minted bootstrap code, create the
+  first owner account, add a scripted model, probe and activate a machine, create a bot,
+  send it a scripted message, and attach a file to the thread.
+steps:
+  - id: launch_clean_app
+    description: >
+      Boot the app with no stored session, API base, or bootstrap enrollment token
+      (apps/mobile/lib/api.ts, apps/mobile/lib/session.ts, apps/mobile/lib/bootstrap-pairing.ts).
+  - id: configure_server
+    description: >
+      Read the server host catalog and the copyable bootstrap command for "Neste
+      computador" (apps/mobile/lib/server-setup.ts).
+  - id: enter_bootstrap_code
+    description: >
+      Claim the bootstrap code minted by the test harness, exactly like scanning the QR
+      or typing the code on /pair-installation (apps/mobile/lib/bootstrap-pairing.ts).
+  - id: create_owner
+    description: >
+      Sign up the first account using the enrollment token from the claim; the server
+      grants it deployment ownership (apps/mobile/lib/api.ts).
+  - id: add_model
+    description: >
+      Connect the scripted model credential and set it as default, exactly like the
+      model step of onboarding (apps/mobile/lib/api.ts rpc, models/connect, models/setDefault).
+  - id: probe_activate_machine
+    description: >
+      Probe and then activate a machine from the catalog (apps/mobile/lib/machine-settings.ts:
+      machineActivationGate, splitMachineCatalog), mirroring machine-settings.tsx's save().
+  - id: create_bot
+    description: >
+      Create the first bot (bots/create), exactly like /new.tsx.
+  - id: send_scripted_message
+    description: >
+      Send a message to the bot and wait for the scripted run to finish (threads/send,
+      threads/get), exactly like /thread.tsx.
+  - id: attach_file
+    description: >
+      Upload a file and send it into the thread (apps/mobile/lib/attachments.ts:
+      uploadAttachment, buildSendWithAttachmentsPayload), exactly like the attach button
+      on /thread.tsx.

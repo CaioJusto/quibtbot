@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "asset": "public/social/quibt-open-source-v2.png",
+  "width": 1200,
+  "height": 630,
+  "mediaType": "image/png",
+  "compatibilityAssets": [
+    "public/og-image.png"
+  ],
+  "bytes": 276167,
+  "sha256": "af4dd2729b7807b62776b7f1bb5e537ed8f1dd43fa199a14e4a5030ea0f2ab54",
+  "copy": {
+    "headline": "Your own team of AI bots, in a chat app.",
+    "description": "AI bots with personality, memory, and a computer of their own.",
+    "domain": "quibt.com.br"
+  }
+}

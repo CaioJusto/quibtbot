@@ -1,0 +1,31 @@
+{
+  "name": "@quibt/www",
+  "version": "0.1.0",
+  "private": true,
+  "homepage": "https://quibt.com.br",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "check": "astro check"
+  },
+  "dependencies": {
+    "@astrojs/react": "^6.0.2",
+    "@quibt/core": "workspace:*",
+    "@quibt/installer": "workspace:*",
+    "@quibt/ui-web": "workspace:*",
+    "astro": "^7.2.1",
+    "react": "19.0.0",
+    "react-dom": "19.0.0"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.10",
+    "@tailwindcss/vite": "^4.1.12",
+    "@types/react": "^19.1.12",
+    "@types/react-dom": "^19.1.9",
+    "tailwindcss": "^4.1.12",
+    "typescript": "^5.9.2"
+  }
+}

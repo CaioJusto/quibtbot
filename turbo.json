@@ -1,0 +1,35 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "globalPassThroughEnv": [
+    "CSC_LINK",
+    "CSC_KEY_PASSWORD",
+    "CSC_NAME",
+    "QUIBT_NOTARIZE",
+    "QUIBT_NOTARY_PROFILE",
+    "APPLE_ID",
+    "APPLE_APP_SPECIFIC_PASSWORD",
+    "APPLE_TEAM_ID",
+    "WIN_CSC_LINK",
+    "WIN_CSC_KEY_PASSWORD"
+  ],
+  "tasks": {
+    "generate": {
+      "cache": false
+    },
+    "build": {
+      "dependsOn": ["^build", "^generate"],
+      "outputs": ["dist/**", "src/generated/**"]
+    },
+    "check": {
+      "dependsOn": ["^check", "^generate"]
+    },
+    "test": {
+      "dependsOn": ["^generate"],
+      "outputs": ["coverage/**"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    }
+  }
+}

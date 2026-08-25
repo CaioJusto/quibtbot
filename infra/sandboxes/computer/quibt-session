@@ -1,0 +1,274 @@
+#!/usr/bin/env bash
+set -uo pipefail
+umask 0002
+HOME="${HOME:-/home/quibt}"
+BOT_ID="${2:-}"
+ACTION="${1:-}"
+DISPLAY_NUM="${3:-}"
+ROOT="${QUIBT_DESKTOPS_ROOT:-/quibt-desktops}"
+SHARED_COOKIES="$HOME/.config/quibt-shared-chromium"
+mkdir -p "$ROOT" "$SHARED_COOKIES" /tmp/quibt /tmp/.X11-unix /workspace
+
+session_dir() {
+  echo "$ROOT/$1"
+}
+
+novnc_answers() {
+  local port="$1"
+  python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:${port}/embed.html', timeout=2).read()" >/dev/null 2>&1
+}
+
+start_novnc() {
+  local dir="$1" port="$2" vnc="$3"
+  mkdir -p "$dir/log"
+  websockify --web=/usr/share/novnc "0.0.0.0:$port" "127.0.0.1:$vnc" >"$dir/log/novnc.log" 2>&1 &
+  echo $! > "$dir/novnc.pid"
+}
+
+# Xvfb can still be up while websockify has leaked every FD and resets the embed.
+# A live session.pid is not a live screen.
+ensure_novnc() {
+  local bot="$1"
+  local dir display port vnc i
+  dir="$(session_dir "$bot")"
+  display="$(cat "$dir/display" 2>/dev/null || echo 1)"
+  port="$(cat "$dir/novnc.port" 2>/dev/null || echo $((6080 + display - 1)))"
+  vnc=$((5900 + display - 1))
+  if novnc_answers "$port"; then
+    return 0
+  fi
+  if [[ -f "$dir/novnc.pid" ]]; then
+    kill "$(cat "$dir/novnc.pid")" 2>/dev/null || true
+    sleep 0.2
+  fi
+  start_novnc "$dir" "$port" "$vnc"
+  echo "$port" > "$dir/novnc.port"
+  for i in $(seq 1 15); do
+    if novnc_answers "$port"; then
+      return 0
+    fi
+    sleep 0.2
+  done
+  return 1
+}
+
+watch_novnc() {
+  local bot="$1" dir pidfile
+  dir="$(session_dir "$bot")"
+  pidfile="$dir/session.pid"
+  while [[ -f "$pidfile" ]] && kill -0 "$(cat "$pidfile" 2>/dev/null)" 2>/dev/null; do
+    sleep 5
+    ensure_novnc "$bot" || true
+  done
+}
+
+ensure_watchdog() {
+  local bot="$1" dir
+  dir="$(session_dir "$bot")"
+  if [[ -f "$dir/watchdog.pid" ]] && kill -0 "$(cat "$dir/watchdog.pid")" 2>/dev/null; then
+    return 0
+  fi
+  watch_novnc "$bot" >/dev/null 2>&1 &
+  echo $! > "$dir/watchdog.pid"
+}
+
+start_session() {
+  local bot="$1" display="$2"
+  local dir pidfile runtime_dir vnc_password vnc_auth
+  dir="$(session_dir "$bot")"
+  pidfile="$dir/session.pid"
+  runtime_dir="/run/quibt/sessions/$display"
+  export XAUTHORITY="$runtime_dir/Xauthority"
+  vnc_password="$runtime_dir/vnc.password"
+  vnc_auth="$runtime_dir/vnc.auth"
+  mkdir -p "$runtime_dir"
+  chmod 700 "$runtime_dir"
+  if [[ ! -s "$XAUTHORITY" ]]; then
+    touch "$XAUTHORITY"
+    chmod 600 "$XAUTHORITY"
+    xauth -f "$XAUTHORITY" add ":$display" . "$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
+  fi
+  if [[ ! -s "$vnc_password" ]]; then
+    python3 -c 'import secrets,sys; open(sys.argv[1], "w").write(secrets.token_urlsafe(8)[:8])' "$vnc_password"
+    chmod 600 "$vnc_password"
+  fi
+  x11vnc -storepasswd "$(cat "$vnc_password")" "$vnc_auth" >/dev/null
+  chmod 600 "$vnc_auth"
+  # O pidfile mora na home, que sobrevive ao container: num container novo o mesmo número
+  # pode ser de outro processo qualquer. Só vale se for mesmo o Xvfb desta sessão.
+  if [[ -f "$pidfile" ]] && kill -0 "$(cat "$pidfile")" 2>/dev/null \
+    && [[ "$(cat "/proc/$(cat "$pidfile")/comm" 2>/dev/null)" == "Xvfb" ]]; then
+    # Report the display this session really serves. Echoing the requested one told the
+    # supervisor a screen lived on a port nobody was listening on (or, worse, on another
+    # bot's port) whenever the two disagreed.
+    local live
+    live="$(cat "$dir/display" 2>/dev/null || true)"
+    # A wedged noVNC used to stay dead here: Xvfb was up, so we never touched websockify,
+    # and takeover painted a black frame for the person who just took the keyboard.
+    ensure_novnc "$bot" || true
+    ensure_watchdog "$bot"
+    echo "already-running display=${live:-$display}"
+    return 0
+  fi
+  mkdir -p "$dir/chrome" "$dir/xdg" "$dir/dbus" "$dir/log"
+  export DISPLAY=":$display"
+  export XDG_RUNTIME_DIR="$dir/xdg"
+  export XDG_CONFIG_HOME="$dir/xdg-config"
+  export XDG_CACHE_HOME="$dir/xdg-cache"
+  export XDG_DATA_HOME="$dir/xdg-data"
+  mkdir -p "$XDG_RUNTIME_DIR" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME"
+  chmod 700 "$XDG_RUNTIME_DIR"
+  if command -v dbus-daemon >/dev/null 2>&1; then
+    dbus-daemon --session --address="unix:path=$dir/dbus/bus" --nofork >/dev/null 2>&1 &
+    echo $! > "$dir/dbus.pid"
+    export DBUS_SESSION_BUS_ADDRESS="unix:path=$dir/dbus/bus"
+  fi
+  rm -f "/tmp/.X${display}-lock" "/tmp/.X11-unix/X${display}"
+  Xvfb ":$display" -screen 0 1280x800x24 -auth "$XAUTHORITY" +extension RANDR +render -noreset >"$dir/log/xvfb.log" 2>&1 &
+  local xvfb_pid=$!
+  echo "$xvfb_pid" > "$dir/xvfb.pid"
+  local ready=0 i
+  for i in $(seq 1 100); do
+    if xdpyinfo -display ":$display" >/dev/null 2>&1; then
+      ready=1
+      break
+    fi
+    sleep 0.1
+  done
+  if [[ "$ready" -ne 1 ]]; then
+    echo "framebuffer failed" >&2
+    cat "$dir/log/xvfb.log" >&2 || true
+    return 1
+  fi
+  # O compositor lê a mesa do pixmap em _XROOTPMAP_ID; só o background_pixel do
+  # xsetroot deixaria a tela no cinza padrão do servidor.
+  quibt-desktop-bg "${QUIBT_DESKTOP_BG:-#D9E6F7}" >/dev/null 2>&1 \
+    || xsetroot -solid "${QUIBT_DESKTOP_BG:-#D9E6F7}" >/dev/null 2>&1 || true
+  if command -v xfwm4 >/dev/null 2>&1; then
+    # O compositor do xfwm4 exige GL, e o Xvfb só tem llvmpipe: ligado, ele pinta
+    # a janela de preto durante o arrasto. Quem compõe aqui é o picom, abaixo.
+    xfwm4 --display ":$display" --compositor=off >"$dir/log/wm.log" 2>&1 &
+    echo $! > "$dir/wm.pid"
+  else
+    mkdir -p "$runtime_dir/fluxbox-home/.fluxbox"
+    cp /etc/quibt/fluxbox/init "$runtime_dir/fluxbox-home/.fluxbox/init" 2>/dev/null || true
+    HOME="$runtime_dir/fluxbox-home" fluxbox -display ":$display" >"$dir/log/wm.log" 2>&1 &
+    echo $! > "$dir/wm.pid"
+  fi
+  # Sem compositor, arrastar uma janela deixava rastro das decorações pela mesa.
+  # O backend xrender funciona no Xvfb; `--vsync` é o que abortava a partida,
+  # porque o servidor virtual não tem método de sincronia nenhum.
+  if command -v picom >/dev/null 2>&1; then
+    picom --backend xrender --no-fading-openclose >"$dir/log/picom.log" 2>&1 &
+    echo $! > "$dir/picom.pid"
+  fi
+  local ports_vnc=$((5900 + display - 1))
+  local ports_novnc=$((6080 + display - 1))
+  box-chrome seed-chrome-session "$dir/chrome" "$SHARED_COOKIES"
+  DISPLAY=":$display" HOME="$HOME" \
+    CHROME_USER_DATA_DIR="$dir/chrome" \
+    quibt-browser >"$dir/log/browser.log" 2>&1 &
+  echo $! > "$dir/browser.pid"
+  # Em janela (não maximizado) o Chromium às vezes cria a janela sem mapeá-la, e a
+  # tela do bot fica só com a mesa. Mapear e posicionar aqui torna o resultado o
+  # mesmo em qualquer perfil, inclusive nos que já traziam um estado salvo.
+  (
+    for _ in $(seq 1 60); do
+      win="$(DISPLAY=":$display" xdotool search --class chromium 2>/dev/null | tail -1)"
+      if [[ -n "$win" ]]; then
+        DISPLAY=":$display" xdotool windowmap "$win" >/dev/null 2>&1 || true
+        DISPLAY=":$display" xdotool windowmove "$win" 64 44 >/dev/null 2>&1 || true
+        DISPLAY=":$display" xdotool windowsize "$win" 1120 690 >/dev/null 2>&1 || true
+        DISPLAY=":$display" xdotool windowactivate "$win" >/dev/null 2>&1 || true
+        break
+      fi
+      sleep 0.5
+    done
+  ) >"$dir/log/window.log" 2>&1 &
+  # -nocursorshape desenha o ponteiro no próprio quadro: quem só acompanha a tela
+  # enxerga para onde o bot está indo, e não só o resultado do clique.
+  # Barra de atalhos embaixo: sem ela a mesa fica vazia e não há como abrir nada
+  # sem pedir ao bot. Cada sessão tem a sua, no display dela.
+  if command -v tint2 >/dev/null 2>&1; then
+    DISPLAY=":$display" tint2 -c /etc/quibt/tint2rc >"$dir/log/dock.log" 2>&1 &
+    echo $! > "$dir/dock.pid"
+  fi
+  # Pisca um anel onde a tela recebeu um clique, para quem só acompanha ver o
+  # momento do toque e não apenas o resultado dele.
+  DISPLAY=":$display" quibt-click-pulse >"$dir/log/click-pulse.log" 2>&1 &
+  echo $! > "$dir/click-pulse.pid"
+  x11vnc -display ":$display" -forever -shared -rfbauth "$vnc_auth" -listen 127.0.0.1 -rfbport "$ports_vnc" -xkb -ncache 0 -nocursorshape -cursor arrow >"$dir/log/vnc.log" 2>&1 &
+  echo $! > "$dir/vnc.pid"
+  echo "$display" > "$dir/display"
+  echo "$ports_novnc" > "$dir/novnc.port"
+  start_novnc "$dir" "$ports_novnc" "$ports_vnc"
+  echo "$xvfb_pid" > "$pidfile"
+  ensure_watchdog "$bot"
+  echo "started display=$display novnc=$ports_novnc"
+}
+
+stop_session() {
+  local bot="$1" dir
+  dir="$(session_dir "$bot")"
+  box-chrome save-chrome-session "$dir/chrome" "$SHARED_COOKIES" 2>/dev/null || true
+  for name in watchdog novnc vnc click-pulse dock browser picom wm dbus xvfb; do
+    if [[ -f "$dir/$name.pid" ]]; then
+      kill "$(cat "$dir/$name.pid")" 2>/dev/null || true
+    fi
+  done
+  rm -f "$dir/session.pid"
+  echo "stopped"
+}
+
+status_session() {
+  local bot="$1" dir
+  dir="$(session_dir "$bot")"
+  if [[ -f "$dir/session.pid" ]] && kill -0 "$(cat "$dir/session.pid")" 2>/dev/null \
+    && [[ "$(cat "/proc/$(cat "$dir/session.pid")/comm" 2>/dev/null)" == "Xvfb" ]]; then
+    echo "running display=$(cat "$dir/display" 2>/dev/null) novnc=$(cat "$dir/novnc.port" 2>/dev/null)"
+    return 0
+  fi
+  echo "stopped"
+  return 1
+}
+
+case "$ACTION" in
+  start)
+    if [[ -z "$BOT_ID" || -z "$DISPLAY_NUM" ]]; then
+      echo "usage: quibt-session start <botId> <display>" >&2
+      exit 1
+    fi
+    start_session "$BOT_ID" "$DISPLAY_NUM"
+    ;;
+  stop)
+    if [[ -z "$BOT_ID" ]]; then
+      echo "usage: quibt-session stop <botId>" >&2
+      exit 1
+    fi
+    stop_session "$BOT_ID"
+    ;;
+  status)
+    if [[ -z "$BOT_ID" ]]; then
+      echo "usage: quibt-session status <botId>" >&2
+      exit 1
+    fi
+    status_session "$BOT_ID"
+    ;;
+  repair)
+    if [[ -z "$BOT_ID" ]]; then
+      echo "usage: quibt-session repair <botId>" >&2
+      exit 1
+    fi
+    if ensure_novnc "$BOT_ID"; then
+      ensure_watchdog "$BOT_ID"
+      echo "repaired"
+      exit 0
+    fi
+    echo "broken"
+    exit 1
+    ;;
+  *)
+    echo "usage: quibt-session start|stop|status|repair <botId> [display]" >&2
+    exit 1
+    ;;
+esac

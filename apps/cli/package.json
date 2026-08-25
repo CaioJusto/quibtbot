@@ -1,0 +1,21 @@
+{
+  "name": "@quibt/cli",
+  "version": "0.2.9",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "quibtbot": "./dist/main.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --root ../.. apps/cli packages/installer"
+  },
+  "dependencies": {
+    "@quibt/installer": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2",
+    "vitest": "^4.1.10"
+  }
+}

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Navegador
+Comment=Chromium com o perfil deste bot
+Exec=quibt-open %U
+Icon=chromium
+Terminal=false
+Categories=Network;WebBrowser;
+MimeType=text/html;application/xhtml+xml;x-scheme-handler/http;x-scheme-handler/https;

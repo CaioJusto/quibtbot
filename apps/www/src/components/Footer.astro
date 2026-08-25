@@ -1,0 +1,22 @@
+---
+import { copyFor, routesFor, type Locale } from "../i18n";
+import { GITHUB_URL } from "../site";
+import Logo from "./Logo.astro";
+
+type Props = { locale?: Locale };
+const { locale = "en" } = Astro.props as Props;
+const copy = copyFor(locale);
+const routes = routesFor(locale);
+---
+
+<footer class="site-footer">
+  <div class="site-footer__brand">
+    <Logo href={routes.home} label={locale === "en" ? "Quibt Bot, home" : "Quibt Bot, início"} />
+    <span class="site-footer__legal">© 2026 · Quibt Bot</span>
+  </div>
+  <nav class="site-footer__links" aria-label={copy.footer.label}>
+    <a href={GITHUB_URL} target="_blank" rel="noreferrer">{copy.footer.github}</a>
+    <a href={routes.privacy}>{copy.footer.privacy}</a>
+    <a href={routes.terms}>{copy.footer.terms}</a>
+  </nav>
+</footer>

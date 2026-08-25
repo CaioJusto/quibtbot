@@ -1,0 +1,120 @@
+{
+  "expo": {
+    "name": "Quibt Bot",
+    "slug": "quibt-bot",
+    "owner": "quibt",
+    "scheme": "quibt",
+    "version": "0.1.1",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "icon": "./assets/icon.png",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/10eabf5e-638b-45be-b977-b742e998ad0c",
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0,
+      "requestHeaders": {
+        "expo-channel-name": "production"
+      }
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": "O Quibt Bot usa Face ID para proteger senhas SSH, chaves privadas e chaves da Box neste aparelho.",
+          "configureAndroidBackup": false
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#0071FB"
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "O Quibt Bot usa a câmera só para ler o QR que conecta este app ao computador dos seus bots.",
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "O Quibt Bot usa o microfone só se você ditar uma mensagem.",
+          "recordAudioAndroid": true
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ],
+      "expo-font",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 180,
+          "resizeMode": "contain",
+          "backgroundColor": "#FCFCFC",
+          "dark": {
+            "image": "./assets/splash-icon.png",
+            "backgroundColor": "#FCFCFC"
+          }
+        }
+      ],
+      "expo-status-bar",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "O Quibt Bot usa o microfone só se você ditar uma mensagem.",
+          "speechRecognitionPermission": "O Quibt Bot usa o reconhecimento de fala só para transformar o que você dita em texto."
+        }
+      ],
+      "expo-video",
+      "./plugins/with-modern-libssh2"
+    ],
+    "ios": {
+      "bundleIdentifier": "app.quibt.bot",
+      "buildNumber": "2",
+      "supportsTablet": true,
+      "icon": "./assets/icon.png",
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true
+        },
+        "NSLocalNetworkUsageDescription": "O Quibt Bot usa a rede local para conectar este iPhone ao computador dos seus bots.",
+        "NSMicrophoneUsageDescription": "O Quibt Bot usa o microfone só se você ditar uma mensagem.",
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSSpeechRecognitionUsageDescription": "O Quibt Bot usa o reconhecimento de fala só para transformar o que você dita em texto."
+      },
+      "appleTeamId": "PFCLC953QY"
+    },
+    "android": {
+      "package": "app.quibt.bot",
+      "versionCode": 2,
+      "icon": "./assets/icon.png",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "monochromeImage": "./assets/monochrome-icon.png",
+        "backgroundColor": "#0071FB"
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "10eabf5e-638b-45be-b977-b742e998ad0c"
+      }
+    }
+  }
+}

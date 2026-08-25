@@ -1,0 +1,342 @@
+diff --git a/android/src/main/java/me/dylankenneally/rnssh/RNSshClientModule.java b/android/src/main/java/me/dylankenneally/rnssh/RNSshClientModule.java
+index 22ba1a7d2a77f227ad1e6a83a7bd0f8d37fe2f3a..e2d755bdc51a044d670f44cf5b2c15525f05aa6e 100644
+--- a/android/src/main/java/me/dylankenneally/rnssh/RNSshClientModule.java
++++ b/android/src/main/java/me/dylankenneally/rnssh/RNSshClientModule.java
+@@ -46,10 +46,16 @@ import com.facebook.react.bridge.WritableMap;
+ import com.facebook.react.bridge.Arguments;
+ 
+ import com.jcraft.jsch.KeyPair;
++import com.jcraft.jsch.HostKey;
++import com.jcraft.jsch.HostKeyRepository;
++import com.jcraft.jsch.UserInfo;
+ 
+ import java.io.File;
+ import java.io.IOException;
+ import java.io.ByteArrayOutputStream;
++import java.security.MessageDigest;
++import android.util.Base64;
++import java.nio.charset.StandardCharsets;
+ 
+ public class RNSshClientModule extends ReactContextBaseJavaModule {
+   private class SSHClient {
+@@ -87,6 +93,181 @@ public class RNSshClientModule extends ReactContextBaseJavaModule {
+             .emit(eventName, params);
+   }
+ 
++  private static String normalizeSha256Fingerprint(String input) {
++    if (input == null) return "";
++    String trimmed = input.trim();
++    if (trimmed.isEmpty()) return "";
++    if (trimmed.matches("(?i)^SHA256:[A-Za-z0-9+/=]+$")) {
++      return trimmed.replaceAll("=+$", "").replaceFirst("(?i)^SHA256:", "SHA256:");
++    }
++    if (trimmed.matches("(?i)^[a-f0-9]{64}$")) {
++      try {
++        byte[] bytes = new byte[32];
++        for (int i = 0; i < 32; i++) {
++          bytes[i] = (byte) Integer.parseInt(trimmed.substring(i * 2, i * 2 + 2), 16);
++        }
++        String base64 = Base64.encodeToString(bytes, Base64.NO_WRAP).replaceAll("=+$", "");
++        return "SHA256:" + base64;
++      } catch (Exception error) {
++        return trimmed;
++      }
++    }
++    return trimmed;
++  }
++
++  private static String sha256Fingerprint(byte[] key) throws Exception {
++    MessageDigest digest = MessageDigest.getInstance("SHA-256");
++    byte[] hash = digest.digest(key);
++    String base64 = Base64.encodeToString(hash, Base64.NO_WRAP).replaceAll("=+$", "");
++    return "SHA256:" + base64;
++  }
++
++  private static String detectHostKeyAlgorithm(byte[] key) {
++    if (key == null || key.length < 8) return "unknown";
++    int typeLen = ((key[0] & 0xff) << 24) | ((key[1] & 0xff) << 16) | ((key[2] & 0xff) << 8) | (key[3] & 0xff);
++    if (typeLen <= 0 || 4 + typeLen > key.length) return "unknown";
++    return new String(key, 4, typeLen, StandardCharsets.UTF_8).trim();
++  }
++
++  @ReactMethod
++  public void inspectHostKey(final String host, final Integer port, final Promise promise) {
++    new Thread(new Runnable() {
++      public void run() {
++        Session session = null;
++        final byte[][] capturedKey = new byte[1][];
++        try {
++          JSch jsch = new JSch();
++          jsch.setHostKeyRepository(new HostKeyRepository() {
++            public int check(String hostName, byte[] key) {
++              capturedKey[0] = key.clone();
++              return HostKeyRepository.NOT_MATCH;
++            }
++
++            public void add(HostKey hostKey, UserInfo userInfo) {}
++
++            public void remove(String host, String type) {}
++
++            public void remove(String host, String type, byte[] key) {}
++
++            public String getKnownHostsRepositoryID() {
++              return "quibt-inspect-host-key";
++            }
++          });
++          session = jsch.getSession("quibt-fingerprint-probe", host, port);
++          Properties properties = new Properties();
++          properties.setProperty("StrictHostKeyChecking", "ask");
++          session.setConfig(properties);
++          try {
++            session.connect(20_000);
++          } catch (JSchException error) {
++            // Expected: host key is rejected after capture so auth never runs.
++          }
++          if (capturedKey[0] == null) {
++            promise.reject("inspect_failed", "SSH host fingerprint was not returned");
++            return;
++          }
++          WritableMap result = Arguments.createMap();
++          result.putString("algorithm", detectHostKeyAlgorithm(capturedKey[0]));
++          result.putString("fingerprint", sha256Fingerprint(capturedKey[0]));
++          promise.resolve(result);
++        } catch (Exception error) {
++          promise.reject("inspect_failed", error.getMessage());
++        } finally {
++          if (session != null && session.isConnected()) {
++            session.disconnect();
++          }
++        }
++      }
++    }).start();
++  }
++
++  @ReactMethod
++  public void connectVerifiedHost(
++      final String host,
++      final Integer port,
++      final String username,
++      final String expectedFingerprint,
++      final ReadableMap auth,
++      final Promise promise
++  ) {
++    new Thread(new Runnable() {
++      public void run() {
++        try {
++          final String expected = normalizeSha256Fingerprint(expectedFingerprint);
++          if (expected.isEmpty()) {
++            promise.reject("fingerprint_required", "Expected SSH host fingerprint is required.");
++            return;
++          }
++
++          JSch jsch = new JSch();
++          jsch.setHostKeyRepository(new HostKeyRepository() {
++            public int check(String hostName, byte[] key) {
++              try {
++                String actual = sha256Fingerprint(key);
++                return actual.equals(expected) ? HostKeyRepository.OK : HostKeyRepository.NOT_MATCH;
++              } catch (Exception error) {
++                return HostKeyRepository.NOT_MATCH;
++              }
++            }
++
++            public void add(HostKey hostKey, UserInfo userInfo) {}
++
++            public void remove(String host, String type) {}
++
++            public void remove(String host, String type, byte[] key) {}
++
++            public String getKnownHostsRepositoryID() {
++              return "quibt-verified-ssh";
++            }
++          });
++
++          String password = auth.hasKey("password") ? auth.getString("password") : null;
++          String privateKey = auth.hasKey("privateKey") ? auth.getString("privateKey") : null;
++          String passphrase = auth.hasKey("passphrase") ? auth.getString("passphrase") : null;
++
++          if (privateKey != null) {
++            byte[] privateKeyBytes = privateKey.getBytes(StandardCharsets.UTF_8);
++            byte[] passphraseBytes = passphrase != null ? passphrase.getBytes(StandardCharsets.UTF_8) : null;
++            jsch.addIdentity("default", privateKeyBytes, null, passphraseBytes);
++          }
++
++          Session session = jsch.getSession(username, host, port);
++          if (password != null) {
++            session.setPassword(password);
++          }
++
++          Properties properties = new Properties();
++          properties.setProperty("StrictHostKeyChecking", "yes");
++          session.setConfig(properties);
++          session.connect(20_000);
++
++          String clientKey = "verified_" + System.currentTimeMillis();
++          SSHClient client = new SSHClient();
++          client._session = session;
++          client._key = clientKey;
++          clientPool.put(clientKey, client);
++          promise.resolve(clientKey);
++        } catch (Exception error) {
++          promise.reject("connect_failed", error.getMessage());
++        }
++      }
++    }).start();
++  }
++
++  @ReactMethod
++  public void disconnectVerified(final String key, final Promise promise) {
++    new Thread(new Runnable() {
++      public void run() {
++        try {
++          disconnect(key);
++          promise.resolve(null);
++        } catch (Exception error) {
++          promise.reject("disconnect_failed", error.getMessage());
++        }
++      }
++    }).start();
++  }
++
+   @ReactMethod
+   private void connectToHostByPassword(final String host, final Integer port, final String username, final String passwordOrKey, final String key, final Callback callback) {
+     connectToHost(host, port, username, passwordOrKey, null, key, callback);
+diff --git a/ios/RNSSHClient.m b/ios/RNSSHClient.m
+index 4e116d445f95dc37df09aa7c79177418a6f7021a..fd71dad632a75026b6b438843232be81deac8d1a 100644
+--- a/ios/RNSSHClient.m
++++ b/ios/RNSSHClient.m
+@@ -1,7 +1,29 @@
+ #import <React/RCTUtils.h>
++#import <CommonCrypto/CommonDigest.h>
+ #import "RNSSHClient.h"
+ #import "SSHClient.h"
+ 
++static NSString *QBNormalizeSha256Fingerprint(NSString *input) {
++  if (input == nil) return @"";
++  NSString *trimmed = [input stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
++  if (trimmed.length == 0) return @"";
++  if ([trimmed rangeOfString:@"SHA256:" options:NSCaseInsensitiveSearch].location == 0) {
++    return trimmed;
++  }
++  return trimmed;
++}
++
++static NSString *QBSha256Fingerprint(NSData *keyData) {
++  unsigned char digest[CC_SHA256_DIGEST_LENGTH];
++  CC_SHA256(keyData.bytes, (CC_LONG)keyData.length, digest);
++  NSData *hash = [NSData dataWithBytes:digest length:CC_SHA256_DIGEST_LENGTH];
++  NSString *base64 = [hash base64EncodedStringWithOptions:0];
++  while ([base64 hasSuffix:@"="]) {
++    base64 = [base64 substringToIndex:base64.length - 1];
++  }
++  return [NSString stringWithFormat:@"SHA256:%@", base64];
++}
++
+ @implementation RNSSHClient {
+     NSMutableDictionary* _clientPool;
+ }
+@@ -428,4 +450,104 @@ RCT_EXPORT_METHOD(disconnect:(nonnull NSString*)key) {
+     [[self clientPool] removeObjectForKey:key];
+ }
+ 
++RCT_EXPORT_METHOD(inspectHostKey:(NSString *)host
++                  port:(NSInteger)port
++                  resolver:(RCTPromiseResolveBlock)resolve
++                  rejecter:(RCTPromiseRejectBlock)reject)
++{
++    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
++        NMSSHSession *session = [NMSSHSession connectToHost:host port:port withUsername:@"quibt-fingerprint-probe"];
++        if (!session || !session.isConnected) {
++            reject(@"inspect_failed", session.lastError.localizedDescription ?: @"SSH connection failed", nil);
++            return;
++        }
++        size_t hostKeyLength = 0;
++        const char *hostKeyBytes = libssh2_session_hostkey(session.rawSession, &hostKeyLength, NULL);
++        NSData *hostKey = (hostKeyBytes && hostKeyLength > 0)
++            ? [NSData dataWithBytes:hostKeyBytes length:hostKeyLength]
++            : nil;
++        if (!hostKey) {
++            [session disconnect];
++            reject(@"inspect_failed", @"SSH host fingerprint was not returned", nil);
++            return;
++        }
++        NSString *algorithm = @"unknown";
++        if (hostKey.length > 4) {
++            const unsigned char *bytes = hostKey.bytes;
++            uint32_t typeLen = CFSwapInt32BigToHost(*(uint32_t *)bytes);
++            if (typeLen > 0 && 4 + typeLen <= hostKey.length) {
++                algorithm = [[NSString alloc] initWithBytes:bytes + 4 length:typeLen encoding:NSUTF8StringEncoding];
++            }
++        }
++        NSString *fingerprint = QBSha256Fingerprint(hostKey);
++        [session disconnect];
++        resolve(@{@"algorithm": algorithm ?: @"unknown", @"fingerprint": fingerprint});
++    });
++}
++
++RCT_EXPORT_METHOD(connectVerifiedHost:(NSString *)host
++                  port:(NSInteger)port
++                  username:(NSString *)username
++                  expectedFingerprint:(NSString *)expectedFingerprint
++                  auth:(NSDictionary *)auth
++                  resolver:(RCTPromiseResolveBlock)resolve
++                  rejecter:(RCTPromiseRejectBlock)reject)
++{
++    NSString *expected = QBNormalizeSha256Fingerprint(expectedFingerprint);
++    if (expected.length == 0) {
++        reject(@"fingerprint_required", @"Expected SSH host fingerprint is required.", nil);
++        return;
++    }
++
++    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
++        NMSSHSession *session = [NMSSHSession connectToHost:host port:port withUsername:username];
++        if (!session || !session.isConnected) {
++            reject(@"connect_failed", @"SSH connection failed", nil);
++            return;
++        }
++
++        size_t hostKeyLength = 0;
++        const char *hostKeyBytes = libssh2_session_hostkey(session.rawSession, &hostKeyLength, NULL);
++        NSData *hostKey = (hostKeyBytes && hostKeyLength > 0)
++            ? [NSData dataWithBytes:hostKeyBytes length:hostKeyLength]
++            : nil;
++        if (!hostKey || ![QBSha256Fingerprint(hostKey) isEqualToString:expected]) {
++            [session disconnect];
++            reject(@"connect_failed", @"SSH host fingerprint mismatch", nil);
++            return;
++        }
++
++        NSString *password = auth[@"password"];
++        BOOL authorized = NO;
++        if (password) {
++            authorized = [session authenticateByPassword:password];
++        } else if (auth[@"privateKey"]) {
++            authorized = [session authenticateByInMemoryPublicKey:nil
++                                                       privateKey:auth[@"privateKey"]
++                                                      andPassword:auth[@"passphrase"]];
++        }
++
++        if (!authorized) {
++            [session disconnect];
++            reject(@"connect_failed", @"SSH authentication failed", nil);
++            return;
++        }
++
++        NSString *clientKey = [NSString stringWithFormat:@"verified_%f", CFAbsoluteTimeGetCurrent()];
++        SSHClient* client = [[SSHClient alloc] init];
++        client._session = session;
++        client._key = clientKey;
++        [[self clientPool] setObject:client forKey:clientKey];
++        resolve(clientKey);
++    });
++}
++
++RCT_EXPORT_METHOD(disconnectVerified:(nonnull NSString*)key
++                  resolver:(RCTPromiseResolveBlock)resolve
++                  rejecter:(RCTPromiseRejectBlock)reject)
++{
++    [self disconnect:key];
++    resolve(nil);
++}
++
+ @end

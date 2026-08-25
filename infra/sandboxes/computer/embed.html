@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Quibt Bot computer</title>
+    <style>
+      html,
+      body,
+      #screen {
+        margin: 0;
+        height: 100%;
+        width: 100%;
+        background: #05080f;
+        overflow: hidden;
+      }
+    </style>
+    <script type="module">
+      import RFB from "./core/rfb.js";
+
+      function query(name, fallback) {
+        const match = `${document.location.href}${window.location.hash}`.match(
+          new RegExp(`.*[?&]${name}=([^&#]*)`),
+        );
+        return match ? decodeURIComponent(match[1]) : fallback;
+      }
+
+      function flag(name) {
+        const value = String(query(name, "false")).toLowerCase();
+        return value === "1" || value === "true" || value === "yes";
+      }
+
+      const path = String(query("path", "websockify")).replace(/^\//, "");
+      const prefix = window.location.pathname.replace(/[^/]+$/, "");
+      const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+      const url = `${protocol}://${window.location.host}${prefix}${path}`;
+      const screen = document.getElementById("screen");
+      const viewOnly = flag("view_only");
+
+      // The app serves this page behind a signed, short-lived capability
+      // (/novnc/<host>/<port>/<expiresAt>.<signature>/embed.html). The signature is only
+      // checked when a connection is opened, so a live session outlives it — but a
+      // reconnect after that instant is refused by the proxy. Once the capability is spent,
+      // only the host app can mint a new one, so we tell it instead of retrying forever.
+      const CAPABILITY_EXPIRES_AT = (() => {
+        const match = window.location.pathname.match(/\/novnc\/[^/]+\/\d+\/(\d+)\./);
+        const value = match ? Number(match[1]) : Number.NaN;
+        return Number.isFinite(value) ? value : Number.POSITIVE_INFINITY;
+      })();
+      // Enough time left to finish a handshake; below this the capability is spent.
+      const HANDSHAKE_HEADROOM_MS = 2000;
+      const LOCAL_RETRY_LIMIT = 2;
+      const LOCAL_RETRY_BASE_MS = 400;
+
+      // The host embeds this page in a sandboxed iframe (no allow-same-origin), so this
+      // document has an opaque origin and cannot know the app's origin. The payload carries
+      // no secret — the host authenticates it by checking the message came from the very
+      // frame it mounted.
+      const TARGET_ORIGIN =
+        window.location.origin && window.location.origin !== "null" ? window.location.origin : "*";
+
+      function notify(type, detail) {
+        const payload = { type, ...detail };
+        try {
+          // React Native WebView (the mobile computer screen) only sees this bridge.
+          if (window.ReactNativeWebView?.postMessage) {
+            window.ReactNativeWebView.postMessage(JSON.stringify(payload));
+          }
+        } catch {
+          // A dead bridge must never stop the other channel.
+        }
+        try {
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage(payload, TARGET_ORIGIN);
+          }
+        } catch {
+          // Nothing to do: the host will fall back to its own polling.
+        }
+      }
+
+      let localRetries = 0;
+      let retryTimer = 0;
+
+      function capabilityUsable() {
+        return Date.now() + HANDSHAKE_HEADROOM_MS < CAPABILITY_EXPIRES_AT;
+      }
+
+      function onDisconnect(event) {
+        // A quick local retry covers a blip while the capability is still valid; after that
+        // (or once it is spent) the host has to mint a new URL and remount this frame.
+        if (localRetries < LOCAL_RETRY_LIMIT && capabilityUsable()) {
+          localRetries += 1;
+          clearTimeout(retryTimer);
+          retryTimer = setTimeout(connect, LOCAL_RETRY_BASE_MS * localRetries);
+          return;
+        }
+        notify("quibt.screen.disconnected", { clean: Boolean(event?.detail?.clean) });
+      }
+
+      function connect() {
+        const password = String(query("password", ""));
+        const rfb = new RFB(screen, url, password ? { credentials: { password } } : undefined);
+        rfb.viewOnly = viewOnly;
+        rfb.scaleViewport = true;
+        rfb.clipViewport = false;
+        rfb.addEventListener("connect", () => {
+          localRetries = 0;
+          notify("quibt.screen.connected", {});
+        });
+        rfb.addEventListener("disconnect", onDisconnect);
+        rfb.addEventListener("securityfailure", onDisconnect);
+      }
+
+      connect();
+    </script>
+  </head>
+  <body>
+    <div id="screen"></div>
+  </body>
+</html>

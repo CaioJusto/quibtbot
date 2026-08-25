@@ -1,0 +1,79 @@
+:root {
+  /* Superfícies. Nada aqui é branco puro: o produto assenta em #fcfcfc. */
+  --qb-canvas: #fcfcfc;
+  --qb-rail: #f7f7f7;
+  --qb-surface: #eeeeee;
+  --qb-surface-2: #f0f0f0;
+  --qb-inset: #ebebeb;
+  --qb-tile: #e5e5e5;
+  --qb-hairline: #e0e0e0;
+
+  /* Tinta: cinzas neutros, sem o desvio azulado do iOS. */
+  --qb-ink: #141414;
+  --qb-ink-strong: #070707;
+  --qb-muted: #707070;
+  --qb-muted-2: #9e9e9e;
+
+  --qb-accent: #3c82f6;
+  --qb-danger: #eb4145;
+  --qb-danger-soft: #ede3e4;
+  --qb-scrim: rgba(0, 0, 0, 0.46);
+
+  /* Cinco degraus de curvatura: badge, botão, cartão, bolha, modal. */
+  --qb-r-xs: 6px;
+  --qb-r-sm: 8px;
+  --qb-r-md: 10px;
+  --qb-r-lg: 14px;
+  --qb-r-xl: 20px;
+
+  /* Cinco tamanhos de letra. */
+  --qb-t-xs: 12px;
+  --qb-t-sm: 13px;
+  --qb-t-md: 14px;
+  --qb-t-lg: 15px;
+  --qb-t-title: 22px;
+
+  /* Nomes antigos, agora apontando para os tokens acima. */
+  --rk-page: var(--qb-canvas);
+  --rk-sidebar: var(--qb-rail);
+  --rk-main: var(--qb-canvas);
+  --rk-panel: var(--qb-canvas);
+  --rk-surface: var(--qb-surface);
+  --rk-surface-2: var(--qb-surface-2);
+  --rk-hairline: var(--qb-hairline);
+  --rk-hairline-strong: var(--qb-hairline);
+  --rk-ink: var(--qb-ink);
+  --rk-body: var(--qb-ink);
+  --rk-muted: var(--qb-muted);
+  --rk-muted-2: var(--qb-muted-2);
+  --rk-blue: var(--qb-accent);
+  --rk-green: #34c759;
+  --rk-red: var(--qb-danger);
+  --rk-accent: var(--qb-accent);
+  --rk-radius: var(--qb-r-md);
+  --rk-font-sans:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", Roboto,
+    Helvetica, Arial, sans-serif;
+  --rk-font-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  --background: 0 0% 99%;
+  --foreground: 0 0% 8%;
+  --card: 0 0% 99%;
+  --card-foreground: 0 0% 8%;
+  --popover: 0 0% 99%;
+  --popover-foreground: 0 0% 8%;
+  --primary: 217 91% 60%;
+  --primary-foreground: 0 0% 99%;
+  --secondary: 0 0% 94%;
+  --secondary-foreground: 0 0% 8%;
+  --muted: 0 0% 94%;
+  --muted-foreground: 0 0% 44%;
+  --accent: 217 91% 60%;
+  --accent-foreground: 0 0% 99%;
+  --destructive: 359 80% 59%;
+  --border: 0 0% 88%;
+  --input: 0 0% 92%;
+  --ring: 217 91% 60%;
+  --radius: 10px;
+}

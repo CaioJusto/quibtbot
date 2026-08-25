@@ -1,0 +1,123 @@
+name: quibt-desktop
+
+services:
+  postgres:
+    # Pin the multi-architecture index, not its amd64 child manifest. The old
+    # child digest made an otherwise multi-arch release impossible to install on ARM VPSes.
+    image: postgres:16@sha256:e17e86066e5ef83e0952a9347f5c792b7ece00972e2aa787a6986f471b3dd3d5
+    environment:
+      POSTGRES_USER: quibt
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:?}
+      POSTGRES_DB: quibt
+    volumes:
+      - ${DATA_DIR}/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quibt"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  computer:
+    image: ghcr.io/quibt/quibt-computer:${QUIBT_STACK_VERSION:?}
+    command: ["true"]
+    restart: "no"
+
+  supervisor:
+    image: ghcr.io/quibt/quibt-supervisor:${QUIBT_STACK_VERSION:?}
+    env_file:
+      - ${INSTALL_ENV_FILE:?}
+    environment:
+      DATA_DIR: ${DATA_DIR:?}
+      SUPERVISOR_HOST: "0.0.0.0"
+      SUPERVISOR_PORT: "7091"
+      DOCKER_SOCKET: /var/run/docker.sock
+      QUIBT_COMPUTER_IMAGE: ghcr.io/quibt/quibt-computer:${QUIBT_STACK_VERSION:?}
+      SANDBOX_SCREEN_NETWORK: internal
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${DATA_DIR:?}:/data
+      - ${INSTALL_ENV_FILE:?}:/run/quibt/quibt.env:ro
+    depends_on:
+      computer:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  api:
+    image: ghcr.io/quibt/quibt-stack:${QUIBT_STACK_VERSION:?}
+    command: ["pnpm", "--filter", "@quibt/api", "start"]
+    env_file:
+      - ${INSTALL_ENV_FILE:?}
+    environment:
+      DATABASE_URL: postgres://quibt:${DATABASE_PASSWORD:?}@postgres:5432/quibt
+      DATA_DIR: ${DATA_DIR:?}
+      # Prints, PDFs e áudios da conversa: o worker grava, a API serve. Sem isto cada um
+      # usava o ./data do próprio container — a imagem sumia do chat (404) e com o container.
+      ARTIFACTS_DIR: /data/artifacts
+      SANDBOX_SUPERVISOR_URL: http://supervisor:7091
+      WAKEUP_DRIVER: graphile
+      SANDBOX_PROVIDER: docker
+      AGENT_RUNTIME: pi
+    ports:
+      # O QR entrega o IP da LAN ao celular. Prender a API em 127.0.0.1 faz o QR
+      # parecer correto, mas nenhum outro aparelho consegue abrir a porta.
+      - "${QUIBT_API_BIND_HOST:-0.0.0.0}:3100:3100"
+    volumes:
+      - ${DATA_DIR:?}:/data
+      - ${INSTALL_ENV_FILE:?}:/run/quibt/quibt.env:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3100/ready').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 180s
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  worker:
+    image: ghcr.io/quibt/quibt-stack:${QUIBT_STACK_VERSION:?}
+    command: ["pnpm", "--filter", "@quibt/worker", "start"]
+    env_file:
+      - ${INSTALL_ENV_FILE:?}
+    environment:
+      DATABASE_URL: postgres://quibt:${DATABASE_PASSWORD:?}@postgres:5432/quibt
+      DATA_DIR: ${DATA_DIR:?}
+      # Prints, PDFs e áudios da conversa: o worker grava, a API serve. Sem isto cada um
+      # usava o ./data do próprio container — a imagem sumia do chat (404) e com o container.
+      ARTIFACTS_DIR: /data/artifacts
+      SANDBOX_SUPERVISOR_URL: http://supervisor:7091
+      WAKEUP_DRIVER: graphile
+      SANDBOX_PROVIDER: docker
+      AGENT_RUNTIME: pi
+    volumes:
+      - ${DATA_DIR:?}:/data
+      - ${INSTALL_ENV_FILE:?}:/run/quibt/quibt.env:ro
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+
+  web:
+    image: ghcr.io/quibt/quibt-stack:${QUIBT_STACK_VERSION:?}
+    command: ["pnpm", "--filter", "@quibt/web", "preview", "--host", "0.0.0.0", "--port", "5173"]
+    env_file:
+      - ${INSTALL_ENV_FILE:?}
+    environment:
+      API_PROXY_TARGET: http://api:3100
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?}
+      WEB_ORIGIN: ${WEB_ORIGIN:?}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:?}
+    labels:
+      quibt.screen-proxy: "true"
+    ports:
+      # O desktop fica só no próprio computador. A instalação VPS define
+      # QUIBT_WEB_BIND_HOST=0.0.0.0 para aceitar acesso remoto explicitamente.
+      - "${QUIBT_WEB_BIND_HOST:-127.0.0.1}:5173:5173"
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy

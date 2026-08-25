@@ -1,0 +1,427 @@
+name: release
+# Fires on version tags only (v0.2.0, v0.2.1, ...) — never on every push like ci.yml. A
+# release is a deliberate act: tag it, then this pipeline validates, builds, smokes, packages
+# and finally publishes a *draft* GitHub Release once (and only once) every prior job passed.
+on:
+  push:
+    tags:
+      - "v*"
+permissions:
+  contents: write
+  packages: write
+concurrency:
+  # Never cancel a release mid-publish; a second tag push queues behind this one instead.
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  NODE_VERSION: "22.19.0"
+jobs:
+  # 1. Validate version and run the full fast suite.
+  validate:
+    name: Validate release version and fast suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: quibt
+          POSTGRES_PASSWORD: quibt
+          POSTGRES_DB: quibt
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U quibt -d quibt"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://quibt:quibt@127.0.0.1:5432/quibt
+    outputs:
+      release: ${{ steps.release.outputs.release }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install
+      # The tag is the only source of truth for the release version. It must be a clean
+      # semver (scripts/release-version.mjs rejects "-dirty"/"v"-prefixed/non-semver input)
+      # and it must equal the version every package.json was pinned to in Task 3 — one
+      # version, no second one invented by this workflow.
+      - name: Resolve and validate the release version
+        id: release
+        run: |
+          set -euo pipefail
+          RELEASE="${GITHUB_REF_NAME#v}"
+          node scripts/release-version.mjs "$RELEASE" > /dev/null
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [ "$RELEASE" != "$PKG_VERSION" ]; then
+            echo "Tag $GITHUB_REF_NAME (release $RELEASE) does not match package.json version $PKG_VERSION." >&2
+            exit 1
+          fi
+          echo "release=$RELEASE" >> "$GITHUB_OUTPUT"
+      - run: pnpm db:generate
+      # `DATABASE_URL` is job-wide so verify:fast exercises its Postgres-backed cases.
+      # Apply the production migration chain before the suite instead of presenting a
+      # healthy but empty Postgres service to those tests.
+      - run: pnpm db:migrate
+      - run: pnpm lint
+      - run: pnpm check
+      - run: pnpm build
+      - run: pnpm verify:fast
+
+  # 2. Build/push the three GHCR images with an immutable version tag, capturing the digest
+  # each push produced so later jobs can pin to it instead of trusting the mutable tag.
+  images:
+    name: Build and push GHCR images
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RELEASE: ${{ needs.validate.outputs.release }}
+    outputs:
+      computer_digest: ${{ steps.computer.outputs.digest }}
+      supervisor_digest: ${{ steps.supervisor.outputs.digest }}
+      stack_digest: ${{ steps.stack.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          # The repository lives under CaioJusto while the packages live under Quibt.
+          # GITHUB_TOKEN cannot publish across that owner boundary.
+          username: CaioJusto
+          password: ${{ secrets.GHCR_WRITE_TOKEN }}
+      - name: Build and push quibt-computer
+        id: computer
+        uses: docker/build-push-action@v6
+        with:
+          context: infra/sandboxes/computer
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ghcr.io/quibt/quibt-computer:${{ env.RELEASE }}
+          build-args: RELEASE_VERSION=${{ env.RELEASE }}
+      - name: Build and push quibt-supervisor
+        id: supervisor
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/sandboxes/supervisor/Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ghcr.io/quibt/quibt-supervisor:${{ env.RELEASE }}
+          build-args: RELEASE_VERSION=${{ env.RELEASE }}
+      - name: Build and push quibt-stack
+        id: stack
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/compose/Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ghcr.io/quibt/quibt-stack:${{ env.RELEASE }}
+          build-args: RELEASE_VERSION=${{ env.RELEASE }}
+
+  # 3. Smoke the image-only compose file (infra/compose/docker-compose.desktop.yml has no
+  # `build:` blocks — every service is a published image) using exactly the digests `images`
+  # just pushed, not whatever the mutable version tag happens to resolve to on a retry.
+  smoke:
+    name: Smoke image-only compose
+    needs: [validate, images]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      RELEASE: ${{ needs.validate.outputs.release }}
+      COMPOSE_FILE: infra/compose/docker-compose.desktop.yml
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: CaioJusto
+          password: ${{ secrets.GHCR_WRITE_TOKEN }}
+      - name: Pull and re-tag the published images by digest
+        run: |
+          set -euo pipefail
+          docker pull "ghcr.io/quibt/quibt-computer@${{ needs.images.outputs.computer_digest }}"
+          docker tag "ghcr.io/quibt/quibt-computer@${{ needs.images.outputs.computer_digest }}" "ghcr.io/quibt/quibt-computer:${RELEASE}"
+          docker pull "ghcr.io/quibt/quibt-supervisor@${{ needs.images.outputs.supervisor_digest }}"
+          docker tag "ghcr.io/quibt/quibt-supervisor@${{ needs.images.outputs.supervisor_digest }}" "ghcr.io/quibt/quibt-supervisor:${RELEASE}"
+          docker pull "ghcr.io/quibt/quibt-stack@${{ needs.images.outputs.stack_digest }}"
+          docker tag "ghcr.io/quibt/quibt-stack@${{ needs.images.outputs.stack_digest }}" "ghcr.io/quibt/quibt-stack:${RELEASE}"
+      # `@quibt/installer`'s `ensureInstallEnvironment` is the one place this repo generates
+      # a quibt.env — reusing it here instead of hand-rolling a second env-generation path.
+      # `ensureInstallEnvironment` only *defaults* QUIBT_STACK_VERSION from the hardcoded
+      # INSTALL_RELEASE in packages/installer/src/compose.ts when the key is not already set,
+      # so pre-seeding the env file with the tag `validate` resolved (same $RELEASE the
+      # `images` job just built and pushed) pins compose to those digests instead of whatever
+      # INSTALL_RELEASE happens to say — the two can diverge on the next version bump.
+      - name: Generate a smoke install environment
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/quibt-smoke/data
+          printf 'QUIBT_STACK_VERSION=%s\n' "$RELEASE" > /tmp/quibt-smoke/data/quibt.env
+          # Resolve the workspace import from the checkout. A script placed in /tmp has no
+          # parent node_modules and therefore cannot resolve @quibt/installer under pnpm.
+          pnpm exec tsx -e 'import { ensureInstallEnvironment } from "./packages/installer/src/index.ts"; ensureInstallEnvironment("/tmp/quibt-smoke/data", "http://127.0.0.1:5173");'
+      - name: Bring up postgres, migrate, then the app services
+        run: |
+          set -euo pipefail
+          ENV_FILE=/tmp/quibt-smoke/data/quibt.env
+          BASE=(docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE")
+          "${BASE[@]}" pull postgres
+          "${BASE[@]}" up -d --wait postgres
+          "${BASE[@]}" run --rm --no-deps api quibt-migrate
+          "${BASE[@]}" up -d --wait supervisor api worker web computer
+      - name: Verify the API is ready
+        run: curl -fsS http://127.0.0.1:3100/ready
+      - if: always()
+        name: Show compose logs
+        run: docker compose -f "$COMPOSE_FILE" --env-file /tmp/quibt-smoke/data/quibt.env logs --tail 200
+      - if: always()
+        name: Tear down the smoke stack
+        run: docker compose -f "$COMPOSE_FILE" --env-file /tmp/quibt-smoke/data/quibt.env down -v
+
+  # 4. Build the quibtbot CLI binary on each OS/arch via scripts/build-cli-binary.mjs — one
+  # build per runner, matching CLI_BINARY_TARGETS in scripts/release-version.mjs exactly.
+  cli-binaries:
+    name: CLI binary (${{ matrix.name }})
+    needs: [validate, images]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: quibtbot-linux-x64
+          - os: ubuntu-24.04-arm
+            name: quibtbot-linux-arm64
+          - os: macos-14
+            name: quibtbot-darwin-arm64
+          - os: windows-latest
+            name: quibtbot-win32-x64.exe
+    env:
+      RELEASE: ${{ needs.validate.outputs.release }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install
+      - name: Pin packaged Compose images to release digests
+        run: >-
+          node scripts/pin-release-images.mjs
+          --stack "${{ needs.images.outputs.stack_digest }}"
+          --supervisor "${{ needs.images.outputs.supervisor_digest }}"
+          --computer "${{ needs.images.outputs.computer_digest }}"
+      - run: node scripts/build-cli-binary.mjs --release "${{ env.RELEASE }}" --out dist/cli-binaries
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: |
+            dist/cli-binaries/${{ matrix.name }}
+            dist/cli-binaries/${{ matrix.name }}.sha256
+
+  # 5. Build the Electron installer on each OS via scripts/pack-desktop.mjs. Production
+  # packaging (`pnpm --filter @quibt/desktop pack:*`) runs `verify-release-manifest` first
+  # and fails closed on a "pending" manifest, so the ready manifest must exist before this
+  # calls pack-desktop.mjs — generated here from the just-built Linux CLI binaries, the same
+  # `releaseManifest`/`INSTALL_RELEASE` protocol every other artifact already uses.
+  desktop-installers:
+    name: Electron installer (${{ matrix.target }})
+    needs: [validate, images, cli-binaries]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: mac
+          - os: windows-latest
+            target: win
+          - os: ubuntu-latest
+            target: linux
+    env:
+      RELEASE: ${{ needs.validate.outputs.release }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install
+      - name: Pin packaged Compose images to release digests
+        run: >-
+          node scripts/pin-release-images.mjs
+          --stack "${{ needs.images.outputs.stack_digest }}"
+          --supervisor "${{ needs.images.outputs.supervisor_digest }}"
+          --computer "${{ needs.images.outputs.computer_digest }}"
+      - uses: actions/download-artifact@v4
+        with:
+          name: quibtbot-linux-x64
+          path: dist/cli-binaries
+      - uses: actions/download-artifact@v4
+        with:
+          name: quibtbot-linux-arm64
+          path: dist/cli-binaries
+      # pnpm runs package scripts from apps/desktop, while download-artifact writes at the
+      # repository root. Keep the CLI paths relative to that package working directory.
+      - name: Generate the ready release manifest
+        run: >-
+          pnpm --filter @quibt/desktop generate-release-manifest --
+          --release "${{ env.RELEASE }}"
+          --base-url "https://github.com/CaioJusto/quibtbot/releases/download/v${{ env.RELEASE }}"
+          --x64 ../../dist/cli-binaries/quibtbot-linux-x64
+          --arm64 ../../dist/cli-binaries/quibtbot-linux-arm64
+      # O app do celular instala na VPS pelo mesmo caminho e precisa dos mesmos digests;
+      # sem este segundo manifesto ele fica preso em "Release manifest is not ready".
+      - name: Generate the ready release manifest for the phone
+        run: >-
+          pnpm --filter @quibt/desktop generate-release-manifest --
+          --release "${{ env.RELEASE }}"
+          --base-url "https://github.com/CaioJusto/quibtbot/releases/download/v${{ env.RELEASE }}"
+          --x64 ../../dist/cli-binaries/quibtbot-linux-x64
+          --arm64 ../../dist/cli-binaries/quibtbot-linux-arm64
+          --out ../../apps/mobile/assets/release-manifest.json
+      # Signing/notarization only run when the matching secret exists. When it does not,
+      # pack-desktop.mjs itself annotates the artifact as unsigned/un-notarized — this step
+      # just surfaces that decision in the job log before packaging happens.
+      - name: Report macOS signing status
+        if: matrix.target == 'mac'
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+        run: |
+          if [ -n "$CSC_LINK" ]; then
+            echo "macOS signing: CSC_LINK is set, electron-builder will codesign the .dmg."
+          else
+            echo "macOS signing: CSC_LINK is unset, the .dmg will ship unsigned."
+          fi
+          if [ -n "$CSC_LINK" ] && [ -n "$APPLE_ID" ]; then
+            echo "macOS notarization: Apple credentials present."
+          else
+            echo "macOS notarization: not configured, the .dmg will not be notarized."
+          fi
+      - name: Report Windows signing status
+        if: matrix.target == 'win'
+        shell: bash
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+        run: |
+          if [ -n "$WIN_CSC_LINK" ]; then
+            echo "Windows signing: WIN_CSC_LINK is set, electron-builder will sign the installer."
+          else
+            echo "Windows signing: WIN_CSC_LINK is unset, the installer will ship unsigned."
+          fi
+      - name: Pack the ${{ matrix.target }} Electron installer
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: node scripts/pack-desktop.mjs ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-installer-${{ matrix.target }}
+          if-no-files-found: ignore
+          path: |
+            apps/desktop/out/QuibtBot.dmg
+            apps/desktop/out/QuibtBot-setup.exe
+            apps/desktop/out/QuibtBot.AppImage
+            apps/desktop/out/signing-status.json
+
+  # 6. Create the checksum file over every published, downloadable artifact.
+  checksums:
+    name: Checksums
+    needs: [validate, cli-binaries, desktop-installers]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          # docker/build-push-action uploads internal *.dockerbuild records. They are not
+          # release payloads and download-artifact can fail while extracting them as files.
+          pattern: "!*.dockerbuild"
+      - name: Generate SHA-256 checksums
+        working-directory: release-artifacts
+        run: |
+          set -euo pipefail
+          OUT="checksums-${{ needs.validate.outputs.release }}.txt"
+          find . -type f ! -name "signing-status.json" -print0 \
+            | xargs -0 sha256sum \
+            | sed "s#\./[^/]*/##" > "$OUT"
+          cat "$OUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: checksums
+          path: release-artifacts/checksums-*.txt
+
+  # 7. Publish the draft GitHub Release. `needs:` spans validate, images, smoke, both build
+  # matrices and the checksum job, so GitHub Actions will not even start this job — let alone
+  # publish anything — until every one of them passed. `draft: true` keeps the release hidden
+  # from the public until a human reviews and publishes it by hand.
+  publish:
+    name: Publish draft GitHub Release
+    needs: [validate, images, smoke, cli-binaries, desktop-installers, checksums]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          pattern: "!*.dockerbuild"
+      - name: Flatten the artifact tree for upload
+        run: |
+          set -euo pipefail
+          mkdir -p dist/release
+          find release-artifacts -type f ! -name "signing-status.json" -exec cp {} dist/release/ \;
+          # signing-status.json is per platform — each desktop-installers matrix leg (mac/win/
+          # linux) writes its own copy. A bare `cp` into the flat dist/release/ dir would let
+          # one platform's file silently overwrite another's, so rename each by the platform
+          # directory it was downloaded into before copying it alongside the other artifacts.
+          while IFS= read -r -d '' status_file; do
+            platform="$(basename "$(dirname "$status_file")")"
+            cp "$status_file" "dist/release/signing-status-${platform#desktop-installer-}.json"
+          done < <(find release-artifacts -type f -name "signing-status.json" -print0)
+          ls -la dist/release
+      - name: Publish a draft GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Quibt Bot ${{ needs.validate.outputs.release }}
+          draft: true
+          fail_on_unmatched_files: true
+          files: dist/release/*
+          # Signing/notarization only run when the matching secret was present on the build
+          # runner (see "Report macOS/Windows signing status" in desktop-installers). Never
+          # claim an installer is signed here — point at the attached signing-status-*.json
+          # files, which record the real per-platform state, instead of asserting one.
+          body: |
+            Quibt Bot ${{ needs.validate.outputs.release }}
+
+            **Signing status:** installers are only signed and notarized when the corresponding
+            secrets (`CSC_LINK`/`CSC_KEY_PASSWORD` for macOS, `WIN_CSC_LINK`/`WIN_CSC_KEY_PASSWORD`
+            for Windows, plus Apple credentials for notarization) were present during this build.
+            This release is not marked signed or notarized unless those secrets were present —
+            see the attached `signing-status-mac.json` / `signing-status-win.json` /
+            `signing-status-linux.json` files for the actual state of each installer.

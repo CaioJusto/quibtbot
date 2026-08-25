@@ -1,0 +1,332 @@
+name: ci
+on:
+  push:
+  pull_request:
+  # The Docker smoke is too slow for every push, so it also has a nightly run and a manual one.
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  # package.json requires >=22.19.0; `node-version: 22` only satisfied it by accident of
+  # whatever 22.x the runner resolved that day.
+  NODE_VERSION: "22.19.0"
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install
+      - run: pnpm lint
+
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install
+      - run: pnpm db:generate
+        env:
+          DATABASE_URL: postgres://quibt:quibt@127.0.0.1:5433/quibt
+      - run: pnpm check
+      - run: pnpm build
+
+  verify-fast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install
+      - run: pnpm db:generate
+        env:
+          DATABASE_URL: postgres://quibt:quibt@127.0.0.1:5433/quibt
+      - run: pnpm verify:fast
+
+  # `pnpm check`/`pnpm build` already reach these via turbo's dependency graph, but that
+  # coverage is implicit: a broken mobile app or marketing site would not fail a specific,
+  # readable step. This job makes every public client an explicit, named CI command.
+  public-clients:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install
+      - run: pnpm db:generate
+        env:
+          DATABASE_URL: postgres://quibt:quibt@127.0.0.1:5433/quibt
+      - run: pnpm --filter @quibt/mobile check
+      - run: pnpm --filter @quibt/www build
+      - run: pnpm verify:installer
+
+  migrations-and-journeys:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: quibt
+          POSTGRES_PASSWORD: quibt
+          POSTGRES_DB: quibt
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U quibt -d quibt"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://quibt:quibt@127.0.0.1:5432/quibt
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install
+      - run: pnpm db:generate
+      - run: pnpm db:migrate
+      # Sequential: the lease suite exercises the global reaper, which would otherwise
+      # sweep runs belonging to a journey executing at the same moment.
+      - run: >-
+          pnpm exec vitest run --no-file-parallelism
+          packages/testkit/src/journeys.test.ts
+          packages/testkit/src/run-lease.pg.test.ts
+          packages/db/src/webhooks.pg.test.ts
+          apps/api/src/webhook-ingress.test.ts
+          packages/adapters/src/child-bots.pg.test.ts
+          packages/adapters/src/executor-unattended.pg.test.ts
+      # No phone or emulator here either: same scripted/fake emulator stack as the
+      # journeys above, driving the real apps/mobile/lib client helpers instead.
+      - run: pnpm e2e:mobile
+        env:
+          AGENT_RUNTIME: scripted
+          SANDBOX_PROVIDER: fake
+          WAKEUP_DRIVER: memory
+
+  # The default suite pins AGENT_RUNTIME=scripted and SANDBOX_PROVIDER=fake, so nothing
+  # else in CI drives the signed-in product through a browser. This job does.
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: quibt
+          POSTGRES_PASSWORD: quibt
+          POSTGRES_DB: quibt
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U quibt -d quibt"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://quibt:quibt@127.0.0.1:5432/quibt
+      NODE_ENV: development
+      BETTER_AUTH_SECRET: ci-e2e-better-auth-secret-0123456789abcdef
+      ENCRYPTION_KEY: ci-e2e-encryption-key-0123456789abcdef0123
+      # O primeiro dono entra por convite de uso único: o teste emite o convite pela
+      # rota de loopback, e ela só responde com este segredo. Sem ele o e2e para no
+      # cadastro, antes de tocar no produto.
+      BOOTSTRAP_SECRET: ci-e2e-bootstrap-secret-0123456789abcdef01
+      API_PORT: "3100"
+      WEB_PORT: "5173"
+      API_URL: http://127.0.0.1:3100
+      API_PROXY_TARGET: http://127.0.0.1:3100
+      WEB_ORIGIN: http://127.0.0.1:5173
+      BETTER_AUTH_URL: http://127.0.0.1:5173
+      SIGNUPS_ENABLED: "true"
+      QUIBT_EDITION: oss
+      BILLING_ENABLED: "false"
+      # Emulators: the journey under test is the product, not a live model or a live sandbox.
+      AGENT_RUNTIME: scripted
+      SANDBOX_PROVIDER: fake
+      WAKEUP_DRIVER: graphile
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install
+      - run: pnpm db:generate
+      - run: pnpm db:migrate
+      - run: pnpm --filter @quibt/web exec playwright install --with-deps chromium
+      # Playwright only starts Vite (its webServer runs in apps/web); the API and the worker
+      # are the halves that make the journey durable, so they are started here.
+      - name: Start API and worker
+        run: |
+          pnpm --filter @quibt/api start > /tmp/api.log 2>&1 &
+          pnpm --filter @quibt/worker start > /tmp/worker.log 2>&1 &
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:3100/ready > /dev/null; then
+              curl -fsS http://127.0.0.1:3100/health
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "api never became ready"
+          cat /tmp/api.log
+          exit 1
+      - run: pnpm --filter @quibt/web exec playwright test
+      - if: failure()
+        run: tail -n 200 /tmp/api.log /tmp/worker.log
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report
+          retention-days: 7
+
+  desktop-pack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install
+      - run: pnpm --filter @quibt/desktop build
+      # electron-builder --dir produces an unpacked app (out/linux-unpacked here on the
+      # ubuntu-latest runner) without a signing identity, so it runs on every push. The full
+      # signed mac/win/linux installers (pnpm desktop:pack:*) need certificates that only
+      # exist in the release pipeline, not here.
+      - run: pnpm --filter @quibt/desktop exec electron-builder --dir
+      - run: node --check scripts/pack-desktop.mjs
+      - run: node --check scripts/alias-desktop-artifacts.mjs
+      - run: node --check scripts/dev-desktop.mjs
+
+  # Real Docker: builds the computer image, drives the supervisor exactly like
+  # DockerSandboxProvider does, and checks stdout, stderr, the exit code, and cleanup.
+  # Minutes of image build, so it stays off the every-push path.
+  docker-smoke:
+    if: >-
+      github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' ||
+      contains(github.event.pull_request.labels.*.name, 'docker-smoke')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SANDBOX_SUPERVISOR_URL: http://127.0.0.1:7091
+      SANDBOX_SUPERVISOR_TOKEN: ci-docker-smoke-supervisor-token-0123456789
+      SMOKE_WORKSPACE_ID: cismoke
+      SMOKE_BOT_ID: cismokebot
+      DATA_DIR: ./data
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install
+      - run: pnpm sandbox:build
+      # The computer runs as uid 1000 and the runner is uid 1001, so the bind-mounted home
+      # has to be writable by both before the graphical session starts.
+      - name: Prepare the workspace home
+        run: |
+          mkdir -p data/workspaces/$SMOKE_WORKSPACE_ID/home
+          chmod -R a+rwX data
+      - name: Start the supervisor
+        run: pnpm --filter @quibt/sandbox-supervisor start > /tmp/supervisor.log 2>&1 &
+      - run: pnpm exec tsx infra/sandboxes/supervisor/src/smoke.ts
+      - if: always()
+        run: |
+          tail -n 200 /tmp/supervisor.log
+          docker ps -a --filter label=quibt.managed=true
+
+  # Full server-install smoke on GitHub's native amd64 runner. This complements the
+  # sandbox-only smoke above and catches release-image, Compose, migration, and health
+  # regressions without relying on QEMU from an Apple-silicon maintainer machine.
+  vps-compose-smoke:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      COMPOSE_FILE: infra/compose/docker-compose.desktop.yml
+      INSTALL_ROOT: /tmp/quibt-vps-smoke
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install
+      - name: Generate a fresh install environment
+        run: |
+          set -euo pipefail
+          mkdir -p "$INSTALL_ROOT/data"
+          RELEASE=$(node -p "require('./package.json').version")
+          printf 'QUIBT_STACK_VERSION=%s\n' "$RELEASE" > "$INSTALL_ROOT/data/quibt.env"
+          pnpm exec tsx -e 'import { ensureInstallEnvironment } from "./packages/installer/src/index.ts"; ensureInstallEnvironment("/tmp/quibt-vps-smoke/data", "http://127.0.0.1:5173");'
+      - name: Pull the published release images
+        run: |
+          set -euo pipefail
+          ENV_FILE="$INSTALL_ROOT/data/quibt.env"
+          docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" pull
+      - name: Start, migrate, and verify the complete stack
+        run: |
+          set -euo pipefail
+          ENV_FILE="$INSTALL_ROOT/data/quibt.env"
+          BASE=(docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE")
+          "${BASE[@]}" up -d --wait postgres
+          "${BASE[@]}" run --rm --no-deps api quibt-migrate
+          "${BASE[@]}" up -d --wait supervisor api worker web computer
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3100/ready > /dev/null &&
+              curl -fsS http://127.0.0.1:5173/ > /dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              echo "the published stack never became reachable from the VPS host"
+              exit 1
+            fi
+            sleep 2
+          done
+          "${BASE[@]}" run --rm --no-deps api quibt-migrate
+          "${BASE[@]}" up -d --wait supervisor api worker web computer
+          test "$(docker image inspect ghcr.io/quibt/quibt-stack:$(node -p "require('./package.json').version") --format '{{.Architecture}}')" = amd64
+      - if: always()
+        name: Show Compose state and logs
+        run: |
+          ENV_FILE="$INSTALL_ROOT/data/quibt.env"
+          docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" ps
+          docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" logs --tail 200
+      - if: always()
+        name: Tear down the disposable stack
+        run: |
+          ENV_FILE="$INSTALL_ROOT/data/quibt.env"
+          docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" down -v

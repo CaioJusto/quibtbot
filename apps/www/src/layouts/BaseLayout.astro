@@ -1,0 +1,69 @@
+---
+import "../styles/global.css";
+import { alternateRoutes, copyFor, type Locale, type PageKey } from "../i18n";
+import { SITE_NAME, SITE_URL } from "../site";
+
+type Props = {
+  title?: string;
+  description: string;
+  locale?: Locale;
+  page?: PageKey;
+  noindex?: boolean;
+};
+
+const { title = SITE_NAME, description, locale = "en", page = "home", noindex = false } = Astro.props;
+const copy = copyFor(locale);
+const { enHref, ptHref } = alternateRoutes(page);
+const canonical = new URL(Astro.url.pathname, SITE_URL).toString();
+const socialImage = new URL("/social/quibt-open-source-v2.png", SITE_URL).toString();
+---
+
+<!doctype html>
+<html lang={locale}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+    <meta name="theme-color" content="#ffffff" />
+    {noindex && <meta name="robots" content="noindex, follow" />}
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content={SITE_NAME} />
+    <meta property="og:locale" content={locale === "en" ? "en_US" : "pt_BR"} />
+    <meta property="og:image" content={socialImage} />
+    <meta property="og:image:secure_url" content={socialImage} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:alt" content={copy.socialAlt} />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={socialImage} />
+    <meta name="twitter:image:alt" content={copy.socialAlt} />
+    <link rel="canonical" href={canonical} />
+    <link rel="alternate" hreflang="en" href={new URL(enHref, SITE_URL).toString()} />
+    <link rel="alternate" hreflang="pt-BR" href={new URL(ptHref, SITE_URL).toString()} />
+    <link rel="alternate" hreflang="x-default" href={new URL(enHref, SITE_URL).toString()} />
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="icon" href="/favicon-32x32.png" type="image/png" sizes="32x32" />
+    <link rel="icon" href="/favicon-16x16.png" type="image/png" sizes="16x16" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@400..700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <title>{title}</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">{copy.skipLink}</a>
+    <div class="page-shell">
+      <slot />
+    </div>
+  </body>
+</html>

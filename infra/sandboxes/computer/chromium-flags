@@ -1,0 +1,3 @@
+# Lido por /usr/bin/chromium (Debian) em toda chamada direta. O computador do bot é um
+# container sem sandbox de usuário: sem --no-sandbox o Chromium morre na largada.
+export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-sandbox --disable-dev-shm-usage --disable-gpu --disable-software-rasterizer --password-store=basic --no-first-run --no-default-browser-check"

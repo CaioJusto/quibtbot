@@ -1,0 +1,72 @@
+---
+import { alternateRoutes, copyFor, routesFor, type Locale, type PageKey } from "../i18n";
+import { GITHUB_URL } from "../site";
+import Button from "./Button.astro";
+import Logo from "./Logo.astro";
+
+type Props = {
+  locale?: Locale;
+  page?: PageKey;
+};
+
+const { locale = "en", page = "home" } = Astro.props as Props;
+const copy = copyFor(locale);
+const routes = routesFor(locale);
+const { enHref, ptHref } = alternateRoutes(page);
+const home = routes.home;
+const downloadHref = `${home}#download`;
+const links = [
+  { href: `${home}#demo`, label: copy.nav.product },
+  { href: `${home}#how`, label: copy.nav.how },
+  { href: downloadHref, label: copy.nav.download },
+  { href: `${home}#open-source`, label: copy.nav.openSource },
+];
+---
+
+<header class="site-header">
+  <div class="site-header__left">
+    <Logo href={home} label={locale === "en" ? "Quibt Bot, home" : "Quibt Bot, início"} />
+    <nav class="site-nav" aria-label={copy.nav.label}>
+      {links.map((link) => (
+        <a href={link.href}>{link.label}</a>
+      ))}
+    </nav>
+  </div>
+  <div class="site-header__right">
+    <nav class="language-switcher" aria-label={locale === "en" ? "Language" : "Idioma"}>
+      <a href={enHref} lang="en" aria-current={locale === "en" ? "page" : undefined}>EN</a>
+      <span aria-hidden="true">/</span>
+      <a href={ptHref} lang="pt-BR" aria-current={locale === "pt-BR" ? "page" : undefined}>PT</a>
+    </nav>
+    <a class="star-pill" href={GITHUB_URL} target="_blank" rel="noreferrer">{copy.nav.github}</a>
+    <Button href={downloadHref} size="sm">
+      <span class="btn-full">{copy.nav.download}</span>
+      <span class="btn-short">{copy.nav.downloadShort}</span>
+    </Button>
+    <details class="site-menu">
+      <summary class="site-menu__btn" aria-label={copy.nav.openMenu}>
+        <span></span>
+        <span></span>
+        <span></span>
+      </summary>
+      <nav class="site-menu__nav" aria-label={copy.nav.menuLabel}>
+        {links.map((link) => (
+          <a href={link.href} data-close-menu>{link.label}</a>
+        ))}
+        <div class="site-menu__languages">
+          <a href={enHref} lang="en" aria-current={locale === "en" ? "page" : undefined}>English</a>
+          <a href={ptHref} lang="pt-BR" aria-current={locale === "pt-BR" ? "page" : undefined}>Português</a>
+        </div>
+      </nav>
+    </details>
+  </div>
+</header>
+
+<script>
+  document.querySelectorAll("[data-close-menu]").forEach((link) => {
+    link.addEventListener("click", () => {
+      const menu = link.closest("details");
+      if (menu) menu.removeAttribute("open");
+    });
+  });
+</script>

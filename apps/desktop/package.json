@@ -1,0 +1,141 @@
+{
+  "name": "@quibt/desktop",
+  "version": "0.2.9",
+  "description": "Quibt Bot — seu time digital, ligado do seu jeito.",
+  "author": "QuibTI Inovações",
+  "homepage": "https://quibt.com.br",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "pnpm build && electron .",
+    "build": "node scripts/bundle.mjs && cp src/preload.cjs dist/preload.cjs && cp offline.html dist/offline.html && cp setup.html dist/setup.html && cp assets/icon.png dist/quibt-icon.png && cp ../web/public/quibt-onboarding-team.png dist/quibt-team.png",
+    "pack": "pnpm verify-release-manifest && pnpm build && electron-builder --mac --win --linux --publish never",
+    "pack:mac": "pnpm verify-release-manifest && pnpm build && electron-builder --mac --arm64 --publish never",
+    "pack:win": "pnpm verify-release-manifest && pnpm build && electron-builder --win --x64 --publish never",
+    "pack:linux": "pnpm verify-release-manifest && pnpm build && electron-builder --linux --x64 --publish never",
+    "pack:dir": "pnpm prepare-local-images && pnpm build && electron-builder --dir",
+    "prepare-local-images": "node scripts/prepare-local-images.mjs",
+    "generate-release-manifest": "tsx scripts/generate-release-manifest.ts",
+    "verify-release-manifest": "node scripts/verify-release-manifest.mjs",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@quibt/contracts": "workspace:*",
+    "@quibt/installer": "workspace:*",
+    "ssh2": "^1.17.0"
+  },
+  "devDependencies": {
+    "@types/ssh2": "^1.15.5",
+    "@electron/asar": "^3.4.1",
+    "electron": "^43.4.0",
+    "electron-builder": "^26.0.12",
+    "esbuild": "^0.25.9",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "vitest": "^4.1.10"
+  },
+  "build": {
+    "appId": "app.quibt.bot",
+    "productName": "Quibt Bot",
+    "directories": {
+      "output": "out",
+      "buildResources": "assets"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "**/node_modules/cpu-features/**"
+    ],
+    "afterSign": "scripts/notarize-app.cjs",
+    "artifactBuildCompleted": "scripts/notarize-artifact.cjs",
+    "extraResources": [
+      {
+        "from": "../../infra/compose/docker-compose.desktop.yml",
+        "to": "compose/docker-compose.desktop.yml"
+      }
+    ],
+    "extraMetadata": {
+      "main": "dist/main.js",
+      "quibtStackVersion": "0.2.9"
+    },
+    "protocols": [
+      {
+        "name": "Quibt Bot",
+        "schemes": [
+          "quibt"
+        ]
+      }
+    ],
+    "mac": {
+      "icon": "assets/icon.icns",
+      "category": "public.app-category.productivity",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "assets/entitlements.mac.plist",
+      "entitlementsInherit": "assets/entitlements.mac.plist",
+      "notarize": false,
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ]
+    },
+    "dmg": {
+      "artifactName": "QuibtBot-${version}.dmg",
+      "title": "Quibt Bot",
+      "background": "assets/dmg-background.png",
+      "iconSize": 92,
+      "iconTextSize": 13,
+      "contents": [
+        {
+          "x": 170,
+          "y": 238
+        },
+        {
+          "x": 490,
+          "y": 238,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    },
+    "win": {
+      "icon": "assets/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "shortcutName": "Quibt Bot",
+      "artifactName": "QuibtBot-${version}-setup.${ext}"
+    },
+    "linux": {
+      "icon": "assets/icon.png",
+      "artifactName": "QuibtBot-${version}.AppImage",
+      "target": [
+        "AppImage"
+      ],
+      "executableName": "quibtbot"
+    }
+  }
+}

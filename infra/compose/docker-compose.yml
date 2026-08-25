@@ -1,0 +1,121 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: quibt
+      POSTGRES_PASSWORD: quibt
+      POSTGRES_DB: quibt
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quibt"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  supervisor:
+    build:
+      context: ../sandboxes/supervisor
+      dockerfile: Dockerfile
+    env_file:
+      - ../../.env
+    environment:
+      DATA_DIR: /data
+      SUPERVISOR_HOST: "0.0.0.0"
+      SUPERVISOR_PORT: "7091"
+      DOCKER_SOCKET: /var/run/docker.sock
+      QUIBT_COMPUTER_IMAGE: quibt/computer:local
+      SANDBOX_SCREEN_NETWORK: internal
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ../../data:/data
+    depends_on:
+      computer:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  computer:
+    image: quibt/computer:local
+    build:
+      context: ../sandboxes/computer
+    command: ["true"]
+    restart: "no"
+
+  api:
+    build:
+      context: ../..
+      dockerfile: infra/compose/Dockerfile
+    command: ["bash", "-lc", "pnpm --filter @quibt/db generate && pnpm --filter @quibt/db exec prisma migrate deploy && pnpm --filter @quibt/api start"]
+    env_file:
+      - ../../.env
+    environment:
+      DATABASE_URL: postgres://quibt:quibt@postgres:5432/quibt
+      DATA_DIR: /data
+      ARTIFACTS_DIR: /data/artifacts
+      SANDBOX_SUPERVISOR_URL: http://supervisor:7091
+      WAKEUP_DRIVER: graphile
+      SANDBOX_PROVIDER: ${SANDBOX_PROVIDER:-docker}
+      AGENT_RUNTIME: pi
+    ports:
+      - "127.0.0.1:3100:3100"
+    volumes:
+      - ../../data:/data
+    # The api owns `prisma migrate deploy`, so "healthy" here means "schema is ready".
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3100/ready').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 180s
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: infra/compose/Dockerfile
+    command: ["pnpm", "--filter", "@quibt/worker", "start"]
+    env_file:
+      - ../../.env
+    environment:
+      DATABASE_URL: postgres://quibt:quibt@postgres:5432/quibt
+      DATA_DIR: /data
+      ARTIFACTS_DIR: /data/artifacts
+      SANDBOX_SUPERVISOR_URL: http://supervisor:7091
+      WAKEUP_DRIVER: graphile
+      SANDBOX_PROVIDER: ${SANDBOX_PROVIDER:-docker}
+      AGENT_RUNTIME: pi
+    volumes:
+      - ../../data:/data
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      # Without this the worker races the migrations the api runs and dies on boot.
+      api:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ../..
+      dockerfile: infra/compose/Dockerfile
+    command: ["pnpm", "--filter", "@quibt/web", "preview", "--host", "0.0.0.0", "--port", "5173"]
+    environment:
+      API_PROXY_TARGET: http://api:3100
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
+    labels:
+      quibt.screen-proxy: "true"
+    ports:
+      - "127.0.0.1:5173:5173"
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  pgdata:

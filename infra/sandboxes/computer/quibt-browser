@@ -1,0 +1,41 @@
+#!/bin/sh
+set -eu
+HOME="${HOME:-/home/quibt}"
+PROFILE="${CHROME_USER_DATA_DIR:-$HOME/.config/quibt-chromium}"
+mkdir -p "$PROFILE"
+# Há um Chromium vivo neste perfil? (`quibt-open` pergunta antes de entregar uma URL.)
+running() {
+  pgrep -f -- "--user-data-dir=$PROFILE( |\$)" >/dev/null 2>&1
+}
+if [ "${1:-}" = "--running" ]; then
+  running
+  exit $?
+fi
+# O lock do perfil guarda o hostname do container que o abriu. Quando o computador
+# do workspace é recriado, o Chromium acha que outra máquina ainda está usando o
+# perfil e não abre janela nenhuma — a tela do bot fica só com a mesa vazia.
+# O perfil é exclusivo desta sessão, então o lock órfão pode sair — mas só quando não
+# há ninguém usando: com o Chromium da sessão de pé, o lock é o que faz esta chamada
+# virar uma aba nele em vez de uma segunda instância brigando pelo mesmo perfil.
+if ! running; then
+  rm -f "$PROFILE/SingletonLock" "$PROFILE/SingletonSocket" "$PROFILE/SingletonCookie"
+fi
+BIN="/usr/bin/chromium"
+[ -x "$BIN" ] || BIN="$(command -v chromium || command -v chromium-browser || true)"
+if [ -z "$BIN" ]; then
+  echo "chromium is not installed" >&2
+  exit 1
+fi
+exec "$BIN" \
+  --no-sandbox \
+  --disable-dev-shm-usage \
+  --disable-gpu \
+  --disable-software-rasterizer \
+  --no-first-run \
+  --no-default-browser-check \
+  --disable-session-crashed-bubble \
+  --password-store=basic \
+  --user-data-dir="$PROFILE" \
+  --window-position="${CHROME_WINDOW_POSITION:-64,44}" \
+  --window-size="${CHROME_WINDOW_SIZE:-1120,690}" \
+  "$@"

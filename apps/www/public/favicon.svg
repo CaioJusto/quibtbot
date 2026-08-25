@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">Quibt Bot mark</title>
+  <rect width="512" height="512" rx="128" fill="#0B3A78" />
+  <path
+    fill="#ffffff"
+    d="M256 96c-88.4 0-160 71.6-160 160s71.6 160 160 160c28.6 0 55.4-7.5 78.6-20.6l46 46c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3l-42.4-42.4C400.7 326.4 416 292.5 416 256c0-88.4-71.6-160-160-160zm0 80c44.2 0 80 35.8 80 80s-35.8 80-80 80-80-35.8-80-80 35.8-80 80-80z"
+  />
+</svg>

@@ -1,0 +1,78 @@
+/* Open-app + chat density inspired by Grok 0.18 sizes, on Quibt --qb-* tokens.
+   Restyles existing classes only. No new product surfaces.
+   Mascots stay the Quibt 3D pot (blob / cube / drop / orb). Give the mark
+   room to read; never force a letter-tile crop. */
+
+.qb-dash__bot-row {
+  min-height: 58px;
+  overflow: visible;
+}
+
+.qb-dash__sidebar .qb-dash__mascot {
+  width: 36px !important;
+  height: 36px !important;
+  overflow: visible !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+}
+
+.qb-dash__sidebar .qb-dash__mascot > * {
+  width: 36px !important;
+  height: 36px !important;
+  overflow: visible !important;
+  border-radius: 0 !important;
+}
+
+.qb-dash__sidebar .qb-dash__mascot img,
+.qb-dash__name-btn .qb-dash__mascot img {
+  border-radius: 0 !important;
+  object-fit: contain !important;
+  max-width: none;
+}
+
+.qb-dash__name-btn .qb-dash__mascot,
+.qb-dash__name-btn .qb-dash__mascot > * {
+  width: 26px !important;
+  height: 26px !important;
+  overflow: visible !important;
+  border-radius: 0 !important;
+}
+
+.qb-dash__topbar {
+  min-height: 51px;
+  padding: 0 16px;
+}
+
+.qb-dash__thread {
+  padding: 28px max(20px, calc((100% - 690px) / 2)) 18px;
+  gap: 0;
+}
+
+.qb-msg-bubble {
+  max-width: min(88%, 640px, calc(100% - 82px));
+  padding: 8px 12px;
+  border-radius: 18px;
+}
+
+.qb-dash__composer {
+  padding: 8px max(24px, calc((100% - 700px) / 2)) 18px;
+}
+
+.qb-dash__input-shell {
+  border-radius: 16px;
+  padding: 9px;
+  align-items: flex-end;
+}
+
+.qb-dash__composer-plus,
+.qb-dash__send,
+.qb-dash__input-shell button[aria-label="Gravar recado de voz"] {
+  width: 30px;
+  height: 30px;
+}
+
+.qb-thinking {
+  color: var(--qb-muted);
+  font-size: 12px;
+  font-weight: 500;
+}

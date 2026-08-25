@@ -1,0 +1,39 @@
+#!/usr/bin/env python3
+"""Pinta a mesa do computador do bot.
+
+`xsetroot -solid` define só o background_pixel da janela raiz. Um compositor
+desenha a mesa a partir do pixmap apontado por `_XROOTPMAP_ID`, e sem ele a tela
+fica com o cinza padrão do servidor. Aqui a cor vira um pixmap de verdade, do
+mesmo jeito que hsetroot e feh fazem, e as duas propriedades são publicadas.
+"""
+
+import sys
+
+from Xlib import X, display
+
+
+def main():
+    color = sys.argv[1] if len(sys.argv) > 1 else "#D9E6F7"
+    screen_display = display.Display()
+    screen = screen_display.screen()
+    pixel = screen.default_colormap.alloc_named_color(color).pixel
+
+    pixmap = screen.root.create_pixmap(screen.width_in_pixels, screen.height_in_pixels, screen.root_depth)
+    gc = pixmap.create_gc(foreground=pixel, background=pixel)
+    pixmap.fill_rectangle(gc, 0, 0, screen.width_in_pixels, screen.height_in_pixels)
+    gc.free()
+
+    screen.root.change_attributes(background_pixmap=pixmap)
+    for name in ("_XROOTPMAP_ID", "ESETROOT_PMAP_ID"):
+        atom = screen_display.intern_atom(name)
+        screen.root.change_property(atom, screen_display.intern_atom("PIXMAP"), 32, [pixmap.id])
+    screen.root.clear_area(0, 0, screen.width_in_pixels, screen.height_in_pixels)
+    # O pixmap precisa sobreviver ao processo: quem o lê é o compositor.
+    screen_display.set_close_down_mode(X.RetainPermanent)
+    screen_display.flush()
+    screen_display.close()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

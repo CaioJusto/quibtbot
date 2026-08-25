@@ -1,0 +1,33 @@
+{
+  "name": "@quibt/testkit",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@quibt/adapter-kit": "workspace:*",
+    "@quibt/adapters": "workspace:*",
+    "@quibt/auth": "workspace:*",
+    "@quibt/contracts": "workspace:*",
+    "@quibt/core": "workspace:*",
+    "@quibt/db": "workspace:*",
+    "@quibt/installer": "workspace:*",
+    "@quibt/memory": "workspace:*",
+    "@hono/node-server": "^1.19.1",
+    "@testcontainers/postgresql": "^11.5.1",
+    "fast-check": "^4.3.0",
+    "testcontainers": "^11.5.1",
+    "yaml": "^2.9.0",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2",
+    "vitest": "^4.1.10"
+  }
+}

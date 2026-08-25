@@ -1,0 +1,1289 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <title>Quibt Bot — setup</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --canvas: #f5f6f8;
+        --surface: rgba(255, 255, 255, 0.94);
+        --surface-2: #f2f3f5;
+        --ink: #121316;
+        --muted: #666a73;
+        --muted-2: #8b8f98;
+        --line: #dfe1e6;
+        --accent: #5b7fe5;
+        --accent-soft: #edf2ff;
+        --good: #218a52;
+        --good-soft: #eaf7ef;
+        --danger: #bf4b38;
+        --danger-soft: #fff0ed;
+        --shadow: 0 28px 80px rgba(29, 38, 66, 0.12);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        min-height: 100%;
+        margin: 0;
+      }
+      body {
+        background:
+          radial-gradient(
+            circle at 18% 18%,
+            rgba(91, 127, 229, 0.12),
+            transparent 28%
+          ),
+          var(--canvas);
+        color: var(--ink);
+        font:
+          15px/1.5 -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      main {
+        width: min(1180px, 100%);
+        min-height: 100vh;
+        margin: 0 auto;
+        display: grid;
+        grid-template-columns: minmax(310px, 0.86fr) minmax(470px, 1.14fr);
+        align-items: center;
+        gap: clamp(30px, 6vw, 84px);
+        padding: 34px;
+      }
+
+      .brand-pane {
+        min-width: 0;
+        padding: 24px 0;
+      }
+      .wordmark {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 700;
+      }
+      .wordmark img {
+        width: 34px;
+        height: 34px;
+        object-fit: contain;
+      }
+      .kicker {
+        margin-top: 48px;
+        color: var(--accent);
+        font-size: 12px;
+        font-weight: 750;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+      }
+      .brand-pane h2 {
+        max-width: 540px;
+        margin: 12px 0 0;
+        font-size: clamp(38px, 4.7vw, 60px);
+        font-weight: 720;
+        letter-spacing: -0.055em;
+        line-height: 0.98;
+      }
+      p {
+        color: var(--muted);
+        margin: 12px 0 0;
+      }
+      .brand-pane > p {
+        max-width: 520px;
+        font-size: 16px;
+      }
+      .brand-art {
+        display: block;
+        width: min(100%, 470px);
+        max-height: 300px;
+        margin: 26px auto -6px;
+        object-fit: contain;
+        filter: drop-shadow(0 20px 28px rgba(50, 76, 150, 0.13));
+      }
+
+      .card {
+        width: 100%;
+        max-height: calc(100vh - 68px);
+        overflow: auto;
+        padding: clamp(28px, 4vw, 44px);
+        border: 1px solid rgba(210, 214, 223, 0.9);
+        border-radius: 30px;
+        background: var(--surface);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(24px);
+      }
+      .view-kicker {
+        margin: 0 0 9px;
+        color: var(--accent);
+        font-size: 11px;
+        font-weight: 750;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+      h1 {
+        margin: 0;
+        font-size: clamp(28px, 3vw, 38px);
+        font-weight: 700;
+        letter-spacing: -0.04em;
+        line-height: 1.05;
+      }
+      .mode-grid {
+        display: grid;
+        gap: 12px;
+        margin-top: 26px;
+      }
+      .mode-card {
+        width: 100%;
+        margin: 0;
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        gap: 3px 18px;
+        padding: 19px 20px;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: #fff;
+        color: var(--ink);
+        text-align: left;
+        box-shadow: none;
+      }
+      .mode-card:hover {
+        border-color: #b8c5e8;
+        background: #fbfcff;
+        transform: translateY(-1px);
+      }
+      .mode-card strong {
+        font-size: 16px;
+      }
+      .mode-card small {
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 450;
+        line-height: 1.35;
+      }
+      .mode-card::after {
+        content: "→";
+        grid-row: 1 / span 2;
+        grid-column: 2;
+        color: var(--accent);
+        font-size: 22px;
+      }
+      .mode-card--primary {
+        border-color: #afc0f2;
+        background: var(--accent-soft);
+      }
+      .choice-actions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        margin-top: 18px;
+      }
+      ol {
+        counter-reset: install-step;
+        margin: 24px 0 0;
+        padding: 0;
+        list-style: none;
+      }
+      ol li {
+        counter-increment: install-step;
+        position: relative;
+        min-height: 42px;
+        margin: 0;
+        display: flex;
+        align-items: center;
+        padding: 8px 12px 8px 48px;
+        border-bottom: 1px solid #eceef2;
+        color: var(--muted);
+      }
+      ol li:last-child {
+        border-bottom: 0;
+      }
+      ol li::before {
+        content: counter(install-step);
+        position: absolute;
+        left: 8px;
+        width: 25px;
+        height: 25px;
+        display: grid;
+        place-items: center;
+        border: 1px solid var(--line);
+        border-radius: 50%;
+        background: #fff;
+        color: var(--muted-2);
+        font-size: 12px;
+        font-weight: 700;
+      }
+      ol li.step-running {
+        color: var(--ink);
+        font-weight: 650;
+      }
+      ol li.step-running::before {
+        border-color: var(--accent);
+        background: var(--accent);
+        color: #fff;
+      }
+      ol li.step-done {
+        color: var(--good);
+      }
+      ol li.step-done::before {
+        content: "✓";
+        border-color: #b9e2c9;
+        background: var(--good-soft);
+        color: var(--good);
+      }
+      ol li.step-failed {
+        color: var(--danger);
+      }
+      ol li.step-failed::before {
+        content: "!";
+        border-color: #f2bcb2;
+        background: var(--danger-soft);
+        color: var(--danger);
+      }
+
+      pre {
+        max-height: 170px;
+        overflow: auto;
+        margin: 14px 0 0;
+        padding: 14px;
+        border: 1px solid #e1e3e8;
+        border-radius: 14px;
+        background: #f7f8fa;
+        color: #646975;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        font:
+          12px/1.45 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+      }
+
+      button {
+        margin-top: 16px;
+        margin-right: 8px;
+        border: 0;
+        border-radius: 999px;
+        background: var(--ink);
+        color: #fff;
+        font:
+          650 14px/1 -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        padding: 13px 20px;
+        cursor: pointer;
+        transition: 150ms ease;
+      }
+      button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 8px 20px rgba(18, 19, 22, 0.13);
+      }
+      button.secondary {
+        background: #fff;
+        color: var(--ink);
+        border: 1px solid var(--line);
+      }
+      button.secondary:hover {
+        border-color: #b7bbc4;
+        box-shadow: 0 8px 20px rgba(18, 19, 22, 0.07);
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: default;
+        transform: none;
+        box-shadow: none;
+      }
+      .choice-actions button {
+        margin: 0;
+      }
+      button:focus-visible,
+      input:focus-visible,
+      textarea:focus-visible,
+      select:focus-visible {
+        outline: 3px solid rgba(91, 127, 229, 0.28);
+        outline-offset: 2px;
+      }
+
+      input:not([type="checkbox"]),
+      textarea,
+      select {
+        width: 100%;
+        margin-top: 8px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: #fff;
+        color: var(--ink);
+        padding: 12px 14px;
+        font: inherit;
+      }
+      textarea {
+        min-height: 96px;
+        font:
+          12px/1.45 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+        resize: vertical;
+      }
+      input[type="checkbox"] {
+        width: 17px;
+        height: 17px;
+        margin: 0;
+        accent-color: var(--ink);
+        vertical-align: -3px;
+      }
+      label {
+        display: block;
+        margin-top: 14px;
+        color: #4f535c;
+        font-size: 13px;
+        font-weight: 560;
+      }
+      label:has(input[type="checkbox"]) {
+        display: flex;
+        align-items: flex-start;
+        gap: 9px;
+        font-weight: 450;
+        line-height: 1.4;
+      }
+
+      #status,
+      #local-pairing,
+      #remote-status,
+      #remote-pairing {
+        max-height: 98px;
+        overflow: auto;
+        margin-top: 16px;
+        padding: 11px 13px;
+        border-radius: 12px;
+        overflow-wrap: anywhere;
+        font-size: 13px;
+      }
+      #status:empty,
+      #local-pairing:empty,
+      #remote-status:empty,
+      #remote-pairing:empty {
+        display: none;
+      }
+      .ok {
+        background: var(--good-soft);
+        color: var(--good);
+      }
+      .bad {
+        background: var(--danger-soft);
+        color: var(--danger);
+      }
+      .working {
+        background: var(--accent-soft);
+        color: #3659b7;
+      }
+
+      .tabs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+        margin-top: 22px;
+        padding: 5px;
+        border-radius: 14px;
+        background: var(--surface-2);
+      }
+      .tab {
+        flex: 1 1 auto;
+        margin: 0;
+        border: 0;
+        border-radius: 10px;
+        background: transparent;
+        color: var(--muted);
+        padding: 9px 11px;
+        font-size: 12px;
+        box-shadow: none;
+      }
+      .tab:hover {
+        box-shadow: none;
+      }
+      .tab.active {
+        background: #fff;
+        color: var(--ink);
+        box-shadow: 0 2px 8px rgba(18, 19, 22, 0.07);
+      }
+      .hint {
+        color: var(--muted);
+        font-size: 13px;
+        margin-top: 10px;
+      }
+      .remote-panel {
+        padding-top: 3px;
+      }
+      .hidden {
+        display: none;
+      }
+
+      @media (max-width: 880px) {
+        main {
+          grid-template-columns: 1fr;
+          gap: 20px;
+          padding: 22px;
+        }
+        .brand-pane {
+          padding: 0 6px;
+        }
+        .brand-pane .kicker,
+        .brand-pane h2,
+        .brand-pane > p {
+          display: none;
+        }
+        .brand-art {
+          position: absolute;
+          width: 130px;
+          right: 30px;
+          top: 10px;
+          margin: 0;
+          opacity: 0.9;
+          pointer-events: none;
+        }
+        .card {
+          max-height: none;
+          border-radius: 24px;
+        }
+      }
+      @media (max-width: 560px) {
+        main {
+          padding: 12px;
+        }
+        .brand-art {
+          display: none;
+        }
+        .card {
+          padding: 24px 20px;
+        }
+        .choice-actions {
+          align-items: stretch;
+          flex-direction: column;
+        }
+        .choice-actions button {
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <aside class="brand-pane" aria-label="Quibt Bot">
+        <div class="wordmark">
+          <img src="./quibt-icon.png" alt="" /> <span>Quibt Bot</span>
+        </div>
+        <div class="kicker">Instalação desktop</div>
+        <h2>Seu time digital, ligado do seu jeito.</h2>
+        <p>
+          Use este Mac, conecte uma VPS ou escolha um servidor Box. O app cuida
+          do restante e mostra cada etapa.
+        </p>
+        <img
+          class="brand-art"
+          src="./quibt-team.png"
+          alt="Personagens do Quibt Bot"
+        />
+      </aside>
+      <section class="card">
+        <div id="choice-view">
+          <p class="view-kicker">Primeiro passo</p>
+          <h1>Vamos ligar o Quibt Bot</h1>
+          <p>
+            Escolha onde o servidor principal vai rodar. Você pode mudar depois.
+          </p>
+          <p id="recovery-notice" class="bad hidden"></p>
+          <div class="mode-grid">
+            <button
+              type="button"
+              class="mode-card mode-card--primary"
+              id="choose-local"
+            >
+              <strong>Instalar neste computador</strong>
+              <small
+                >Mais simples para começar. O Docker mantém tudo neste
+                Mac.</small
+              >
+            </button>
+            <button type="button" class="mode-card" id="choose-remote">
+              <strong>Conectar a outro servidor</strong>
+              <small
+                >Use uma URL pronta, uma VPS própria ou um servidor Box.</small
+              >
+            </button>
+          </div>
+          <div class="choice-actions">
+            <button type="button" class="secondary" id="retry-choice">
+              Já está no ar — abrir
+            </button>
+            <button type="button" class="secondary" id="forget-remote-choice">
+              Voltar para este computador
+            </button>
+            <button type="button" class="secondary" id="uninstall-choice">
+              Remover o Quibt deste computador…
+            </button>
+          </div>
+        </div>
+
+        <div id="local-view" class="hidden">
+          <p class="view-kicker">Instalação local</p>
+          <h1>Instalar neste computador</h1>
+          <p>
+            O app prepara tudo sozinho. Se o Docker não estiver instalado, o
+            Quibt baixa a versão oficial, pede a senha do Mac uma vez, abre o
+            Docker e continua automaticamente.
+          </p>
+          <p class="hint">
+            Ao começar, você aceita os termos de uso do Docker Desktop. O Quibt
+            verifica a assinatura oficial antes de instalar.
+          </p>
+          <ol id="steps">
+            <li id="step-requirements">Preparar Docker automaticamente</li>
+            <li id="step-environment">Gerar segredos locais</li>
+            <li id="step-images">Preparar imagens</li>
+            <li id="step-services">
+              Subir Postgres, API, worker e o computador
+            </li>
+            <li id="step-database">Aplicar migrações</li>
+            <li id="step-health">Verificar saúde da API</li>
+            <li id="step-pairing">Preparar pareamento</li>
+          </ol>
+          <p id="status" class="bad"></p>
+          <p id="local-pairing" class="ok hidden"></p>
+          <pre id="log" hidden></pre>
+          <button type="button" id="start">Começar instalação</button>
+          <button type="button" id="open-after-install" hidden>
+            Abrir Quibt Bot
+          </button>
+          <button type="button" class="secondary" id="back-local">
+            Voltar
+          </button>
+          <button type="button" class="secondary" id="retry-local">
+            Já está no ar — abrir
+          </button>
+        </div>
+
+        <div id="remote-view" class="hidden">
+          <p class="view-kicker">Servidor remoto</p>
+          <h1>Conectar a outro servidor</h1>
+          <p>
+            Use uma URL existente, siga o guia de VPS, instale por SSH ou suba
+            um servidor Box.
+          </p>
+          <div class="tabs">
+            <button type="button" class="tab active" data-remote-tab="url">
+              URL existente
+            </button>
+            <button type="button" class="tab" data-remote-tab="guide">
+              VPS guiado
+            </button>
+            <button type="button" class="tab" data-remote-tab="ssh">
+              SSH VPS
+            </button>
+            <button type="button" class="tab" data-remote-tab="box">Box</button>
+          </div>
+
+          <div id="remote-panel-url" class="remote-panel">
+            <input
+              type="url"
+              id="remote-url"
+              placeholder="https://meu-servidor.exemplo"
+            />
+            <button type="button" id="connect-remote">Conectar</button>
+          </div>
+
+          <div id="remote-panel-guide" class="remote-panel hidden">
+            <p class="hint">
+              Crie uma VPS Ubuntu 22.04/24.04, abra o console web do provedor e
+              cole este comando como root.
+            </p>
+            <pre id="vps-bootstrap">Carregando comando…</pre>
+            <p class="hint">
+              Quando a instalação terminar, volte para “URL existente” e informe
+              a URL pública do servidor.
+            </p>
+          </div>
+
+          <div id="remote-panel-ssh" class="remote-panel hidden">
+            <label>Host<input id="ssh-host" placeholder="vps.example" /></label>
+            <input type="hidden" id="ssh-inspection-id" />
+            <label
+              >Porta<input
+                id="ssh-port"
+                type="number"
+                value="22"
+                min="1"
+                max="65535"
+            /></label>
+            <label>Usuário<input id="ssh-user" placeholder="root" /></label>
+            <label
+              >Autenticação
+              <select id="ssh-auth-type">
+                <option value="password">Senha</option>
+                <option value="privateKey">Chave privada</option>
+              </select>
+            </label>
+            <label id="ssh-password-wrap"
+              >Senha<input id="ssh-password" type="password" autocomplete="off"
+            /></label>
+            <label id="ssh-key-wrap" class="hidden"
+              >Chave privada<textarea
+                id="ssh-private-key"
+                autocomplete="off"
+              ></textarea>
+            </label>
+            <label id="ssh-passphrase-wrap" class="hidden"
+              >Passphrase da chave<input
+                id="ssh-passphrase"
+                type="password"
+                autocomplete="off"
+            /></label>
+            <button type="button" class="secondary" id="ssh-inspect">
+              Ler impressão digital
+            </button>
+            <label
+              >Impressão digital confirmada<input
+                id="ssh-fingerprint"
+                placeholder="SHA256:…"
+            /></label>
+            <label
+              ><input type="checkbox" id="ssh-save" /> Salvar credencial neste
+              computador (criptografada)</label
+            >
+            <ol id="remote-steps">
+              <li id="remote-step-requirements">Verificar host SSH</li>
+              <li id="remote-step-environment">Baixar e validar quibtbot</li>
+              <li id="remote-step-images">Instalar stack remota</li>
+              <li id="remote-step-health">Validar URL</li>
+              <li id="remote-step-pairing">Preparar pareamento</li>
+            </ol>
+            <button type="button" id="ssh-install">Instalar no servidor</button>
+            <button type="button" class="secondary" id="ssh-cancel">
+              Cancelar
+            </button>
+          </div>
+
+          <div id="remote-panel-box" class="remote-panel hidden">
+            <label
+              >API key Box<input
+                id="box-api-key"
+                type="password"
+                autocomplete="off"
+                placeholder="box_…"
+            /></label>
+            <label
+              ><input type="checkbox" id="box-save" checked /> Guardar a chave
+              neste computador (criptografada)</label
+            >
+            <p class="hint">
+              A chave fica só no app e nunca é enviada à API Quibt. A VM de
+              servidor é distinta das VMs dos bots.
+            </p>
+            <button type="button" id="box-install">Instalar no Box</button>
+            <button type="button" class="secondary" id="box-cancel">
+              Cancelar
+            </button>
+          </div>
+
+          <p id="remote-status" class="bad"></p>
+          <p id="remote-pairing" class="ok hidden"></p>
+          <pre id="remote-log" hidden></pre>
+          <button type="button" class="secondary" id="back-remote">
+            Voltar
+          </button>
+          <button type="button" class="secondary" id="retry-remote">
+            Já está no ar — abrir
+          </button>
+          <button type="button" class="secondary" id="forget-remote">
+            Esquecer servidor
+          </button>
+        </div>
+      </section>
+    </main>
+    <script>
+      const desktop = window.quibtDesktop;
+      const choiceView = document.getElementById("choice-view");
+      const localView = document.getElementById("local-view");
+      const remoteView = document.getElementById("remote-view");
+      const status = document.getElementById("status");
+      const localPairing = document.getElementById("local-pairing");
+      const remoteStatus = document.getElementById("remote-status");
+      const remoteLog = document.getElementById("remote-log");
+      const remotePairing = document.getElementById("remote-pairing");
+      const log = document.getElementById("log");
+      const recoveryNotice = document.getElementById("recovery-notice");
+
+      function showRecoveryNotice(text) {
+        if (!recoveryNotice || !text) return;
+        recoveryNotice.textContent = text;
+        recoveryNotice.classList.remove("hidden");
+      }
+
+      void desktop?.startupNotice?.().then((message) => {
+        if (message) showRecoveryNotice(message);
+      });
+
+      function say(target, text, ok) {
+        target.textContent = text;
+        target.className =
+          ok === true ? "ok" : ok === false ? "bad" : "working";
+      }
+
+      function remoteInstallMessage(message) {
+        if (!message) return "Instalação remota indisponível neste build.";
+        if (message === "Release manifest is not ready for remote install.") {
+          return "A instalação remota será liberada quando o manifesto deste release estiver pronto.";
+        }
+        if (message === "Embedded release manifest is unavailable.") {
+          return "O manifesto deste release não está disponível neste build.";
+        }
+        if (message.startsWith("Release manifest digest for ")) {
+          return "O manifesto deste release ainda não possui todos os arquivos verificados.";
+        }
+        return message;
+      }
+
+      function show(view) {
+        choiceView.classList.toggle("hidden", view !== "choice");
+        localView.classList.toggle("hidden", view !== "local");
+        remoteView.classList.toggle("hidden", view !== "remote");
+      }
+
+      function resetStepStyles() {
+        for (const step of [
+          "requirements",
+          "environment",
+          "images",
+          "services",
+          "database",
+          "health",
+          "pairing",
+        ]) {
+          const el = document.getElementById(`step-${step}`);
+          if (el) el.className = "";
+        }
+      }
+
+      function markStep(step, statusName) {
+        const el = document.getElementById(`step-${step}`);
+        if (!el) return;
+        el.className =
+          statusName === "succeeded"
+            ? "step-done"
+            : statusName === "failed"
+              ? "step-failed"
+              : "step-running";
+      }
+
+      let busy = false;
+      let unsubscribe = null;
+      let unsubscribePairing = null;
+      let _activeRemoteTab = "url";
+      let sshOperationId = null;
+      let boxOperationId = null;
+
+      function newOperationId(prefix) {
+        return `${prefix}-${globalThis.crypto?.randomUUID?.() ?? Date.now()}`;
+      }
+
+      function showPairing(pairing) {
+        if (!remotePairing || !pairing?.code) return;
+        remotePairing.textContent = `Código de pareamento: ${pairing.code}${pairing.expiresAt ? ` (expira ${pairing.expiresAt})` : ""}`;
+        remotePairing.classList.remove("hidden");
+      }
+
+      function showLocalPairing(pairing) {
+        if (!localPairing || !pairing?.code) return;
+        localPairing.textContent = `Código de pareamento: ${pairing.code}${pairing.expiresAt ? ` (expira ${pairing.expiresAt})` : ""}`;
+        localPairing.classList.remove("hidden");
+      }
+
+      function setRemoteTab(tab) {
+        _activeRemoteTab = tab;
+        for (const button of document.querySelectorAll("[data-remote-tab]")) {
+          button.classList.toggle("active", button.dataset.remoteTab === tab);
+        }
+        for (const panel of document.querySelectorAll(".remote-panel")) {
+          panel.classList.add("hidden");
+        }
+        document
+          .getElementById(`remote-panel-${tab}`)
+          ?.classList.remove("hidden");
+      }
+
+      function markRemoteStep(step, statusName) {
+        const el = document.getElementById(`remote-step-${step}`);
+        if (!el) return;
+        el.className =
+          statusName === "succeeded"
+            ? "step-done"
+            : statusName === "failed"
+              ? "step-failed"
+              : "step-running";
+      }
+
+      function resetRemoteStepStyles() {
+        for (const step of [
+          "requirements",
+          "environment",
+          "images",
+          "health",
+          "pairing",
+        ]) {
+          markRemoteStep(step, "");
+          const el = document.getElementById(`remote-step-${step}`);
+          if (el) el.className = "";
+        }
+      }
+
+      function sshPayload(includeFingerprint = false, operationId) {
+        const authType =
+          document.getElementById("ssh-auth-type")?.value === "privateKey"
+            ? "privateKey"
+            : "password";
+        const payload = {
+          host: document.getElementById("ssh-host")?.value?.trim() ?? "",
+          port: Number(document.getElementById("ssh-port")?.value ?? 22),
+          username: document.getElementById("ssh-user")?.value?.trim() ?? "",
+          authType,
+          password: document.getElementById("ssh-password")?.value ?? "",
+          privateKey: document.getElementById("ssh-private-key")?.value ?? "",
+          passphrase: document.getElementById("ssh-passphrase")?.value ?? "",
+          operationId,
+        };
+        if (includeFingerprint) {
+          payload.inspectionId =
+            document.getElementById("ssh-inspection-id")?.value?.trim() ?? "";
+          payload.expectedFingerprint =
+            document.getElementById("ssh-fingerprint")?.value?.trim() ?? "";
+          payload.saveCredential =
+            document.getElementById("ssh-save")?.checked === true;
+        }
+        return payload;
+      }
+
+      function bindRemoteInstallEvents() {
+        unsubscribe?.();
+        unsubscribePairing?.();
+        remotePairing?.classList.add("hidden");
+        unsubscribe =
+          desktop.onInstallEvent?.((event) => {
+            markRemoteStep(event.step, event.status);
+            const line = `[${event.step}] ${event.status}: ${event.message}`;
+            remoteLog.textContent = `${remoteLog.textContent}${line}\n`;
+          }) ?? null;
+        unsubscribePairing =
+          desktop.onInstallPairing?.((pairing) => {
+            showPairing(pairing);
+          }) ?? null;
+      }
+
+      for (const button of document.querySelectorAll("[data-remote-tab]")) {
+        button.addEventListener("click", () =>
+          setRemoteTab(button.dataset.remoteTab ?? "url"),
+        );
+      }
+
+      document
+        .getElementById("ssh-auth-type")
+        ?.addEventListener("change", (event) => {
+          const isKey = event.target.value === "privateKey";
+          document
+            .getElementById("ssh-password-wrap")
+            ?.classList.toggle("hidden", isKey);
+          document
+            .getElementById("ssh-key-wrap")
+            ?.classList.toggle("hidden", !isKey);
+          document
+            .getElementById("ssh-passphrase-wrap")
+            ?.classList.toggle("hidden", !isKey);
+        });
+
+      document.getElementById("choose-local")?.addEventListener("click", () => {
+        resetStepStyles();
+        say(
+          status,
+          "Pronto para verificar o Docker e instalar o Quibt Bot.",
+          true,
+        );
+        show("local");
+      });
+
+      document
+        .getElementById("choose-remote")
+        ?.addEventListener("click", async () => {
+          say(remoteStatus, "", false);
+          remoteLog.hidden = true;
+          remoteLog.textContent = "";
+          setRemoteTab("url");
+          show("remote");
+          const remoteState = await desktop?.remoteInstallStatus?.();
+          if (remoteState && !remoteState.available) {
+            say(remoteStatus, remoteInstallMessage(remoteState.message), false);
+          }
+          if (desktop?.guidedVpsBootstrap) {
+            try {
+              const result = await desktop.guidedVpsBootstrap();
+              const target = document.getElementById("vps-bootstrap");
+              if (!result?.ok) {
+                say(remoteStatus, remoteInstallMessage(result?.message), false);
+                if (target)
+                  target.textContent =
+                    "Verifique a assinatura do release antes de copiar um comando.";
+                return;
+              }
+              if (target)
+                target.textContent =
+                  result.command ?? "Comando indisponível neste build.";
+            } catch (error) {
+              say(
+                remoteStatus,
+                error instanceof Error
+                  ? remoteInstallMessage(error.message)
+                  : "Manifesto de release indisponível.",
+                false,
+              );
+            }
+          }
+        });
+
+      document
+        .getElementById("back-local")
+        ?.addEventListener("click", () => show("choice"));
+      document
+        .getElementById("back-remote")
+        ?.addEventListener("click", () => show("choice"));
+
+      document
+        .getElementById("retry-choice")
+        ?.addEventListener("click", () => desktop?.reloadApp?.());
+      // Quem chega aqui com um install meio quebrado também precisa da saída limpa:
+      // o mesmo "Desinstalar" do menu, que pergunta antes e mantém dados/imagens se quiser.
+      const uninstallChoice = document.getElementById("uninstall-choice");
+      if (uninstallChoice && !desktop?.uninstall) uninstallChoice.hidden = true;
+      uninstallChoice?.addEventListener("click", () => desktop?.uninstall?.());
+      document
+        .getElementById("retry-local")
+        ?.addEventListener("click", () => desktop?.reloadApp?.());
+      document
+        .getElementById("retry-remote")
+        ?.addEventListener("click", () => desktop?.reloadApp?.());
+
+      async function forgetRemote(target) {
+        if (!desktop?.forgetRemote) {
+          say(
+            target,
+            "Este build não suporta esquecer o servidor remoto.",
+            false,
+          );
+          return;
+        }
+        try {
+          const result = await desktop.forgetRemote();
+          say(target, result.message, result.ok);
+          if (result.ok) show("choice");
+        } catch (error) {
+          say(
+            target,
+            error instanceof Error ? error.message : "Erro inesperado.",
+            false,
+          );
+        }
+      }
+
+      document
+        .getElementById("forget-remote-choice")
+        ?.addEventListener("click", () => {
+          forgetRemote(status);
+        });
+      document
+        .getElementById("forget-remote")
+        ?.addEventListener("click", () => {
+          forgetRemote(remoteStatus);
+        });
+
+      const startButton = document.getElementById("start");
+      const openAfterInstall = document.getElementById("open-after-install");
+      openAfterInstall?.addEventListener("click", () => desktop?.reloadApp?.());
+      startButton?.addEventListener("click", async () => {
+        if (busy) return;
+        if (!desktop?.startStack) {
+          say(
+            status,
+            "Este build não sabe subir o stack. Use pnpm dev ou aponte QUIBT_WEB_URL.",
+            false,
+          );
+          return;
+        }
+        busy = true;
+        startButton.disabled = true;
+        resetStepStyles();
+        say(status, "Iniciando instalação…");
+        log.hidden = false;
+        log.textContent = "";
+        unsubscribe?.();
+        unsubscribe =
+          desktop.onInstallEvent?.((event) => {
+            markStep(event.step, event.status);
+            const line = `[${event.step}] ${event.status}: ${event.message}`;
+            log.textContent = `${log.textContent}${line}\n`;
+            if (event.status === "running") say(status, event.message);
+          }) ?? null;
+        try {
+          const result = await desktop.startStack();
+          if (result.log) {
+            log.textContent = result.log;
+          }
+          say(status, result.message, result.ok);
+          if (result.ok && result.pairing) {
+            showLocalPairing(result.pairing);
+            const completed = await desktop.completeLocalPairing?.();
+            if (!completed?.ok) {
+              say(
+                status,
+                completed?.message ?? "Não foi possível concluir o pareamento.",
+                false,
+              );
+              return;
+            }
+            startButton.hidden = true;
+            if (openAfterInstall) openAfterInstall.hidden = false;
+          } else if (result.ok && desktop.reloadApp) {
+            await desktop.reloadApp();
+          }
+        } catch (error) {
+          say(
+            status,
+            error instanceof Error ? error.message : "Erro inesperado.",
+            false,
+          );
+        } finally {
+          busy = false;
+          startButton.disabled = false;
+        }
+      });
+
+      document
+        .getElementById("connect-remote")
+        ?.addEventListener("click", async () => {
+          const url = document.getElementById("remote-url")?.value?.trim();
+          if (!url) {
+            say(remoteStatus, "Digite a URL do servidor.", false);
+            return;
+          }
+          if (!desktop?.connectRemote) {
+            say(remoteStatus, "Este build não suporta conexão remota.", false);
+            return;
+          }
+          try {
+            const result = await desktop.connectRemote(url);
+            say(remoteStatus, result.message, result.ok);
+          } catch (error) {
+            say(
+              remoteStatus,
+              error instanceof Error ? error.message : "Erro inesperado.",
+              false,
+            );
+          }
+        });
+
+      document
+        .getElementById("ssh-inspect")
+        ?.addEventListener("click", async () => {
+          if (!desktop?.inspectSshHost) {
+            say(remoteStatus, "Este build não suporta inspeção SSH.", false);
+            return;
+          }
+          try {
+            const result = await desktop.inspectSshHost(sshPayload(false));
+            if (!result.ok) {
+              say(
+                remoteStatus,
+                result.message ?? "Falha ao ler impressão digital.",
+                false,
+              );
+              return;
+            }
+            const field = document.getElementById("ssh-fingerprint");
+            if (field) field.value = result.fingerprint ?? "";
+            const inspectionField =
+              document.getElementById("ssh-inspection-id");
+            if (inspectionField)
+              inspectionField.value = result.inspectionId ?? "";
+            say(
+              remoteStatus,
+              `Confirme ${result.display ?? `${result.hostname} (${result.ip})`} — ${result.algorithm}: ${result.fingerprint}`,
+              true,
+            );
+          } catch (error) {
+            say(
+              remoteStatus,
+              error instanceof Error ? error.message : "Erro inesperado.",
+              false,
+            );
+          }
+        });
+
+      document
+        .getElementById("ssh-install")
+        ?.addEventListener("click", async () => {
+          if (busy) return;
+          if (!desktop?.installOverSsh) {
+            say(remoteStatus, "Este build não suporta instalação SSH.", false);
+            return;
+          }
+          const remoteState = await desktop?.remoteInstallStatus?.();
+          if (remoteState && !remoteState.available) {
+            say(
+              remoteStatus,
+              remoteState.message ??
+                "Instalação remota indisponível neste build.",
+              false,
+            );
+            return;
+          }
+          busy = true;
+          sshOperationId = newOperationId("ssh");
+          resetRemoteStepStyles();
+          remoteLog.hidden = false;
+          remoteLog.textContent = "";
+          bindRemoteInstallEvents();
+          say(remoteStatus, "Instalando no servidor…", true);
+          try {
+            const result = await desktop.installOverSsh(
+              sshPayload(true, sshOperationId),
+            );
+            if (result.log) remoteLog.textContent = result.log;
+            say(
+              remoteStatus,
+              result.message ??
+                (result.ok ? "Instalação concluída." : "Instalação falhou."),
+              result.ok,
+            );
+            if (result.warning)
+              say(
+                remoteStatus,
+                `${result.message ?? ""} ${result.warning}`.trim(),
+                result.ok,
+              );
+            if (result.ok && result.url) {
+              const urlField = document.getElementById("remote-url");
+              if (urlField) urlField.value = result.url;
+            }
+          } catch (error) {
+            say(
+              remoteStatus,
+              error instanceof Error ? error.message : "Erro inesperado.",
+              false,
+            );
+          } finally {
+            busy = false;
+            sshOperationId = null;
+          }
+        });
+
+      document
+        .getElementById("ssh-cancel")
+        ?.addEventListener("click", async () => {
+          if (!sshOperationId) {
+            say(remoteStatus, "Nenhuma instalação SSH ativa.", false);
+            return;
+          }
+          const result = await desktop?.cancelRemoteInstall?.({
+            operationId: sshOperationId,
+            kind: "ssh",
+          });
+          say(
+            remoteStatus,
+            result?.message ?? "Instalação SSH cancelada.",
+            Boolean(result?.ok),
+          );
+        });
+
+      document
+        .getElementById("box-install")
+        ?.addEventListener("click", async () => {
+          if (busy) return;
+          if (!desktop?.installOnBox) {
+            say(remoteStatus, "Este build não suporta instalação Box.", false);
+            return;
+          }
+          const remoteState = await desktop?.remoteInstallStatus?.();
+          if (remoteState && !remoteState.available) {
+            say(
+              remoteStatus,
+              remoteState.message ??
+                "Instalação remota indisponível neste build.",
+              false,
+            );
+            return;
+          }
+          busy = true;
+          boxOperationId = newOperationId("box");
+          resetRemoteStepStyles();
+          remoteLog.hidden = false;
+          remoteLog.textContent = "";
+          bindRemoteInstallEvents();
+          say(remoteStatus, "Instalando no Box…", true);
+          try {
+            const result = await desktop.installOnBox({
+              apiKey:
+                document.getElementById("box-api-key")?.value?.trim() ?? "",
+              saveApiKey: document.getElementById("box-save")?.checked === true,
+              operationId: boxOperationId,
+            });
+            if (result.log) remoteLog.textContent = result.log;
+            say(
+              remoteStatus,
+              result.message ??
+                (result.ok ? "Instalação concluída." : "Instalação falhou."),
+              result.ok,
+            );
+            if (result.warning)
+              say(
+                remoteStatus,
+                `${result.message ?? ""} ${result.warning}`.trim(),
+                result.ok,
+              );
+            if (result.ok && result.url) {
+              const urlField = document.getElementById("remote-url");
+              if (urlField) urlField.value = result.url;
+            }
+          } catch (error) {
+            say(
+              remoteStatus,
+              error instanceof Error ? error.message : "Erro inesperado.",
+              false,
+            );
+          } finally {
+            busy = false;
+            boxOperationId = null;
+          }
+        });
+
+      document
+        .getElementById("box-cancel")
+        ?.addEventListener("click", async () => {
+          if (!boxOperationId) {
+            say(remoteStatus, "Nenhuma instalação Box ativa.", false);
+            return;
+          }
+          const result = await desktop?.cancelRemoteInstall?.({
+            operationId: boxOperationId,
+            kind: "box",
+          });
+          say(
+            remoteStatus,
+            result?.message ?? "Instalação Box cancelada.",
+            Boolean(result?.ok),
+          );
+        });
+    </script>
+  </body>
+</html>

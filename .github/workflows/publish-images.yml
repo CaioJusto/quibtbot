@@ -1,0 +1,45 @@
+name: publish-images
+# Disparo manual: publica a imagem do stack para linux/amd64 no GHCR e junta o manifest
+# multi-arch com o arm64 (que a máquina de desenvolvimento publica nativamente).
+#
+# Por que existe: o repo mora em CaioJusto/ e as imagens em ghcr.io/quibt/ — o
+# GITHUB_TOKEN não atravessa namespaces, então o login usa o secret GHCR_WRITE_TOKEN.
+# E o amd64 precisa de runner nativo: node/esbuild segfaultam sob emulação qemu.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Versão (tag das imagens, ex. 0.2.0)"
+        required: true
+        default: "0.2.0"
+permissions:
+  contents: read
+concurrency:
+  group: publish-images
+  cancel-in-progress: false
+jobs:
+  stack-amd64:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: CaioJusto
+          password: ${{ secrets.GHCR_WRITE_TOKEN }}
+      - name: Build and push quibt-stack (amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/compose/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/quibt/quibt-stack:${{ inputs.version }}-amd64
+          build-args: RELEASE_VERSION=${{ inputs.version }}
+      - name: Merge multi-arch manifest
+        run: |
+          docker buildx imagetools create -t "ghcr.io/quibt/quibt-stack:${{ inputs.version }}" \
+            "ghcr.io/quibt/quibt-stack:${{ inputs.version }}-arm64" \
+            "ghcr.io/quibt/quibt-stack:${{ inputs.version }}-amd64"

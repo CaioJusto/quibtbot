@@ -1,0 +1,48 @@
+{
+  "name": "@quibt/core",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "development": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./secrets-guard": {
+      "types": "./src/secrets-guard.ts",
+      "development": "./src/secrets-guard.ts",
+      "default": "./src/secrets-guard.ts"
+    },
+    "./bootstrap-invite": {
+      "types": "./src/bootstrap-invite.ts",
+      "development": "./src/bootstrap-invite.ts",
+      "default": "./src/bootstrap-invite.ts"
+    },
+    "./device-code": {
+      "types": "./src/device-code.ts",
+      "development": "./src/device-code.ts",
+      "default": "./src/device-code.ts"
+    },
+    "./bootstrap-invite-server": {
+      "types": "./src/bootstrap-invite-server.ts",
+      "development": "./src/bootstrap-invite-server.ts",
+      "default": "./src/bootstrap-invite-server.ts"
+    }
+  },
+  "scripts": {
+    "check": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@quibt/adapter-kit": "workspace:*",
+    "@quibt/contracts": "workspace:*",
+    "qrcode-generator": "^2.0.4",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "fast-check": "^4.3.0",
+    "typescript": "^5.9.2",
+    "vitest": "^4.1.10"
+  }
+}

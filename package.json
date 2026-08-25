@@ -1,0 +1,71 @@
+{
+  "name": "quibt-bot",
+  "private": true,
+  "version": "0.2.9",
+  "homepage": "https://quibt.com.br",
+  "license": "Apache-2.0",
+  "type": "module",
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "dev": "turbo dev --filter=@quibt/api --filter=@quibt/worker --filter=@quibt/web --filter=@quibt/sandbox-supervisor",
+    "build": "turbo build",
+    "check": "turbo check",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "db:generate": "pnpm --filter @quibt/db generate",
+    "db:migrate": "pnpm --filter @quibt/db migrate",
+    "owner:code": "node --env-file=.env scripts/mint-dev-owner-code.mjs",
+    "sandbox:build": "docker build -t quibt/computer:local infra/sandboxes/computer",
+    "release:manifest": "node scripts/release-version.mjs",
+    "release:cli-binary": "node scripts/build-cli-binary.mjs",
+    "verify:fast": "vitest run",
+    "verify:installer": "vitest run packages/installer apps/cli packages/testkit/src/installer-smoke.test.ts",
+    "smoke:installer": "node scripts/smoke-installer.mjs",
+    "verify": "tsx packages/testkit/src/cli/verify.ts",
+    "verify:providers": "tsx packages/testkit/src/cli/verify.ts --providers",
+    "e2e": "tsx packages/testkit/src/cli/verify.ts",
+    "e2e:mobile": "pnpm --filter @quibt/mobile e2e",
+    "compose:up": "docker compose -f infra/compose/docker-compose.yml up --build",
+    "compose:down": "docker compose -f infra/compose/docker-compose.yml down -v",
+    "desktop": "pnpm --filter @quibt/desktop dev",
+    "desktop:pack": "node scripts/pack-desktop.mjs",
+    "desktop:pack:mac": "node scripts/pack-desktop.mjs mac",
+    "desktop:pack:win": "node scripts/pack-desktop.mjs win",
+    "desktop:pack:linux": "node scripts/pack-desktop.mjs linux",
+    "dev:desktop": "node scripts/dev-desktop.mjs"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.8",
+    "@types/node": "^24.3.0",
+    "actionlint": "^2.0.6",
+    "esbuild": "^0.25.9",
+    "postject": "^1.0.0-alpha.6",
+    "tsx": "^4.20.5",
+    "turbo": "^2.5.6",
+    "typescript": "^5.9.2",
+    "vitest": "^4.1.10",
+    "yaml": "^2.9.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "adm-zip": "0.6.0",
+      "deepmerge-ts": "8.0.2",
+      "postcss": "8.5.26",
+      "sharp": "0.35.3",
+      "uuid": "11.1.1"
+    },
+    "auditConfig": {
+      "ignoreGhsas": [
+        "GHSA-w3rx-r6r6-pgpr",
+        "GHSA-5p2g-fcmc-qvqq"
+      ]
+    },
+    "patchedDependencies": {
+      "image-size@1.2.1": "patches/image-size@1.2.1.patch",
+      "@dylankenneally/react-native-ssh-sftp@1.11.0": "patches/@dylankenneally__react-native-ssh-sftp@1.11.0.patch"
+    }
+  }
+}

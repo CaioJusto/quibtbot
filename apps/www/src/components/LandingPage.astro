@@ -1,0 +1,183 @@
+---
+import Button from "./Button.astro";
+import Footer from "./Footer.astro";
+import Header from "./Header.astro";
+import { ProductDemo } from "./ProductDemo";
+import BaseLayout from "../layouts/BaseLayout.astro";
+import { copyFor, type Locale } from "../i18n";
+import {
+  CHANGELOG_URL,
+  DESKTOP_VERSION,
+  GITHUB_URL,
+  INSTALL_COMMAND,
+  LINUX_DOWNLOAD_URL,
+  MAC_DOWNLOAD_URL,
+  WIN_DOWNLOAD_URL,
+} from "../site";
+
+type Props = { locale: Locale };
+const { locale } = Astro.props as Props;
+const copy = copyFor(locale);
+const landing = copy.landing;
+const mascotSources = [
+  "/mascots/quib-blue.png",
+  "/mascots/quib-yellow.png",
+  "/mascots/quib-cyan.png",
+  "/mascots/quib-pink.png",
+];
+---
+
+<BaseLayout title="Quibt Bot" description={copy.metaDescription} locale={locale} page="home">
+  <div class="container">
+    <Header locale={locale} page="home" />
+
+    <main id="main">
+      <section class="landing-hero">
+        <div class="landing-hero__copy">
+          <a class="hero__pill" href={GITHUB_URL} target="_blank" rel="noreferrer">
+            <span class="hero__badge">{landing.status.badge}</span>
+            <span>v{DESKTOP_VERSION} {landing.status.text}</span>
+          </a>
+          <h1>{landing.title}</h1>
+          <p class="lead">{landing.lead}</p>
+          <div class="hero__actions">
+            <Button href="#download">{copy.nav.download}</Button>
+            <Button href={GITHUB_URL} variant="secondary" external>{copy.nav.github}</Button>
+          </div>
+        </div>
+        <div class="landing-hero__stage" aria-label={landing.mascotStageLabel}>
+          <img class="landing-mascot landing-mascot--hero-blue" src={mascotSources[0]} alt={landing.mascotAlts.blue} width="512" height="512" />
+          <img class="landing-mascot landing-mascot--hero-yellow" src={mascotSources[1]} alt={landing.mascotAlts.yellow} width="512" height="512" />
+          <img class="landing-mascot landing-mascot--hero-pink" src={mascotSources[3]} alt={landing.mascotAlts.pink} width="512" height="512" />
+          <img class="landing-mascot landing-mascot--hero-cyan" src={mascotSources[2]} alt={landing.mascotAlts.cyan} width="512" height="512" />
+        </div>
+      </section>
+
+      <section id="demo" class="demo-section">
+        <img class="landing-mascot landing-mascot--demo-blue" src="/mascots/quib-blue.png" alt="" width="512" height="512" aria-hidden="true" />
+        <img class="landing-mascot landing-mascot--demo-cyan" src="/mascots/quib-cyan.png" alt="" width="512" height="512" aria-hidden="true" />
+        <ProductDemo locale={locale} client:visible />
+      </section>
+
+      <section id="how" class="section">
+        <div class="section-intro">
+          <div class="eyebrow">{landing.howEyebrow}</div>
+          <h2 class="section-heading">{landing.howTitle}</h2>
+          <p class="section-copy">{landing.howCopy}</p>
+        </div>
+        <div class="how-steps">
+          {landing.steps.map((step, index) => (
+            <article class="how-step">
+              <span class="how-step__number">{String(index + 1).padStart(2, "0")}</span>
+              <h3>{step.title}</h3>
+              <p>{step.copy}</p>
+            </article>
+          ))}
+          <img class="landing-mascot landing-mascot--how-yellow" src="/mascots/quib-yellow.png" alt="" width="512" height="512" aria-hidden="true" />
+        </div>
+      </section>
+
+      <section id="roster" class="section">
+        <div class="section-intro">
+          <div class="eyebrow">{landing.charactersEyebrow}</div>
+          <h2 class="section-heading">{landing.charactersTitle}</h2>
+          <p class="section-copy">{landing.charactersCopy}</p>
+        </div>
+        <div class="mascot-roster">
+          {landing.characters.map((character, index) => (
+            <article class:list={["mascot-profile", `mascot-profile--${["blue", "yellow", "cyan", "pink"][index]}`]}>
+              <img class="landing-mascot" src={mascotSources[index]} alt={character.alt} width="512" height="512" />
+              <h3>{character.name}</h3>
+              <p>{character.copy}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section id="download" class="section">
+        <div class="section-intro">
+          <div class="eyebrow">{landing.downloadEyebrow}</div>
+          <h2 class="section-heading">{landing.downloadTitle}</h2>
+          <p class="section-copy">{landing.downloadCopy}</p>
+        </div>
+        <div class="download-row">
+          <a class="download-pair" href={MAC_DOWNLOAD_URL}>
+            <span class="download-pair__btn">{landing.downloadMac}</span>
+            <span class="download-pair__tag">macOS</span>
+          </a>
+          <a class="download-pair" href={WIN_DOWNLOAD_URL}>
+            <span class="download-pair__btn">{landing.downloadWin}</span>
+            <span class="download-pair__tag download-pair__tag--win">Windows</span>
+          </a>
+          <a class="download-pair" href={LINUX_DOWNLOAD_URL}>
+            <span class="download-pair__btn">{landing.downloadLinux}</span>
+            <span class="download-pair__tag">Linux</span>
+          </a>
+        </div>
+        <p class="download-notes">
+          {landing.downloadMacNote}<br />
+          {landing.downloadWinNote}<br />
+          {landing.downloadLinuxNote} — {landing.downloadLatest}{" "}
+          <a href={CHANGELOG_URL} target="_blank" rel="noreferrer">{landing.downloadReleases}</a>
+        </p>
+        <div class="install-command">
+          <span class="install-command__label">{landing.installCommandLabel}</span>
+          <code class="install-command__code">{INSTALL_COMMAND}</code>
+          <button
+            type="button"
+            class="install-command__copy"
+            data-copy-btn
+            data-copy-text={INSTALL_COMMAND}
+            data-copy-label={landing.copyCommand}
+            data-copied-label={landing.copied}
+          >
+            {landing.copyCommand}
+          </button>
+        </div>
+      </section>
+
+      <section id="open-source" class="stats-band landing-cta">
+        <div class="landing-cta__copy">
+          <div class="eyebrow">{landing.openEyebrow}</div>
+          <h2>{landing.openTitle}</h2>
+          <p>{landing.openCopy}</p>
+          <div class="cta-actions">
+            <Button href="#download">{copy.nav.download}</Button>
+            <Button href={GITHUB_URL} variant="secondary" external>{copy.nav.github}</Button>
+          </div>
+        </div>
+        <img class="landing-mascot landing-mascot--cta-blue" src="/mascots/quib-blue.png" alt="" width="512" height="512" aria-hidden="true" />
+        <div class="stats-grid">
+          {landing.stats.map((stat) => (
+            <div>
+              <div class="stat-value">{stat.value}</div>
+              <div class="stat-label">{stat.label}</div>
+            </div>
+          ))}
+        </div>
+      </section>
+    </main>
+
+    <Footer locale={locale} />
+  </div>
+</BaseLayout>
+
+<script>
+  document.querySelectorAll("[data-copy-btn]").forEach((button) => {
+    const text = button.getAttribute("data-copy-text") ?? "";
+    const label = button.getAttribute("data-copy-label") ?? button.textContent ?? "";
+    const copiedLabel = button.getAttribute("data-copied-label") ?? label;
+    button.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        return;
+      }
+      button.textContent = copiedLabel;
+      window.setTimeout(() => {
+        button.textContent = label;
+      }, 1600);
+    });
+  });
+</script>
+

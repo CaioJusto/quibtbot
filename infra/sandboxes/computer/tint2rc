@@ -1,0 +1,50 @@
+# Dock do computador do bot: uma barra de atalhos embaixo, centralizada, só com
+# os aplicativos que existem nesta imagem. Sem lista de janelas nem relógio — o
+# painel do Quibt já diz de quem é a tela e o que está acontecendo.
+
+#---- Painel
+panel_items = L
+# Largura pelo conteúdo (3 atalhos), para o dock ficar centralizado e não uma
+# barra de ponta a ponta.
+panel_size = 176 62
+panel_margin = 0 0
+panel_padding = 10 6 10
+panel_position = bottom center horizontal
+panel_layer = top
+panel_background_id = 1
+panel_monitor = all
+autohide = 0
+strut_policy = none
+wm_menu = 0
+panel_dock = 0
+disable_transparency = 0
+
+#---- Fundo do painel: vidro claro, para combinar com a mesa
+rounded = 16
+border_width = 1
+background_color = #ffffff 72
+border_color = #d0dcf0 70
+
+#---- Fundo do ícone em foco
+rounded = 12
+border_width = 0
+background_color = #3c82f6 16
+border_color = #3c82f6 0
+
+#---- Atalhos
+launcher_padding = 6 4 8
+launcher_background_id = 0
+launcher_icon_background_id = 2
+launcher_icon_size = 40
+launcher_icon_asb = 100 0 0
+launcher_icon_theme_override = 0
+startup_notifications = 0
+launcher_tooltip = 1
+launcher_item_app = /usr/share/applications/quibt-browser.desktop
+launcher_item_app = /usr/share/applications/quibt-terminal.desktop
+launcher_item_app = /usr/share/applications/quibt-files.desktop
+
+#---- Dicas
+tooltip_padding = 8 6
+tooltip_background_id = 1
+tooltip_font_color = #202023 100

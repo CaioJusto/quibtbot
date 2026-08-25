@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Arquivos
+Comment=Pasta de trabalho deste computador
+# Um xterm com `ls` não é o gerenciador de arquivos que o ícone promete: quem
+# clicava aqui caía num segundo terminal. O pcmanfm abre a pasta de verdade.
+Exec=pcmanfm /home/quibt
+Icon=folder
+Terminal=false
+Categories=System;FileTools;

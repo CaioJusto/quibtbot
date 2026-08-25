@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd /app
+pnpm --filter @quibt/db generate
+pnpm --filter @quibt/db exec prisma migrate deploy

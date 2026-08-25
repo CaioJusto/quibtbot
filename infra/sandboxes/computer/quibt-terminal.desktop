@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Terminal
+Comment=Linha de comando do computador
+Exec=xterm -fa Monospace -fs 11 -bg white -fg black
+Icon=xterm
+Terminal=false
+Categories=System;TerminalEmulator;

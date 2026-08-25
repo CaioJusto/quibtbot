@@ -1,0 +1,72 @@
+#!/bin/sh
+# Abre uma URL (ou um arquivo que o navegador mostra) no Chromium da sessão deste display.
+#
+# É o que `xdg-open`, `chromium`, `google-chrome` e afins viram dentro do computador do
+# bot. Sem isto, `xdg-open https://…` caía no /usr/bin/chromium puro: sem --no-sandbox ele
+# morre no container ("No usable sandbox"), e com outro perfil abriria uma segunda janela
+# em vez de uma aba na que a pessoa já vê na tela.
+set -u
+HOME="${HOME:-/home/quibt}"
+ROOT="${QUIBT_DESKTOPS_ROOT:-/quibt-desktops}"
+
+target="${1:-}"
+if [ -z "$target" ]; then
+  echo "uso: quibt-open <url|arquivo>" >&2
+  exit 2
+fi
+
+# Qual perfil é o desta sessão: o diretório cuja sessão viva serve este DISPLAY.
+display="${DISPLAY#:}"
+display="${display%%.*}"
+profile=""
+if [ -n "$display" ] && [ -d "$ROOT" ]; then
+  for d in "$ROOT"/*; do
+    [ -f "$d/display" ] || continue
+    [ "$(cat "$d/display" 2>/dev/null)" = "$display" ] || continue
+    if [ -f "$d/session.pid" ] && kill -0 "$(cat "$d/session.pid" 2>/dev/null)" 2>/dev/null; then
+      profile="$d/chrome"
+      break
+    fi
+  done
+fi
+
+case "$target" in
+  http://*|https://*|file://*|about:*|chrome://*|data:*) url="$target" ;;
+  -*) # flags do chromium (ex.: --new-window URL): passa tudo adiante como está
+    url="" ;;
+  *)
+    if [ -e "$target" ]; then
+      case "$target" in
+        *.html|*.htm|*.pdf|*.svg|*.png|*.jpg|*.jpeg|*.gif|*.webp|*.txt|*.md|*.json|*.csv|*.xml)
+          case "$target" in
+            /*) url="file://$target" ;;
+            *) url="file://$(pwd)/$target" ;;
+          esac
+          ;;
+        *) exec /usr/bin/xdg-open "$target" ;;
+      esac
+    else
+      # "g1.globo.com" sem esquema: é um site.
+      url="https://$target"
+    fi
+    ;;
+esac
+
+if [ -n "$profile" ]; then
+  export CHROME_USER_DATA_DIR="$profile"
+fi
+
+if [ -n "$url" ]; then
+  shift
+  set -- "$url" "$@"
+fi
+
+if quibt-browser --running; then
+  # O Chromium da sessão está de pé: esta chamada entrega a URL a ele (abre uma aba) e sai.
+  timeout 20 quibt-browser "$@" >/dev/null 2>&1
+  sleep 1.5
+else
+  setsid quibt-browser "$@" >/dev/null 2>&1 </dev/null &
+  sleep 3
+fi
+echo "Aberto no navegador: ${url:-$*}"

@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+"""Desenha um pulso onde a tela recebeu um clique.
+
+Quem acompanha o computador do bot vê o ponteiro se mexer, mas não vê o momento
+do clique — o resultado aparece sem que dê para dizer onde ele tocou. Este daemon
+escuta os botões do mouse pelo XRecord e pisca um anel no ponto, então o clique
+fica visível no próprio quadro, para o VNC e para qualquer espectador.
+
+Vale para o clique do bot e para o de quem assumiu o controle: o que é capturado
+é o evento do servidor X, não a origem dele.
+"""
+
+import sys
+import time
+
+from Xlib import X, display, threaded  # noqa: F401  (threaded ativa os locks)
+from Xlib.ext import record, shape
+from Xlib.protocol import rq
+
+RING_SIZE = 46
+RING_COLOR = 0x0A84FF
+RING_WIDTH = 3
+RING_STEPS = (18, 26, 34, 42, 46)
+STEP_SECONDS = 0.075
+
+
+def draw_pulse(screen_display, x, y):
+    """Anel que cresce e some. A janela é recortada no formato do anel, senão o
+    pulso apareceria como um quadrado branco por cima da tela."""
+    screen = screen_display.screen()
+    window = screen.root.create_window(
+        x - RING_SIZE // 2,
+        y - RING_SIZE // 2,
+        RING_SIZE,
+        RING_SIZE,
+        0,
+        screen.root_depth,
+        X.InputOutput,
+        X.CopyFromParent,
+        override_redirect=True,
+        background_pixel=RING_COLOR,
+        event_mask=0,
+    )
+    mask = window.create_pixmap(RING_SIZE, RING_SIZE, 1)
+    clear = mask.create_gc(foreground=0, background=0)
+    paint = mask.create_gc(foreground=1, line_width=RING_WIDTH)
+    try:
+        window.map()
+        for size in RING_STEPS:
+            offset = (RING_SIZE - size) // 2
+            mask.fill_rectangle(clear, 0, 0, RING_SIZE, RING_SIZE)
+            mask.arc(paint, offset, offset, size - 1, size - 1, 0, 360 * 64)
+            # Sem a máscara de entrada, o anel roubaria o clique seguinte.
+            window.shape_mask(shape.SO.Set, shape.SK.Bounding, 0, 0, mask)
+            window.shape_rectangles(shape.SO.Set, shape.SK.Input, 0, [])
+            screen_display.flush()
+            time.sleep(STEP_SECONDS)
+    finally:
+        window.destroy()
+        mask.free()
+        screen_display.flush()
+
+
+def main():
+    record_display = display.Display()
+    draw_display = display.Display()
+    if not record_display.has_extension("RECORD"):
+        print("RECORD extension missing", file=sys.stderr)
+        return 1
+
+    context = record_display.record_create_context(
+        0,
+        [record.AllClients],
+        [
+            {
+                "core_requests": (0, 0),
+                "core_replies": (0, 0),
+                "ext_requests": (0, 0, 0, 0),
+                "ext_replies": (0, 0, 0, 0),
+                "delivered_events": (0, 0),
+                "device_events": (X.ButtonPress, X.ButtonPress),
+                "errors": (0, 0),
+                "client_started": False,
+                "client_died": False,
+            }
+        ],
+    )
+
+    def handler(reply):
+        if reply.category != record.FromServer or reply.client_swapped:
+            return
+        data = reply.data
+        while len(data):
+            event, data = rq.EventField(None).parse_binary_value(
+                data, record_display.display, None, None
+            )
+            # Botões 4 e 5 são a roda: rolar não é clique.
+            if event.type == X.ButtonPress and event.detail in (1, 2, 3):
+                try:
+                    draw_pulse(draw_display, event.root_x, event.root_y)
+                except Exception:  # a tela pode sumir no meio do pulso
+                    pass
+
+    record_display.record_enable_context(context, handler)
+    record_display.record_free_context(context)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

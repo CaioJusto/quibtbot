@@ -1,0 +1,40 @@
+---
+import Footer from "./Footer.astro";
+import Header from "./Header.astro";
+import BaseLayout from "../layouts/BaseLayout.astro";
+import { copyFor, type Locale } from "../i18n";
+
+type Props = {
+  locale: Locale;
+  page: "privacy" | "terms";
+};
+
+const { locale, page } = Astro.props as Props;
+const copy = copyFor(locale);
+const content = copy[page];
+---
+
+<BaseLayout
+  title={`${content.title} · Quibt Bot`}
+  description={content.description}
+  locale={locale}
+  page={page}
+>
+  <div class="container">
+    <Header locale={locale} page={page} />
+    <main id="main" class="privacy-copy">
+      <h1>{content.title}</h1>
+      <p>{content.intro}</p>
+      <p class="privacy-copy__updated">{content.lastUpdated}</p>
+      <div class="privacy-copy__sections">
+        {content.sections.map((section) => (
+          <section>
+            <h2>{section.title}</h2>
+            <p>{section.body}</p>
+          </section>
+        ))}
+      </div>
+    </main>
+    <Footer locale={locale} />
+  </div>
+</BaseLayout>

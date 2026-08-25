@@ -1,0 +1,40 @@
+{
+  "name": "@quibt/web",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --root ../.. apps/web/src",
+    "e2e": "playwright test"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^4.2.0",
+    "@orpc/client": "^1.15.0",
+    "@orpc/contract": "^1.15.0",
+    "@quibt/chat-ui": "workspace:*",
+    "@quibt/contracts": "workspace:*",
+    "@quibt/core": "workspace:*",
+    "@quibt/ui-tokens": "workspace:*",
+    "@quibt/ui-web": "workspace:*",
+    "@tanstack/react-query": "^5.85.5",
+    "@tailwindcss/vite": "^4.1.12",
+    "@vitejs/plugin-react": "^5.0.2",
+    "better-auth": "^1.6.27",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "react-router-dom": "^7.8.2",
+    "tailwindcss": "^4.1.12",
+    "vite": "^7.1.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "@types/react": "^19.1.12",
+    "@types/react-dom": "^19.1.9",
+    "typescript": "^5.9.2",
+    "vitest": "^4.1.10"
+  }
+}

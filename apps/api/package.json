@@ -1,0 +1,32 @@
+{
+  "name": "@quibt/api",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.1",
+    "@orpc/server": "^1.15.0",
+    "@quibt/adapter-kit": "workspace:*",
+    "@quibt/adapters": "workspace:*",
+    "@quibt/auth": "workspace:*",
+    "@quibt/contracts": "workspace:*",
+    "@quibt/core": "workspace:*",
+    "@quibt/db": "workspace:*",
+    "@quibt/memory": "workspace:*",
+    "@better-auth/utils": "^0.4.2",
+    "dotenv": "^17.2.1",
+    "hono": "^4.9.6",
+    "stripe": "^22.5.0",
+    "tsx": "^4.20.5"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2",
+    "vitest": "^4.1.10"
+  }
+}

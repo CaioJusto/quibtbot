@@ -1,0 +1,102 @@
+# Primeiros passos no Quibt Bot
+
+Este guia é para quem nunca mexeu em servidor, Docker ou chave de API. O Quibt Bot é **open source e local-first**: você instala, traz o seu modelo, escolhe onde o computador dos bots vai rodar, e cria o primeiro personagem.
+
+Duas perguntas guiam este guia: **Onde o Quibt fica ligado?** (o passo 1 abaixo — este
+computador, sua VPS ou uma VM da Box) e **Onde os bots trabalham?** (o passo 4 — Docker, VPS,
+E2B ou Box). São escolhas independentes.
+
+Não existe plano de tokens da Quibt no caminho público. Você paga o modelo (OpenRouter, Ollama no seu PC, ou a assinatura que já tem) e, se escolher nuvem, paga a E2B ou a Box na conta **deles**.
+
+## 1. Instalar
+
+Escolha um caminho.
+
+**App de desktop (mais fácil)**
+
+1. Baixe o instalador em [quibt.com.br](https://quibt.com.br) ou nas [Releases do GitHub](https://github.com/CaioJusto/quibtbot/releases/latest):
+   - Mac (Apple silicon): `QuibtBot.dmg` — na primeira vez, clique com o botão direito → Abrir.
+   - Windows: `QuibtBot-setup.exe` — se o SmartScreen avisar, Mais informações → Executar mesmo assim.
+   - Linux: `QuibtBot.AppImage`.
+2. Abra o Quibt Bot. Se o stack local ainda não estiver de pé, o app mostra um assistente.
+3. No Mac, o assistente encontra Docker Desktop, Colima e Homebrew sozinho. Se nenhum Docker existir, baixa o DMG oficial certo para o processador, confere a assinatura da Docker Inc. e a notarização da Apple, pede a senha do Mac uma vez, abre o Docker e continua. Não precisa instalar o Docker antes.
+
+**Por um comando** (Mac ou Linux, sem o app): cole no terminal
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CaioJusto/quibtbot/v0.2.9/scripts/install.sh \
+  | QUIBT_RELEASE=0.2.9 sh
+```
+
+Ele baixa o `quibtbot` certo para a sua máquina, confere o SHA-256 publicado e roda `quibtbot install`. No fim imprime o endereço e o código para o celular. Para sair: `quibtbot uninstall` (ou, no app, **Quibt Bot → Desinstalar**).
+
+**Pelo código** (se alguém da casa já programa): siga o “Run locally” do [README](../README.md).
+
+## 2. Criar a sua conta
+
+Abra o app e toque em **Começar agora**: a primeira conta pede só o seu nome — o código que o instalador mostrou já provou que o computador é seu, então não há e-mail nem senha para inventar. Essa primeira pessoa vira dona do deploy e é quem escolhe a máquina. Para entrar em outro aparelho depois, peça um código em **Conta → Celular**.
+
+## 3. Trazer o modelo
+
+Depois do nome, o app vai direto às decisões — modelo, máquina e o primeiro bot. A tela da máquina confirma o Docker desta máquina; quem já instalou apontando para Box, E2B ou um supervisor remoto pula esse passo (a escolha já está feita, e continua em Ajustes → Máquina). Não há telas de apresentação no meio.
+
+Três jeitos. Pode pular e configurar depois, mas sem modelo o bot não responde.
+
+| Jeito | O que fazer | Quem paga |
+| --- | --- | --- |
+| Chave OpenRouter | Crie conta em [openrouter.ai](https://openrouter.ai), copie a chave, cole no Quibt. | A sua conta OpenRouter |
+| Modelo local | Instale [Ollama](https://ollama.com) (ou LM Studio). A URL padrão é `http://127.0.0.1:11434`. | Ninguém. Roda no seu PC |
+| Assinatura | Entre com ChatGPT Plus/Pro, GitHub Copilot ou SuperGrok. O app mostra um código para você colar no site deles. | A assinatura que você já paga |
+
+Na assinatura, **Continuar só libera depois que o login termina** — antes disso o botão diz “Entre na assinatura primeiro”. Salvar o provedor sem credencial fazia o bot responder “não tenho um modelo conectado” no primeiro recado.
+
+O modelo sugerido evita os que a OpenAI recusa em conta ChatGPT (a família `codex-spark` só responde a quem paga por chave de API). Você troca no seletor de modelo dessa mesma tela.
+
+## 4. Escolher a máquina
+
+Esta tela só aparece para quem é dono do install. Toque numa opção e **leia o quadro que abre** — ele diz o que instalar, onde clicar e o que vai ser cobrado.
+
+| Opção | Em uma frase | O que você precisa |
+| --- | --- | --- |
+| Nesta máquina (Docker) | Os bots usam este computador. | Docker Desktop aberto |
+| Minha VPS | Os bots usam o seu servidor. | URL + token do supervisor |
+| E2B | Cada bot ganha um desktop isolado na nuvem da E2B. | Conta e chave em e2b.dev |
+| Box | Cada bot ganha uma VM Ubuntu na Box. | Conta e chave em box.ascii.dev |
+
+Receitas Hetzner / DigitalOcean / “qualquer VPS” são atalhos para a opção Minha VPS.
+
+O passo a passo de cada uma está em [computers.md](./computers.md) e no próprio app (o mesmo texto).
+
+Toque em **Testar** antes de salvar. Se algo faltar, a tela diz o que colar.
+
+## 5. Criar o primeiro bot
+
+Escolha uma cara, um nome e um cargo. Toque em **Abrir o Quibt Bot**. Mande uma mensagem. O painel do computador mostra a tela Linux daquele bot.
+
+## Como vários bots dividem o computador
+
+- **Docker ou VPS:** é o **mesmo** computador (a mesma imagem Linux). Cada bot tem a **própria tela** — um desktop, não uma aba do Chrome. Arquivos da casa são compartilhados. A parede parece igual; as janelas de cada bot são outras.
+- **E2B ou Box:** cada bot tem o **próprio** computador na nuvem. Nada é compartilhado entre eles.
+
+Isso não é o modelo do Crocbot (“Croc Pot”), que ou isola um container por agente ou controla abas do Chrome. No Quibt, no Docker, pense num escritório: um PC, um monitor por pessoa.
+
+## Desinstalar
+
+Instalar põe containers, um container por computador de bot, três imagens e uma pasta de dados na máquina — apagar o app sozinho deixa tudo isso para trás (e a próxima abertura nem mostra o assistente, porque o stack continua no ar). No app: **Quibt Bot → Desinstalar o Quibt Bot…** (pergunta uma vez, pode manter os seus dados, e manda o app para o Lixo). No terminal: `quibtbot uninstall`, com `--keep-data` para guardar banco e arquivos dos bots. O Docker fica.
+
+## Se travar
+
+| Sintoma | O que tentar |
+| --- | --- |
+| “Docker não responde” | Clique em **Começar instalação** novamente. No Mac o Quibt abre o Docker e espera automaticamente; confira apenas se há uma confirmação de senha do macOS atrás da janela. |
+| Bot não responde | Volte em modelo e cole a chave, ou confirme que o Ollama está aberto. |
+| Tela preta no computador | Mande outra mensagem, ou toque em Assumir controle. No Docker, o desktop só sobe quando o bot precisa dele. |
+| Celular não conecta | No computador, abra **Conta → Conectar o celular**. No app móvel, **Ler o QR do computador** é a primeira opção. Os dois aparelhos devem estar no mesmo Wi-Fi; no iPhone, aceite **Rede Local** ou libere em **Ajustes → Privacidade e Segurança → Rede Local → Quibt Bot**. Fora dessa rede, ative o acesso por Tailscale no computador e gere outro QR. |
+| Quero entrar em outro aparelho | Num aparelho já conectado: **Conta → Celular → Liberar entrada**. Leia o QR ou digite o código de oito caracteres em **Entrar com código**. Vale cinco minutos, uma vez só. |
+| Esqueci a senha e não chega e-mail | Numa instalação sem `RESEND_API_KEY` não existe e-mail para chegar. Abra **Esqueceu a senha?** no navegador **do próprio computador**: o link aparece ali mesmo. De outro aparelho não funciona, e é de propósito. |
+
+Trocar de máquina depois: **Ajustes → Máquina**. Um computador que já está ligado fica no provedor antigo até a próxima vez que ele bootar.
+
+Se o app de desktop já estiver conectado a uma VPS, o QR mostrado por ele leva o celular direto
+para essa mesma VPS. Nesse caso o notebook é apenas a tela de controle e pode ser desligado depois;
+o servidor e os bots continuam na VPS.

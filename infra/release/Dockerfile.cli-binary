@@ -1,0 +1,29 @@
+# syntax=docker/dockerfile:1
+
+# Reproducible Linux SEA builder used when hosted release runners are unavailable.
+# The build happens inside the requested native Linux architecture and pins the
+# embedded Compose manifest to the exact release image digests without editing
+# the developer checkout.
+FROM node:22.19-bookworm AS build
+
+ENV ONNXRUNTIME_NODE_INSTALL=skip
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+WORKDIR /src
+
+COPY . .
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile --filter . --filter @quibt/cli...
+
+ARG RELEASE_VERSION
+ARG STACK_DIGEST
+ARG SUPERVISOR_DIGEST
+ARG COMPUTER_DIGEST
+
+RUN node scripts/pin-release-images.mjs \
+      --stack "${STACK_DIGEST}" \
+      --supervisor "${SUPERVISOR_DIGEST}" \
+      --computer "${COMPUTER_DIGEST}" && \
+    node scripts/build-cli-binary.mjs --release "${RELEASE_VERSION}" --out /release
+
+FROM scratch
+COPY --from=build /release/ /

@@ -1,0 +1,5 @@
+[Default Applications]
+text/html=quibt-browser.desktop
+application/xhtml+xml=quibt-browser.desktop
+x-scheme-handler/http=quibt-browser.desktop
+x-scheme-handler/https=quibt-browser.desktop
