@@ -34,7 +34,10 @@ export default function Scan() {
     const bootstrap = parseBootstrapDeepLink(data);
     if (bootstrap) {
       softHaptic();
-      router.push({
+      // replace, não push: esta tela é um modal. Empilhar por cima dela deixava o
+      // leitor de QR vivo por baixo de tudo — cadastro, onboarding e até o chat abriam
+      // com a câmera no fundo, e a pessoa achava que nada tinha sido salvo.
+      router.replace({
         pathname: "/pair-installation",
         params: { api: bootstrap.api, token: bootstrap.token },
       });
