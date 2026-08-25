@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Clock, ProcessRunner } from "./orchestrator.js";
+import type { Clock, ProcessRunner, ProcessRunResult } from "./orchestrator.js";
 import { resolveComposeFile } from "./paths.js";
 
 export {
@@ -18,10 +18,12 @@ export {
   appServicesUpInvocation,
   type ComposeMode,
   type ComposeStep,
+  composeImagesInvocation,
   composeInvocation,
   INSTALL_RELEASE,
   postgresUpInvocation,
   resolveQuibtImage,
+  stackUpInvocation,
 } from "./compose.js";
 export { assessComposeServices, REQUIRED_COMPOSE_SERVICES } from "./compose-services.js";
 export {
@@ -45,6 +47,23 @@ export {
   parseEnvFile,
 } from "./environment.js";
 export {
+  explainDockerFailure,
+  explainInstallLock,
+  explainUpdateRequired,
+} from "./failure-messages.js";
+export {
+  checkDiskSpace,
+  DOWNLOAD_NOTICE,
+  formatGigabytes,
+  PULL_ATTEMPTS,
+  PULL_INACTIVITY_TIMEOUT_MS,
+  PullLayerTracker,
+  type PullProgress,
+  progressMessage,
+  REQUIRED_FREE_BYTES,
+  shortImageName,
+} from "./image-pull.js";
+export {
   acquireInstallLock,
   installLockPath,
   readInstallLock,
@@ -66,6 +85,7 @@ export {
   type InstallResult,
   type OrchestratorDeps,
   type ProcessRunner,
+  type ProcessRunOptions,
   type ProcessRunResult,
   probeDeploymentNeedsFirstOwner,
   runInstall,
@@ -158,6 +178,31 @@ export function defaultPublicUrl(): string {
   return "http://127.0.0.1:5173";
 }
 
+/**
+ * Entrega linhas completas a `onOutput` conforme chegam. O `docker pull` sem TTY
+ * imprime uma linha por camada; é isso que vira a barra de progresso.
+ */
+class LineSplitter {
+  private pending = "";
+
+  constructor(private readonly onLine: (line: string) => void) {}
+
+  push(chunk: Buffer): void {
+    this.pending += chunk.toString("utf8");
+    let newline = this.pending.indexOf("\n");
+    while (newline >= 0) {
+      this.onLine(this.pending.slice(0, newline).replace(/\r$/, ""));
+      this.pending = this.pending.slice(newline + 1);
+      newline = this.pending.indexOf("\n");
+    }
+  }
+
+  flush(): void {
+    if (this.pending) this.onLine(this.pending);
+    this.pending = "";
+  }
+}
+
 export function createProcessRunner(timeoutMs = DEFAULT_PROCESS_TIMEOUT_MS): ProcessRunner {
   return {
     run(command, args, options) {
@@ -169,31 +214,53 @@ export function createProcessRunner(timeoutMs = DEFAULT_PROCESS_TIMEOUT_MS): Pro
         const chunks: Buffer[] = [];
         const errChunks: Buffer[] = [];
         let settled = false;
-        const finish = (result: {
-          code: number;
-          stdout: string;
-          stderr: string;
-          stdoutBytes?: Buffer;
-        }) => {
+        let idleTimer: NodeJS.Timeout | null = null;
+        const finish = (result: ProcessRunResult) => {
           if (settled) return;
           settled = true;
           clearTimeout(timer);
+          if (idleTimer) clearTimeout(idleTimer);
           resolve(result);
         };
-        const timer = setTimeout(() => {
+        const killForTimeout = (timedOut: "absolute" | "inactivity") => {
           child.kill("SIGTERM");
           finish({
             code: 124,
             stdout: Buffer.concat(chunks).toString("utf8"),
-            stderr: "process timed out",
+            stderr:
+              timedOut === "inactivity"
+                ? `process produced no output for ${Math.round((options?.inactivityTimeoutMs ?? 0) / 1000)} s`
+                : "process timed out",
+            timedOut,
           });
-        }, options?.timeoutMs ?? timeoutMs);
-        child.stdout.on("data", (chunk) => chunks.push(chunk as Buffer));
-        child.stderr.on("data", (chunk) => errChunks.push(chunk as Buffer));
+        };
+        const timer = setTimeout(() => killForTimeout("absolute"), options?.timeoutMs ?? timeoutMs);
+        const armIdleTimer = () => {
+          const idleMs = options?.inactivityTimeoutMs;
+          if (!idleMs) return;
+          if (idleTimer) clearTimeout(idleTimer);
+          idleTimer = setTimeout(() => killForTimeout("inactivity"), idleMs);
+        };
+        armIdleTimer();
+        const onOutput = options?.onOutput;
+        const stdoutLines = onOutput ? new LineSplitter((line) => onOutput(line, "stdout")) : null;
+        const stderrLines = onOutput ? new LineSplitter((line) => onOutput(line, "stderr")) : null;
+        child.stdout.on("data", (chunk) => {
+          chunks.push(chunk as Buffer);
+          armIdleTimer();
+          stdoutLines?.push(chunk as Buffer);
+        });
+        child.stderr.on("data", (chunk) => {
+          errChunks.push(chunk as Buffer);
+          armIdleTimer();
+          stderrLines?.push(chunk as Buffer);
+        });
         child.on("error", (error) => {
           finish({ code: 1, stdout: "", stderr: error.message });
         });
         child.on("close", (code) => {
+          stdoutLines?.flush();
+          stderrLines?.flush();
           const stdoutBuffer = Buffer.concat(chunks);
           finish({
             code: code ?? 1,

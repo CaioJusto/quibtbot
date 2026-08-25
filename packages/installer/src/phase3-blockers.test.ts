@@ -255,6 +255,7 @@ describe("first install on missing path", () => {
       },
       clock: { now: () => new Date("2026-08-17T00:00:00.000Z"), sleep: async () => undefined },
       platform: "linux",
+      statfs: async () => ({ bsize: 4096, bavail: 25_000_000 }),
     });
 
     expect(result.ok).toBe(true);

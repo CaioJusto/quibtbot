@@ -44,7 +44,7 @@ describe("installer integration smoke", () => {
     expect(result.resolvedImages.every((image) => image.includes(`:${result.release}`))).toBe(true);
 
     expect(result.commandOrder).toEqual([
-      "compose pull",
+      "image pull",
       "compose up postgres",
       "compose run migrate",
       "compose up apps",
@@ -54,10 +54,21 @@ describe("installer integration smoke", () => {
     const secrets = collectSecrets(result.envValues);
     assertNoSecretsInEvents(result, secrets);
 
+    // Segunda passada com o estado completo: religa (um `up --wait`), sem baixar nem migrar.
     expect(result.second.ok).toBe(true);
+    expect(result.second.alreadyInstalled).toBe(true);
     expect(result.second.pairingPending).toBeUndefined();
     expect(result.envMtimeUnchanged).toBe(true);
-    expect(result.dockerCommandsOnRerun).toEqual([]);
+    expect(
+      result.dockerCommandsOnRerun.filter(
+        (line) => line.startsWith("compose ") && line.includes(" up "),
+      ),
+    ).toHaveLength(1);
+    expect(
+      result.dockerCommandsOnRerun.some(
+        (line) => line.startsWith("pull ") || line.includes("quibt-migrate"),
+      ),
+    ).toBe(false);
   });
 
   it("sanitizes failure logs when docker pull fails", async () => {

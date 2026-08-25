@@ -16,6 +16,7 @@ const bridge = {
   remoteSecrets: () => ipcRenderer.invoke("desktop.remoteSecrets"),
   forgetRemoteSecrets: (target) => ipcRenderer.invoke("desktop.forgetRemoteSecrets", target),
   startupNotice: () => ipcRenderer.invoke("desktop.startupNotice"),
+  autoStartPending: () => ipcRenderer.invoke("desktop.autoStartPending"),
   uninstall: () => ipcRenderer.invoke("desktop.uninstall"),
   onInstallEvent: (callback) => {
     const listener = (_event, data) => callback(data);

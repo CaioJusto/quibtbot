@@ -321,4 +321,87 @@ describe("runCliAsync", () => {
       process.getuid = originalGetUid;
     }
   });
+
+  it("install com o estado completo religa o stack e diz que já está no ar", async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), "quibt-cli-install-again-"));
+    ensureInstallEnvironment(dataDir, "http://127.0.0.1:5173");
+    writeFileSync(
+      path.join(dataDir, "install-state.json"),
+      `${JSON.stringify({
+        version: 1,
+        release: INSTALL_RELEASE,
+        completed: [
+          "requirements",
+          "environment",
+          "images",
+          "services",
+          "database",
+          "health",
+          "pairing",
+        ],
+        updatedAt: "2026-08-17T00:00:00.000Z",
+      })}\n`,
+      { mode: 0o600 },
+    );
+    const commands: string[] = [];
+
+    const code = await runCliAsync(["install"], {
+      dataDir,
+      publicUrl: "http://127.0.0.1:5173",
+      composeFile: COMPOSE_FILE,
+      isTty: true,
+      platform: "linux",
+      clock: { now: () => new Date("2026-08-17T00:30:00.000Z"), sleep: async () => undefined },
+      fetch: async (url) =>
+        String(url).endsWith("/ready")
+          ? new Response("{}", { status: 200 })
+          : new Response("not found", { status: 404 }),
+      run: {
+        async run(command, args) {
+          commands.push([command, ...args].join(" "));
+          return { code: 0, stdout: "", stderr: "" };
+        },
+      },
+      log: (line) => logs.push(line),
+      error: (line) => errors.push(line),
+    });
+
+    expect(code).toBe(0);
+    expect(errors).toEqual([]);
+    expect(logs.at(-1)).toBe(
+      `Quibt Bot ${INSTALL_RELEASE} já instalado e no ar em http://127.0.0.1:5173. Para conectar o celular: quibtbot pair`,
+    );
+    expect(logs.join("\n")).toContain("[services] running: Ligando o Quibt Bot…");
+    expect(commands.some((entry) => entry.includes(" up -d --wait"))).toBe(true);
+    expect(commands.some((entry) => entry.startsWith("docker pull"))).toBe(false);
+  });
+
+  it("--non-interactive não abre o prompt de senha do Mac: falha dizendo o que instalar", async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), "quibt-cli-non-interactive-"));
+    const commands: string[] = [];
+
+    const code = await runCliAsync(["install", "--non-interactive"], {
+      dataDir,
+      publicUrl: "http://127.0.0.1:5173",
+      composeFile: COMPOSE_FILE,
+      isTty: false,
+      platform: "darwin",
+      clock: { now: () => new Date("2026-08-17T00:30:00.000Z"), sleep: async () => undefined },
+      fetch: async () => new Response("not found", { status: 404 }),
+      run: {
+        async run(command, args) {
+          commands.push([command, ...args].join(" "));
+          return { code: 1, stdout: "", stderr: "missing" };
+        },
+      },
+      log: (line) => logs.push(line),
+      error: (line) => errors.push(line),
+    });
+
+    expect(code).toBe(1);
+    expect(errors.join("\n")).toContain("--non-interactive");
+    expect(errors.join("\n")).toContain("Instale o Docker Desktop");
+    expect(commands.some((entry) => entry.startsWith("/usr/bin/osascript"))).toBe(false);
+    expect(commands.some((entry) => entry.startsWith("/usr/bin/curl"))).toBe(false);
+  });
 });

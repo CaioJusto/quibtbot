@@ -425,6 +425,78 @@
         display: none;
       }
 
+      /* Religando um stack já instalado: sem lista de passos, só o que está acontecendo. */
+      .starting {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        margin-top: 22px;
+        padding: 16px 18px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: var(--accent-soft);
+      }
+      .starting[hidden] {
+        display: none;
+      }
+      .spinner {
+        flex: none;
+        width: 26px;
+        height: 26px;
+        border: 3px solid rgba(91, 127, 229, 0.25);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 0.9s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .starting strong {
+        display: block;
+        color: var(--ink);
+      }
+      .starting small {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      #local-view.is-starting #local-intro,
+      #local-view.is-starting #local-terms,
+      #local-view.is-starting #steps {
+        display: none;
+      }
+
+      /* Download das imagens: uma barra por cima da lista, imagem N de M e camadas. */
+      .progress {
+        margin-top: 14px;
+      }
+      .progress[hidden] {
+        display: none;
+      }
+      .progress-label {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        color: var(--muted);
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+      }
+      .progress-track {
+        height: 8px;
+        margin-top: 6px;
+        border-radius: 999px;
+        background: var(--surface-2);
+        overflow: hidden;
+      }
+      .progress-fill {
+        width: 0;
+        height: 100%;
+        border-radius: 999px;
+        background: var(--accent);
+        transition: width 200ms ease;
+      }
+
       @media (max-width: 880px) {
         main {
           grid-template-columns: 1fr;
@@ -532,17 +604,27 @@
         </div>
 
         <div id="local-view" class="hidden">
-          <p class="view-kicker">Instalação local</p>
-          <h1>Instalar neste computador</h1>
-          <p>
+          <p class="view-kicker" id="local-kicker">Instalação local</p>
+          <h1 id="local-title">Instalar neste computador</h1>
+          <p id="local-intro">
             O app prepara tudo sozinho. Se o Docker não estiver instalado, o
             Quibt baixa a versão oficial, pede a senha do Mac uma vez, abre o
             Docker e continua automaticamente.
           </p>
-          <p class="hint">
+          <p class="hint" id="local-terms">
             Ao começar, você aceita os termos de uso do Docker Desktop. O Quibt
             verifica a assinatura oficial antes de instalar.
           </p>
+          <div class="starting" id="starting" hidden>
+            <div class="spinner" aria-hidden="true"></div>
+            <div>
+              <strong id="starting-step">Conferindo o Docker…</strong>
+              <small
+                >Leva cerca de um minuto na primeira vez depois de ligar o
+                Mac.</small
+              >
+            </div>
+          </div>
           <ol id="steps">
             <li id="step-requirements">Preparar Docker automaticamente</li>
             <li id="step-environment">Gerar segredos locais</li>
@@ -554,6 +636,15 @@
             <li id="step-health">Verificar saúde da API</li>
             <li id="step-pairing">Preparar pareamento</li>
           </ol>
+          <div class="progress" id="pull-progress" hidden>
+            <div class="progress-label">
+              <span id="pull-progress-label">Baixando imagens…</span>
+              <span id="pull-progress-count"></span>
+            </div>
+            <div class="progress-track">
+              <div class="progress-fill" id="pull-progress-fill"></div>
+            </div>
+          </div>
           <p id="status" class="bad"></p>
           <p id="local-pairing" class="ok hidden"></p>
           <pre id="log" hidden></pre>
@@ -906,6 +997,7 @@
         });
 
       document.getElementById("choose-local")?.addEventListener("click", () => {
+        setStartingMode(false);
         resetStepStyles();
         say(
           status,
@@ -1010,8 +1102,53 @@
 
       const startButton = document.getElementById("start");
       const openAfterInstall = document.getElementById("open-after-install");
+      const startingBox = document.getElementById("starting");
+      const startingStep = document.getElementById("starting-step");
+      const pullProgress = document.getElementById("pull-progress");
+      const pullProgressLabel = document.getElementById("pull-progress-label");
+      const pullProgressCount = document.getElementById("pull-progress-count");
+      const pullProgressFill = document.getElementById("pull-progress-fill");
       openAfterInstall?.addEventListener("click", () => desktop?.reloadApp?.());
-      startButton?.addEventListener("click", async () => {
+
+      // Barra do download: (imagens prontas + fração da atual) / total.
+      function renderPullProgress(progress) {
+        if (!pullProgress || !progress) return;
+        const { image, index, count, layersDone, layersTotal } = progress;
+        const fraction = layersTotal > 0 ? layersDone / layersTotal : 0;
+        const overall = count > 0 ? (index - 1 + fraction) / count : 0;
+        const name = String(image).slice(String(image).lastIndexOf("/") + 1);
+        pullProgress.hidden = false;
+        if (pullProgressLabel)
+          pullProgressLabel.textContent =
+            count > 1 ? `Imagem ${index} de ${count} — ${name}` : name;
+        if (pullProgressCount)
+          pullProgressCount.textContent =
+            layersTotal > 0 ? `${layersDone}/${layersTotal} camadas` : "";
+        if (pullProgressFill)
+          pullProgressFill.style.width = `${Math.round(Math.min(1, overall) * 100)}%`;
+      }
+
+      function hidePullProgress() {
+        if (pullProgress) pullProgress.hidden = true;
+        if (pullProgressFill) pullProgressFill.style.width = "0";
+      }
+
+      // Já instalado, só desligado: outra cara para a mesma tela.
+      function setStartingMode(on) {
+        localView.classList.toggle("is-starting", on);
+        if (startingBox) startingBox.hidden = !on;
+        const kicker = document.getElementById("local-kicker");
+        const title = document.getElementById("local-title");
+        if (kicker) kicker.textContent = on ? "Já instalado" : "Instalação local";
+        if (title)
+          title.textContent = on ? "Ligando o Quibt Bot…" : "Instalar neste computador";
+        if (startButton) {
+          startButton.textContent = on ? "Tentar de novo" : "Começar instalação";
+          startButton.hidden = on;
+        }
+      }
+
+      async function runLocalStack({ auto = false } = {}) {
         if (busy) return;
         if (!desktop?.startStack) {
           say(
@@ -1022,10 +1159,16 @@
           return;
         }
         busy = true;
-        startButton.disabled = true;
+        if (startButton) startButton.disabled = true;
+        if (auto) {
+          // Também no "Tentar de novo": o spinner volta e o botão some enquanto liga.
+          if (startingBox) startingBox.hidden = false;
+          if (startButton) startButton.hidden = true;
+        }
         resetStepStyles();
-        say(status, "Iniciando instalação…");
-        log.hidden = false;
+        hidePullProgress();
+        say(status, auto ? "Ligando o Quibt Bot…" : "Iniciando instalação…");
+        log.hidden = auto;
         log.textContent = "";
         unsubscribe?.();
         unsubscribe =
@@ -1033,10 +1176,17 @@
             markStep(event.step, event.status);
             const line = `[${event.step}] ${event.status}: ${event.message}`;
             log.textContent = `${log.textContent}${line}\n`;
-            if (event.status === "running") say(status, event.message);
+            if (event.progress) renderPullProgress(event.progress);
+            else if (event.step === "images" && event.status !== "running")
+              hidePullProgress();
+            if (event.status === "running") {
+              say(status, event.message);
+              if (startingStep) startingStep.textContent = event.message;
+            }
           }) ?? null;
         try {
           const result = await desktop.startStack();
+          hidePullProgress();
           if (result.log) {
             log.textContent = result.log;
           }
@@ -1052,21 +1202,43 @@
               );
               return;
             }
-            startButton.hidden = true;
+            if (startButton) startButton.hidden = true;
             if (openAfterInstall) openAfterInstall.hidden = false;
           } else if (result.ok && desktop.reloadApp) {
             await desktop.reloadApp();
+          } else if (!result.ok && auto) {
+            // Falhou ao religar: mostra o erro real, os detalhes e o botão de tentar de novo.
+            if (startingBox) startingBox.hidden = true;
+            log.hidden = false;
+            if (startButton) startButton.hidden = false;
           }
         } catch (error) {
+          hidePullProgress();
           say(
             status,
             error instanceof Error ? error.message : "Erro inesperado.",
             false,
           );
+          if (auto) {
+            if (startingBox) startingBox.hidden = true;
+            if (startButton) startButton.hidden = false;
+          }
         } finally {
           busy = false;
-          startButton.disabled = false;
+          if (startButton) startButton.disabled = false;
         }
+      }
+
+      startButton?.addEventListener("click", () =>
+        runLocalStack({ auto: localView.classList.contains("is-starting") }),
+      );
+
+      // Instalado e desligado (depois de ligar o Mac): religa sem pedir clique.
+      void desktop?.autoStartPending?.().then((pending) => {
+        if (!pending) return;
+        setStartingMode(true);
+        show("local");
+        return runLocalStack({ auto: true });
       });
 
       document

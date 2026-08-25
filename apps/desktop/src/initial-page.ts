@@ -6,17 +6,33 @@ export const REMOTE_UNAVAILABLE_MESSAGE =
 
 export type InitialNavigationPlan =
   | { action: "navigate"; url: string; remote: boolean }
-  | { action: "setup"; clearRemote: boolean; message: string };
+  | {
+      action: "setup";
+      clearRemote: boolean;
+      message: string;
+      /**
+       * O Quibt já foi instalado neste computador e só está desligado (depois de um
+       * reboot, por exemplo): a tela de setup deve religar sozinha, não pedir para
+       * instalar de novo.
+       */
+      autoStart?: boolean;
+    };
 
 export async function planInitialNavigation(
   target: string,
   probe: (url: string) => Promise<boolean>,
   isLocal: (url: string) => boolean,
+  installedLocally: () => boolean = () => false,
 ): Promise<InitialNavigationPlan> {
   const available = await probe(target);
   if (isLocal(target)) {
     if (!available) {
-      return { action: "setup", clearRemote: false, message: LOCAL_UNAVAILABLE_MESSAGE };
+      return {
+        action: "setup",
+        clearRemote: false,
+        message: LOCAL_UNAVAILABLE_MESSAGE,
+        autoStart: installedLocally(),
+      };
     }
     return { action: "navigate", url: target, remote: false };
   }
