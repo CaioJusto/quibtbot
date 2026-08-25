@@ -497,3 +497,70 @@ describe("instalação pública (sslip.io + Caddy)", () => {
     expect(events.map((event) => event.message)).toContainEqual(expect.stringMatching(/porta 80/));
   });
 });
+
+describe("retomada numa instalação pública", () => {
+  it("o pairing entrega o https do Caddy mesmo quando o passo environment foi pulado", async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), "quibt-public-resume-"));
+    // Primeira passada já gravou o host público; o install caiu depois e voltou.
+    const env = ensureInstallEnvironment(dataDir, PUBLIC_URL, {
+      publicHost: "quibt-348dc227.46.224.84.18.sslip.io",
+    });
+    expect(env.values.QUIBT_PUBLIC_HOST).toBe("quibt-348dc227.46.224.84.18.sslip.io");
+    writeFileSync(
+      path.join(dataDir, "install-state.json"),
+      `${JSON.stringify({
+        version: 1,
+        release: "0.2.9",
+        completed: ["requirements", "environment", "images", "services", "database"],
+        updatedAt: "2026-08-17T00:00:00.000Z",
+      })}\n`,
+      { mode: 0o600 },
+    );
+    const run: ProcessRunner = {
+      async run(command, args) {
+        if (command === "docker" && args[0] === "info") {
+          return { code: 0, stdout: "Server Version: 27.0.0", stderr: "" };
+        }
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    };
+    const minted = {
+      code: "ABCD1234",
+      token: "invite-token",
+      expiresAt: "2026-08-17T01:00:00.000Z",
+    };
+    const fetchImpl = (async (input: string, init?: RequestInit) => {
+      const url = String(input);
+      // Sonda de saúde no loopback, nunca no https (o Caddy pode nem estar de pé).
+      if (url === "http://127.0.0.1:3100/ready")
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      if (url.endsWith("/api/bootstrap/invites") && init?.method === "POST") {
+        return new Response(JSON.stringify(minted), { status: 200 });
+      }
+      if (url.endsWith("/rpc/health")) {
+        return new Response(JSON.stringify({ json: { ok: true, needsFirstOwner: true } }), {
+          status: 200,
+        });
+      }
+      return new Response("not found", { status: 404 });
+    }) as typeof fetch;
+
+    const result = await runInstall({
+      dataDir,
+      publicUrl: PUBLIC_URL,
+      composeFile: COMPOSE_FILE,
+      composeMode: "packaged",
+      run,
+      fetch: fetchImpl,
+      clock: { now: () => new Date("2026-08-17T00:30:00.000Z"), sleep: async () => undefined },
+      platform: "linux",
+      // Sem publicAccess de propósito: a retomada não redescobre nada — lê o env.
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.pairing?.url).toBe("https://quibt-348dc227.46.224.84.18.sslip.io");
+    expect(result.pairing?.deepLink).toContain(
+      encodeURIComponent("https://quibt-348dc227.46.224.84.18.sslip.io"),
+    );
+  });
+});

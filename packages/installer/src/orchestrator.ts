@@ -103,6 +103,17 @@ export interface OrchestratorDeps {
   onWarning?: (message: string) => void;
 }
 
+/**
+ * O endereço que o CELULAR recebe: numa instalação pública é o https do Caddy, lido do
+ * env. Vem do env, e não da decisão em memória, porque uma retomada (o install caiu
+ * em `health` e voltou) pula o passo `environment` e a decisão nem existe — o pairing
+ * entregava `http://127.0.0.1:5173` ao telefone, um endereço morto fora do host.
+ */
+export function reachableUrl(envValues: Record<string, string>, publicUrl: string): string {
+  const host = envValues[PUBLIC_HOST_ENV]?.trim();
+  return host ? `https://${host}` : publicUrl;
+}
+
 /** O host público de uma instalação anterior, se o env já existir. */
 function readExistingPublicHost(dataDir: string): string | undefined {
   const file = envFilePath(dataDir);
@@ -548,10 +559,8 @@ export async function runInstall(deps: OrchestratorDeps): Promise<InstallResult>
         }
         // The installer talks directly to the loopback-only API. Phones and remote
         // browsers must use the public web origin, whose /api proxy reaches that API.
-        // Numa instalação pública o celular tem de receber o https do Caddy, não o
-        // loopback: é esse endereço que vai no QR e que ele guarda.
-        const reachableUrl = access?.mode === "public" ? access.url : deps.publicUrl;
-        const pairing = buildPairingOutput(reachableUrl, reachableUrl, minted);
+        const reach = reachableUrl(envValues, deps.publicUrl);
+        const pairing = buildPairingOutput(reach, reach, minted);
         emit({ step, status: "succeeded", message: "Pairing invite ready" });
         return { ok: true, state, pairing, pairingPending: true };
       }
@@ -690,7 +699,11 @@ export async function runPair(deps: {
   }
   return {
     ok: true,
-    pairing: buildPairingOutput(deps.publicUrl, deps.publicUrl, minted),
+    pairing: buildPairingOutput(
+      reachableUrl(envValues, deps.publicUrl),
+      reachableUrl(envValues, deps.publicUrl),
+      minted,
+    ),
   };
 }
 
