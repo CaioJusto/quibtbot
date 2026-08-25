@@ -569,3 +569,29 @@ describe("container exit", () => {
     expect(error.message).toContain("código 1");
   });
 });
+
+describe("hardenDesktopRoot", () => {
+  it("cria a raiz dos desktops e garante 1777, relendo o modo", async () => {
+    const { mkdtempSync, lstatSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const path = await import("node:path");
+    const { hardenDesktopRoot } = await import("./index.js");
+    const root = path.join(mkdtempSync(path.join(tmpdir(), "quibt-desk-")), "desktops");
+    await hardenDesktopRoot(root);
+    expect((lstatSync(root).mode & 0o7777).toString(8)).toBe("1777");
+    // Idempotente: rodar de novo não muda nada nem lança.
+    await hardenDesktopRoot(root);
+    expect((lstatSync(root).mode & 0o7777).toString(8)).toBe("1777");
+  });
+
+  it("recusa uma raiz que virou link simbólico", async () => {
+    const { mkdtempSync, symlinkSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const path = await import("node:path");
+    const { hardenDesktopRoot } = await import("./index.js");
+    const dir = mkdtempSync(path.join(tmpdir(), "quibt-desk-link-"));
+    const root = path.join(dir, "desktops");
+    symlinkSync(dir, root);
+    await expect(hardenDesktopRoot(root)).rejects.toThrow(/link/);
+  });
+});

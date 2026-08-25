@@ -154,8 +154,9 @@ app.post("/computers", async (c) => {
     await prepareWorkspaceDesktopStorage(serviceHomePath, serviceDesktopPath);
     await chownWorkspaceTree(serviceHomePath);
     await chownWorkspaceTree(serviceDesktopPath, "desktops");
-    // Depois do chown geral: aquele deixa a raiz como 1000:1000, e é esta linha que a
-    // devolve ao root com 711. Os desktops de cada bot, abaixo dela, seguem do bot.
+    // Depois do chown geral: a raiz dos desktops tem de terminar 1777 (sticky, como
+    // /tmp) para cada sessão criar o próprio desktop com o uid dela. Falha alto se o
+    // modo não ficar — antes o erro era engolido e a tela morria só ao assumir o controle.
     await hardenDesktopRoot(serviceDesktopPath);
     const homePath = hostHomePath(serviceHomePath, runtimeInfo);
     const desktopPath = hostHomePath(serviceDesktopPath, runtimeInfo);
@@ -1135,10 +1136,23 @@ async function ensureSharedHomePermissions(container: Docker.Container) {
  * `CapDrop: ALL` proíbe. Dono não se mexe: o supervisor nem sempre é root (`pnpm dev`
  * e o CI rodam como gente comum) e mudar dono exige privilégio.
  */
-async function hardenDesktopRoot(desktopRoot: string) {
+export async function hardenDesktopRoot(desktopRoot: string) {
   const info = await lstat(desktopRoot).catch(() => undefined);
-  if (!info || info.isSymbolicLink() || !info.isDirectory()) return;
-  await chmod(desktopRoot, 0o1777).catch(() => undefined);
+  if (info?.isSymbolicLink()) throw new SupervisorError("desktop storage path is a link", 500);
+  if (!info) await mkdir(desktopRoot, { recursive: true });
+  await chmod(desktopRoot, 0o1777);
+  // Relido de propósito: um chmod que "passa" mas não fica (bind mount, fs sem suporte)
+  // deixava o dir 755 root, o dono da sessão não conseguia criar o desktop dele e a
+  // tela morria em "framebuffer failed" — silenciosamente, só na hora de assumir o
+  // controle. Melhor o install falhar aqui, com nome, do que o celular ficar
+  // "conectando" para sempre.
+  const mode = (await lstat(desktopRoot)).mode & 0o7777;
+  if (mode !== 0o1777) {
+    throw new SupervisorError(
+      `desktop root ${desktopRoot} ficou com modo ${mode.toString(8)}, esperado 1777`,
+      500,
+    );
+  }
 }
 
 /**
