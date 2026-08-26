@@ -715,7 +715,11 @@ export function createRouter(deps: RouterDeps) {
         repos.removeBotGroupMember(context.actor, input.groupId, input.botId),
       ),
       thread: authed.botGroups.thread.handler(async ({ context, input }) =>
-        groupSnapshot(deps, context.actor, input.groupId, input.afterSeq ?? -1),
+        groupSnapshot(deps, context.actor, input.groupId, {
+          afterSeq: input.afterSeq,
+          beforeSeq: input.beforeSeq,
+          limit: input.limit,
+        }),
       ),
       subscribe: authed.botGroups.subscribe.handler(async function* ({ context, input }) {
         const group = await repos.getBotGroup(context.actor, input.groupId);
@@ -750,7 +754,13 @@ export function createRouter(deps: RouterDeps) {
     },
     threads: {
       get: authed.threads.get.handler(async ({ context, input }) =>
-        snapshot(deps, context.actor, input.botId, input.afterSeq ?? -1, context.screenOrigin),
+        snapshot(
+          deps,
+          context.actor,
+          input.botId,
+          { afterSeq: input.afterSeq, beforeSeq: input.beforeSeq, limit: input.limit },
+          context.screenOrigin,
+        ),
       ),
       subscribe: authed.threads.subscribe.handler(async function* ({ context, input }) {
         const bot = await repos.getBot(context.actor, input.botId);
@@ -2287,7 +2297,13 @@ export function createRouter(deps: RouterDeps) {
         const bots = await repos.listBots(context.actor);
         const bot = bots.find((b) => b.id === input.botId);
         if (!bot) throw new IsolationError();
-        const snap = await snapshot(deps, context.actor, input.botId, -1, context.screenOrigin);
+        const snap = await snapshot(
+          deps,
+          context.actor,
+          input.botId,
+          { afterSeq: -1, unbounded: true },
+          context.screenOrigin,
+        );
         const memory = await deps.prisma.memoryDocument.findMany({
           where: { botId: input.botId, workspaceId: context.actor.workspaceId },
         });
@@ -2677,23 +2693,59 @@ async function reconcileStrandedRun<
   return failed.includes(run.id) ? null : run;
 }
 
+export const THREAD_HISTORY_DEFAULT_LIMIT = 50;
+
+interface HistoryPageInput {
+  afterSeq?: number;
+  beforeSeq?: number;
+  limit?: number;
+  /** Internal export path only; RPC history inputs can never set this. */
+  unbounded?: boolean;
+}
+
+export function historyWindow(input: HistoryPageInput) {
+  const limit = input.limit ?? THREAD_HISTORY_DEFAULT_LIMIT;
+  if (input.unbounded) {
+    return { orderBy: { seq: "desc" as const }, reverse: true };
+  }
+  if (input.beforeSeq !== undefined) {
+    return {
+      seq: { lt: input.beforeSeq },
+      orderBy: { seq: "desc" as const },
+      take: limit,
+      reverse: true,
+    };
+  }
+  if (input.afterSeq !== undefined && input.afterSeq >= 0) {
+    return {
+      seq: { gt: input.afterSeq },
+      orderBy: { seq: "asc" as const },
+      reverse: false,
+    };
+  }
+  return { orderBy: { seq: "desc" as const }, take: limit, reverse: true };
+}
+
 async function snapshot(
   deps: RouterDeps,
   actor: Actor,
   botId: string,
-  afterSeq: number,
+  page: HistoryPageInput,
   screenOrigin?: string,
 ): Promise<ThreadSnapshot> {
   const bot = await createRepos(deps.prisma).getBot(actor, botId);
   if (!bot.thread) throw new IsolationError();
   const threadId = bot.thread.id;
+  const window = historyWindow(page);
+  const incrementalAfter = page.beforeSeq === undefined ? (page.afterSeq ?? -1) : -1;
+
   const [conversation, conversations, events, queued, last, home] = await Promise.all([
     activeConversationForBot(deps.prisma, botId),
     deps.prisma.conversation.findMany({
       where: { botId },
       orderBy: { createdAt: "desc" },
     }),
-    eventsAfter(deps.prisma, threadId, afterSeq, { newest: afterSeq < 0 }),
+    eventsAfter(deps.prisma, threadId, incrementalAfter, { newest: incrementalAfter < 0 }),
     deps.prisma.run.findFirst({
       where: {
         botId,
@@ -2719,12 +2771,14 @@ async function snapshot(
   const rows = await deps.prisma.message.findMany({
     where: {
       threadId,
-      seq: { gt: afterSeq },
+      ...("seq" in window ? { seq: window.seq } : {}),
       OR: [{ conversationId: conversation.id }, { conversationId: null }],
     },
-    orderBy: { seq: "asc" },
+    orderBy: window.orderBy,
+    ...("take" in window ? { take: window.take } : {}),
   });
-  const persisted = rows.map((row) => ({
+  const orderedRows = window.reverse ? [...rows].reverse() : rows;
+  const persisted = orderedRows.map((row) => ({
     id: row.id,
     threadId: row.threadId,
     seq: row.seq,
@@ -2739,7 +2793,7 @@ async function snapshot(
     reactions: (row.reactions as Record<string, string[]> | null) ?? undefined,
     createdAt: row.createdAt.toISOString(),
   }));
-  const live = projected.filter((message) => {
+  const live = (page.beforeSeq === undefined ? projected : []).filter((message) => {
     if (message.blocks.some((block) => block.kind === "progress")) return true;
     if (!message.id.startsWith("subagent:")) return false;
     return !persisted.some((row) =>
@@ -2787,13 +2841,18 @@ async function groupSnapshot(
   deps: RouterDeps,
   actor: Actor,
   groupId: string,
-  afterSeq: number,
+  page: HistoryPageInput,
 ): Promise<GroupThreadSnapshot> {
   const group = await createRepos(deps.prisma).getBotGroup(actor, groupId);
+  const window = historyWindow(page);
   const [rows, last, runs] = await Promise.all([
     deps.prisma.message.findMany({
-      where: { threadId: group.threadId, seq: { gt: afterSeq } },
-      orderBy: { seq: "asc" },
+      where: {
+        threadId: group.threadId,
+        ...("seq" in window ? { seq: window.seq } : {}),
+      },
+      orderBy: window.orderBy,
+      ...("take" in window ? { take: window.take } : {}),
     }),
     deps.prisma.event.findFirst({
       where: { threadId: group.threadId },
@@ -2809,11 +2868,12 @@ async function groupSnapshot(
       orderBy: { createdAt: "asc" },
     }),
   ]);
+  const orderedRows = window.reverse ? [...rows].reverse() : rows;
   return {
     groupId,
     threadId: group.threadId,
     cursor: last?.seq ?? -1,
-    messages: rows.map((row) => ({
+    messages: orderedRows.map((row) => ({
       id: row.id,
       threadId: row.threadId,
       seq: row.seq,

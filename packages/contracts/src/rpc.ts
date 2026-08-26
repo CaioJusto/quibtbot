@@ -222,6 +222,8 @@ export const appContract = {
         z.object({
           groupId: Id,
           afterSeq: z.number().int().min(-1).optional(),
+          beforeSeq: z.number().int().nonnegative().optional(),
+          limit: z.number().int().min(1).max(100).optional(),
         }),
       )
       .output(GroupThreadSnapshotSchema),
@@ -246,7 +248,14 @@ export const appContract = {
   },
   threads: {
     get: oc
-      .input(z.object({ botId: Id, afterSeq: z.number().int().min(-1).optional() }))
+      .input(
+        z.object({
+          botId: Id,
+          afterSeq: z.number().int().min(-1).optional(),
+          beforeSeq: z.number().int().nonnegative().optional(),
+          limit: z.number().int().min(1).max(100).optional(),
+        }),
+      )
       .output(ThreadSnapshotSchema),
     subscribe: oc
       .input(z.object({ botId: Id, cursor: z.number().int().min(-1) }))

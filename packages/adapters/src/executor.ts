@@ -87,6 +87,7 @@ import {
 import { screenshotCommand, screenshotPath } from "./screenshot.js";
 import { inferScript } from "./scripted-runtime.js";
 import type { EncryptedSecretStore } from "./secrets.js";
+import { webFetch, webFetchRequestForTranscript } from "./web-fetch.js";
 
 export interface ExecutorDeps {
   prisma: PrismaClient;
@@ -483,7 +484,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
       ) => {
         // Retries look up the effect by executionId: it only counts as done once the tool
         // actually returned, so a crash mid-tool re-runs it instead of faking success.
-        const applied = await recordEffect(deps, run, name, executionId, args);
+        const recordedArgs = name === "web_fetch" ? webFetchRequestForTranscript(args) : args;
+        const applied = await recordEffect(deps, run, name, executionId, recordedArgs);
         if (applied.duplicate) return applied.effect.result ?? { duplicate: true };
         try {
           const result = await performTool(name, args, executionId, applied);
@@ -527,6 +529,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return { error: "Use a valid HTTP or HTTPS page address without credentials." };
           }
           return runSandboxCommand(deps.sandbox, computer, command, "/home/quibt", context);
+        }
+        if (name === "web_fetch") {
+          return webFetch(String(args.url ?? ""), { signal: context.signal });
         }
         if (name === "shell") {
           const command = String(args.command ?? args.cmd ?? "");

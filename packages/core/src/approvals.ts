@@ -85,6 +85,7 @@ export function commandCanAutoApprove(tool: string, summary: string): boolean {
 /** Tools the model can always run without a card. */
 export const SAFE_TOOLS = new Set([
   "open_url",
+  "web_fetch",
   "memory",
   "remember",
   "save_skill",
