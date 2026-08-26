@@ -21,7 +21,7 @@ function validCustomDump(): Buffer {
 function seedInstalledState(dataDir: string): void {
   ensureInstallEnvironment(dataDir, PUBLIC_URL);
   saveInstallState(dataDir, {
-    ...initialInstallState("0.2.12", new Date("2026-08-17T00:00:00.000Z")),
+    ...initialInstallState("0.2.13", new Date("2026-08-17T00:00:00.000Z")),
     completed: [
       "requirements",
       "environment",
@@ -66,7 +66,7 @@ describe("pairing completion ordering", () => {
       path.join(dataDir, "install-state.json"),
       `${JSON.stringify({
         version: 1,
-        release: "0.2.12",
+        release: "0.2.13",
         completed: ["requirements", "environment", "images", "services", "database", "health"],
         updatedAt: "2026-08-17T00:00:00.000Z",
       })}\n`,
@@ -121,11 +121,11 @@ describe("previous release validation", () => {
   it("aborts when env and install state releases diverge", () => {
     const dataDir = mkdtempSync(path.join(tmpdir(), "quibt-prev-release-"));
     const env = ensureInstallEnvironment(dataDir, PUBLIC_URL);
-    saveInstallState(dataDir, initialInstallState("0.2.12", new Date()));
+    saveInstallState(dataDir, initialInstallState("0.2.13", new Date()));
     writeFileSync(
       env.path,
       readFileSync(env.path, "utf8").replace(
-        "QUIBT_STACK_VERSION=0.2.12",
+        "QUIBT_STACK_VERSION=0.2.13",
         "QUIBT_STACK_VERSION=0.1.0",
       ),
       { mode: 0o600 },
@@ -161,11 +161,11 @@ describe("restoreRollback throw handling", () => {
         clock: { now: () => new Date(), sleep: async () => undefined },
       },
       {
-        release: "0.2.12",
+        release: "0.2.13",
         images: [
-          { reference: "ghcr.io/quibt/quibt-stack:0.2.12", id: "sha256:a" },
-          { reference: "ghcr.io/quibt/quibt-supervisor:0.2.12", id: "sha256:b" },
-          { reference: "ghcr.io/quibt/quibt-computer:0.2.12", id: "sha256:c" },
+          { reference: "ghcr.io/quibt/quibt-stack:0.2.13", id: "sha256:a" },
+          { reference: "ghcr.io/quibt/quibt-supervisor:0.2.13", id: "sha256:b" },
+          { reference: "ghcr.io/quibt/quibt-computer:0.2.13", id: "sha256:c" },
         ],
         envSnapshotPath,
         backupBundleDir: bundle.dir,
