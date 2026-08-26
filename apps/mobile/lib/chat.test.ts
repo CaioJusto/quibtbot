@@ -8,6 +8,7 @@ import {
   buildSwitchBranchPayload,
   bundledWithPrevious,
   chatTimeLabel,
+  isWorkingPlaceholder,
   LOCAL_REACTOR_ID,
   messageActions,
   peerLine,
@@ -17,6 +18,14 @@ import {
   versionsByParent,
   versionsOf,
 } from "./chat.js";
+
+describe("isWorkingPlaceholder", () => {
+  it("recognizes only the initial runtime waiting marker", () => {
+    expect(isWorkingPlaceholder("Trabalhando…")).toBe(true);
+    expect(isWorkingPlaceholder(" working... ")).toBe(true);
+    expect(isWorkingPlaceholder("Trabalhando na pesquisa")).toBe(false);
+  });
+});
 
 const messages = [
   {

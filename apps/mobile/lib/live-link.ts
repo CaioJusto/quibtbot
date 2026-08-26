@@ -88,10 +88,23 @@ export function isConnectionProblem(message: string | null | undefined): boolean
 export const CONNECTION_PROBLEM_MESSAGE =
   "Sem contato com o seu Quibt. Confira a conexão e tente de novo.";
 
+/**
+ * Erro interno de compatibilidade do RPC. Ele é recuperável (o fio tenta de novo) e nunca
+ * deve aparecer em inglês para quem abriu a conversa.
+ */
+export function isConversationSyncProblem(message: string | null | undefined): boolean {
+  return Boolean(message && /output validation failed/i.test(message));
+}
+
+export const CONVERSATION_SYNC_PROBLEM_MESSAGE =
+  "A conversa está sincronizando. Tentando novamente…";
+
 /** A mensagem que a pessoa lê: rede caída vira uma frase nossa; o resto passa como veio. */
 export function userFacingError(error: unknown, fallback: string): string {
   const message = error instanceof Error && error.message ? error.message : fallback;
-  return isConnectionProblem(message) ? CONNECTION_PROBLEM_MESSAGE : message;
+  if (isConnectionProblem(message)) return CONNECTION_PROBLEM_MESSAGE;
+  if (isConversationSyncProblem(message)) return CONVERSATION_SYNC_PROBLEM_MESSAGE;
+  return message;
 }
 
 /**

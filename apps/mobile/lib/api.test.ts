@@ -526,6 +526,66 @@ describe("applyMobileThreadEvent", () => {
     expect(next?.messages.map((message) => message.id)).toEqual(["message-1"]);
   });
 
+  it("keeps active progress after confirming the user message and preserves row order", async () => {
+    const { applyMobileThreadEvent } = await import("./api");
+    const next = applyMobileThreadEvent(
+      {
+        cursor: 3,
+        messages: [
+          {
+            id: "optimistic:nonce-1",
+            clientNonce: "nonce-1",
+            role: "user" as const,
+            blocks: [{ kind: "text", text: "oi" }],
+          },
+          {
+            id: "progress:run-1",
+            role: "bot" as const,
+            blocks: [{ kind: "progress", text: "Trabalhando…" }],
+            runId: "run-1",
+          },
+        ],
+      },
+      {
+        id: "event-4",
+        seq: 4,
+        type: "thread.message.created",
+        payload: {
+          messageId: "message-1",
+          clientNonce: "nonce-1",
+          role: "user",
+          blocks: [{ kind: "text", text: "oi" }],
+        },
+      },
+    );
+    expect(next?.messages.map((message) => message.id)).toEqual(["message-1", "progress:run-1"]);
+  });
+
+  it("still clears unscoped progress when a bot reply arrives without a run id", async () => {
+    const { applyMobileThreadEvent } = await import("./api");
+    const next = applyMobileThreadEvent(
+      {
+        messages: [
+          {
+            id: "progress:run-1",
+            role: "bot" as const,
+            blocks: [{ kind: "progress", text: "Trabalhando…" }],
+            runId: "run-1",
+          },
+        ],
+      },
+      {
+        type: "thread.message.created",
+        payload: {
+          messageId: "message-1",
+          role: "bot",
+          blocks: [{ kind: "text", text: "Olá" }],
+        },
+      },
+    );
+    expect(next?.messages.map((message) => message.id)).toEqual(["message-1"]);
+  });
+
   it("drops streaming progress when the run ends", async () => {
     const { applyMobileThreadEvent } = await import("./api");
     const prev = {

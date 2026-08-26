@@ -8,6 +8,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from "expo-speech-recognition";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Animated,
   AppState,
   FlatList,
   Keyboard,
@@ -56,6 +57,7 @@ import {
   buildOptimisticUserMessage,
   buildReactPayload,
   buildSwitchBranchPayload,
+  isWorkingPlaceholder,
   messageActions,
   quotedTextFor,
   rollbackMessages,
@@ -77,6 +79,7 @@ import {
   connectionChipLabel,
   createSafetyPoller,
   isConnectionProblem,
+  isConversationSyncProblem,
   RECONNECTING_CHIP_DELAY_MS,
   userFacingError,
 } from "../lib/live-link";
@@ -292,7 +295,10 @@ export default function Thread() {
         setPollFailed(false);
       } catch (err) {
         if (isSessionExpiredError(err)) sessionExpired();
-        else if (isConnectionProblem(err instanceof Error ? err.message : null)) {
+        else if (
+          isConnectionProblem(err instanceof Error ? err.message : null) ||
+          isConversationSyncProblem(err instanceof Error ? err.message : null)
+        ) {
           // Rede caída é o chip discreto, não o banner vermelho com "Network request failed".
           setPollFailed(true);
         } else {
@@ -374,7 +380,8 @@ export default function Thread() {
         if (
           err instanceof Error &&
           !/cannot stream|failed \(\d+\)/.test(err.message) &&
-          !isConnectionProblem(err.message)
+          !isConnectionProblem(err.message) &&
+          !isConversationSyncProblem(err.message)
         ) {
           setError(err.message);
           setPlanLimitError(isPlanLimitError(err));
@@ -1828,10 +1835,24 @@ const MessageRow = memo(function MessageRow({
       ref={block as never}
       // Um toque na conversa guarda o teclado, como em qualquer app de mensagens.
       onPress={() => Keyboard.dismiss()}
-      onLongPress={() => {
+      onLongPress={(event) => {
         softHaptic();
+        const { locationX, locationY, pageX, pageY } = event.nativeEvent;
         block.current?.measureInWindow((x, y, width, height) => {
-          onMenu(message, { x, y, width, height }, mine, versionIndex, versionCount);
+          onMenu(
+            message,
+            {
+              x,
+              y,
+              width,
+              height,
+              touchX: Number.isFinite(locationX) ? x + locationX : pageX,
+              touchY: Number.isFinite(locationY) ? y + locationY : pageY,
+            },
+            mine,
+            versionIndex,
+            versionCount,
+          );
         });
       }}
       delayLongPress={320}
@@ -1918,6 +1939,8 @@ const MessageRow = memo(function MessageRow({
           <View style={[styles.bubble, mine ? styles.mineBubble : styles.agentBubble]}>
             {mine ? (
               <Text style={[styles.messageText, styles.mineText]}>{displayText}</Text>
+            ) : streaming && isWorkingPlaceholder(displayText) ? (
+              <WorkingIndicator />
             ) : (
               <ChatMarkdown streaming={streaming}>{displayText}</ChatMarkdown>
             )}
@@ -1990,6 +2013,58 @@ const MessageRow = memo(function MessageRow({
     </Pressable>
   );
 });
+
+/** Estado de espera estável: comunica atividade sem piscar texto estático na conversa. */
+function WorkingIndicator() {
+  const dots = useRef([
+    { id: "first", value: new Animated.Value(0.34) },
+    { id: "second", value: new Animated.Value(0.34) },
+    { id: "third", value: new Animated.Value(0.34) },
+  ]).current;
+
+  useEffect(() => {
+    const animation = Animated.loop(
+      Animated.stagger(
+        140,
+        dots.map(({ value }) =>
+          Animated.sequence([
+            Animated.timing(value, { toValue: 1, duration: 280, useNativeDriver: true }),
+            Animated.timing(value, { toValue: 0.34, duration: 560, useNativeDriver: true }),
+          ]),
+        ),
+      ),
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [dots]);
+
+  return (
+    <View accessible accessibilityLabel="O bot está trabalhando" style={styles.workingIndicator}>
+      <Text style={styles.workingLabel}>Trabalhando</Text>
+      <View style={styles.workingDots}>
+        {dots.map(({ id, value }) => (
+          <Animated.View
+            key={id}
+            style={[
+              styles.workingDot,
+              {
+                opacity: value,
+                transform: [
+                  {
+                    translateY: value.interpolate({
+                      inputRange: [0.34, 1],
+                      outputRange: [0, -2],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          />
+        ))}
+      </View>
+    </View>
+  );
+}
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: COLORS.background },
@@ -2095,6 +2170,15 @@ const styles = StyleSheet.create({
   mineText: { color: COLORS.mineInk },
   agentBubble: { backgroundColor: COLORS.bubble },
   messageText: { color: COLORS.primary, fontSize: 16, lineHeight: 23 },
+  workingIndicator: {
+    minHeight: 23,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  workingLabel: { color: COLORS.secondary, fontSize: 15, lineHeight: 23, fontWeight: "600" },
+  workingDots: { flexDirection: "row", alignItems: "center", gap: 4 },
+  workingDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: COLORS.secondary },
   approvalActions: {
     marginTop: 12,
     flexDirection: "row",

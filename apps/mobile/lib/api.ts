@@ -914,20 +914,33 @@ export function applyMobileThreadEvent<
       createdAt: typeof event.payload?.createdAt === "string" ? event.payload.createdAt : undefined,
     };
     const finishedProgress = event.runId ? `progress:${event.runId}` : null;
+    const messages: MobileMessage[] = [];
+    let inserted = false;
+    for (const message of prev.messages) {
+      const replacesOptimistic = Boolean(
+        eventClientNonce && message.clientNonce === eventClientNonce,
+      );
+      if (message.id === next.id || replacesOptimistic) {
+        if (!inserted) {
+          // A confirmação durável ocupa o lugar da otimista. Se a bolha de progresso já
+          // veio depois dela, a ordem visual continua usuário -> bot, sem salto na lista.
+          messages.push(next);
+          inserted = true;
+        }
+        continue;
+      }
+      if (message.id.startsWith("progress:")) {
+        // Uma mensagem do usuário não encerra o trabalho do bot. Antes, como ela não tem
+        // runId, apagava todas as bolhas de progresso e produzia o pisca visto no vídeo.
+        if (finishedProgress ? message.id === finishedProgress : next.role !== "user") continue;
+      }
+      messages.push(message);
+    }
+    if (!inserted) messages.push(next);
     return {
       ...prev,
       cursor: event.seq ?? prev.cursor,
-      messages: [
-        ...prev.messages.filter(
-          (message) =>
-            message.id !== next.id &&
-            (!eventClientNonce || message.clientNonce !== eventClientNonce) &&
-            (finishedProgress
-              ? message.id !== finishedProgress
-              : !message.id.startsWith("progress:")),
-        ),
-        next,
-      ],
+      messages,
     };
   }
   return prev;

@@ -27,6 +27,13 @@ export type OptimisticAttachment = {
   image?: boolean;
 };
 
+const WORKING_PLACEHOLDERS = new Set(["trabalhando…", "trabalhando...", "working…", "working..."]);
+
+/** O primeiro progress do runtime é estado de espera, ainda não é texto da resposta. */
+export function isWorkingPlaceholder(text: string): boolean {
+  return WORKING_PLACEHOLDERS.has(text.trim().toLocaleLowerCase());
+}
+
 /**
  * Draws the person's message before the network round-trip finishes. The nonce is also
  * sent to the server and echoed in the live event, so the durable row replaces this one

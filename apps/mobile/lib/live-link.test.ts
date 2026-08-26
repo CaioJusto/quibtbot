@@ -202,6 +202,9 @@ describe("userFacingError", () => {
     expect(userFacingError(new Error(""), "Não foi possível enviar")).toBe(
       "Não foi possível enviar",
     );
+    expect(userFacingError(new Error("Output validation failed"), "x")).toBe(
+      "A conversa está sincronizando. Tentando novamente…",
+    );
   });
 });
 

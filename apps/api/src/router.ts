@@ -2978,16 +2978,44 @@ async function computerStatus(
           false,
         )
       : null;
+  const state = publicComputerState(desktop?.state);
   return {
     botId,
     kind: (computer?.kind ?? "fake") as ComputerStatus["kind"],
-    state: (desktop?.state ?? "stopped") as ComputerStatus["state"],
+    state,
     controlHolder: (desktop?.controlHolder ?? "none") as ComputerStatus["controlHolder"],
     controlLeaseExpiresAt: desktop?.controlLeaseExpiresAt?.toISOString() ?? null,
-    screenAvailable: desktop?.state === "running" || desktop?.state === "booting",
+    screenAvailable: state === "running" || state === "booting",
     homeRevision,
     screenUrl: driving,
   };
+}
+
+/**
+ * O banco guarda estados de fencing enquanto suspende ou destrói uma sessão. Eles são
+ * detalhes internos e não fazem parte do contrato público do computador. Deixar o cast
+ * atravessar esses valores fazia qualquer `threads/get` falhar na validação — e o celular
+ * substituía a conversa inteira por "Output validation failed" justamente nessa janela.
+ */
+function publicComputerState(state: string | null | undefined): ComputerStatus["state"] {
+  switch (state) {
+    case undefined:
+    case null:
+    case "stopped":
+      return "stopped";
+    case "booting":
+    case "running":
+    case "suspended":
+    case "error":
+      return state;
+    case "suspending":
+      return "suspended";
+    case "deleting":
+      return "stopped";
+    default:
+      // Uma linha antiga ou parcialmente migrada não pode tornar o chat ilegível.
+      return "error";
+  }
 }
 
 /** Trecho curto do recado citado, para o bot entender a que a pessoa respondeu. */

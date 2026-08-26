@@ -15,14 +15,15 @@ import {
   View,
   type ViewStyle,
 } from "react-native";
+import { type ContextMenuAnchor, contextMenuPosition } from "./context-menu-position";
+
+export type { ContextMenuAnchor } from "./context-menu-position";
 
 /** As duas versões de cada cor deste menu; no iOS o sistema entrega a do modo em vigor. */
 function dynColor(light: string, dark: string): string {
   if (Platform.OS !== "ios") return light;
   return DynamicColorIOS({ light, dark }) as unknown as string;
 }
-
-export type ContextMenuAnchor = { x: number; y: number; width: number; height: number };
 
 export type ContextMenuEntry = {
   label: string;
@@ -104,16 +105,15 @@ export function ContextMenuSheet({
   const screen = Dimensions.get("window");
   const accessoryHeight = accessory ? 56 + GAP : 0;
   const menuHeight = entries.length * ITEM_HEIGHT + 16 + accessoryHeight;
-  // Abaixo da linha quando cabe; acima quando a linha está no pé da tela.
-  const below = anchor.y + anchor.height + GAP + menuHeight < screen.height - 24;
-  const menuTop = below ? anchor.y + anchor.height + GAP : anchor.y - GAP - menuHeight;
-  // O cartão do menu nasce centrado no item destacado (um favorito pequeno, uma linha
-  // larga), e só encosta na borda quando não cabe — antes ele grudava à esquerda da linha
-  // e ficava torto em relação ao destaque.
-  const wantedLeft = alignRight
-    ? anchor.x + anchor.width - CARD_WIDTH
-    : anchor.x + anchor.width / 2 - CARD_WIDTH / 2;
-  const menuLeft = Math.min(Math.max(wantedLeft, 12), screen.width - CARD_WIDTH - 12);
+  const { top: menuTop, left: menuLeft } = contextMenuPosition({
+    anchor,
+    menuWidth: CARD_WIDTH,
+    menuHeight,
+    screenWidth: screen.width,
+    screenHeight: screen.height,
+    alignRight,
+    gap: GAP,
+  });
 
   const expandedEntries = entries.find((entry) => entry.label === expanded)?.submenu ?? [];
   const scale = enter.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1] });
