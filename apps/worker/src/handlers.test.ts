@@ -112,6 +112,9 @@ describe("control.reap", () => {
           controlLeaseId: null,
           controlLeaseUserId: null,
           controlLeaseExpiresAt: null,
+          // Devolver o computador apaga também a marca do último uso: o próximo lease
+          // começa sem crédito de renovação herdado de quem estava antes.
+          controlLastInputAt: null,
         },
       },
     ]);
