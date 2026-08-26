@@ -16,7 +16,38 @@ describe("planInitialNavigation", () => {
       action: "setup",
       clearRemote: false,
       message: LOCAL_UNAVAILABLE_MESSAGE,
+      autoStart: false,
     });
+  });
+
+  it("religa sozinho quando o stack local está instalado e só desligado", async () => {
+    const plan = await planInitialNavigation(
+      "http://127.0.0.1:5173",
+      async () => false,
+      (url) => url.includes("127.0.0.1"),
+      () => true,
+    );
+    expect(plan).toEqual({
+      action: "setup",
+      clearRemote: false,
+      message: LOCAL_UNAVAILABLE_MESSAGE,
+      autoStart: true,
+    });
+  });
+
+  it("um stack local no ar não consulta o estado da instalação", async () => {
+    let asked = false;
+    const plan = await planInitialNavigation(
+      "http://127.0.0.1:5173",
+      async () => true,
+      () => true,
+      () => {
+        asked = true;
+        return true;
+      },
+    );
+    expect(plan).toEqual({ action: "navigate", url: "http://127.0.0.1:5173", remote: false });
+    expect(asked).toBe(false);
   });
 
   it("clears remote and opens setup when a persisted remote url is unavailable", async () => {

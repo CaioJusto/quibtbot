@@ -60,6 +60,10 @@ function writeFakeDocker(
 } {
   const logPath = path.join(binDir, "commands.log");
   const dockerPath = path.join(binDir, "docker");
+  // O docker falso guarda o que já "baixou": sem isso `image inspect` não teria como
+  // dizer que a segunda passada não precisa baixar nada de novo.
+  const storeDir = path.join(binDir, "images");
+  mkdirSync(storeDir, { recursive: true });
   const failPull = options.failPull ? "1" : "";
   const failPullMessage =
     options.failPullMessage ?? "pull failed: DATABASE_PASSWORD=secret123 BOOTSTRAP_SECRET=abc123";
@@ -68,14 +72,48 @@ function writeFakeDocker(
     dockerPath,
     `#!/bin/sh
 LOG="${logPath}"
+STORE="${storeDir}"
 echo "$@" >> "$LOG"
+marker() {
+  printf '%s/%s' "$STORE" "$(printf '%s' "$1" | tr -c 'A-Za-z0-9' '_')"
+}
 case "$1" in
   info)
+    exit 0
+    ;;
+  image)
+    if [ "$2" = "inspect" ]; then
+      for ref in "$@"; do :; done
+      if [ -f "$(marker "$ref")" ]; then
+        echo "sha256:aaaaaaaaaaaa"
+        exit 0
+      fi
+      echo "Error: No such image: $ref" >&2
+      exit 1
+    fi
+    echo "fake docker: unknown image invocation: $*" >&2
+    exit 1
+    ;;
+  pull)
+    if [ -n "${failPull}" ]; then
+      echo "${failPullMessage}" >&2
+      exit 1
+    fi
+    echo "aaaaaaaaaaaa: Pulling fs layer"
+    echo "aaaaaaaaaaaa: Pull complete"
+    touch "$(marker "$2")"
     exit 0
     ;;
   compose)
     args="$*"
     case "$args" in
+      *" config --images"*)
+        echo "postgres:16@sha256:e17e86066e5ef83e0952a9347f5c792b7ece00972e2aa787a6986f471b3dd3d5"
+        echo "ghcr.io/quibt/quibt-computer:${INSTALL_RELEASE}"
+        echo "ghcr.io/quibt/quibt-supervisor:${INSTALL_RELEASE}"
+        echo "ghcr.io/quibt/quibt-stack:${INSTALL_RELEASE}"
+        exit 0
+        ;;
       *" pull"*)
         if [ -n "${failPull}" ]; then
           echo "${failPullMessage}" >&2
@@ -113,7 +151,10 @@ function readDockerLog(logPath: string): string[] {
 }
 
 function classifyComposeCommand(line: string): string | null {
+  // O download é uma imagem por vez (`docker pull <ref>`), com progresso por camada.
+  if (line.startsWith("pull ")) return "image pull";
   if (!line.startsWith("compose ")) return null;
+  if (line.includes(" config --images")) return null;
   if (line.includes(" pull")) return "compose pull";
   if (line.includes(" run --rm") && line.includes("quibt-migrate")) return "compose run migrate";
   if (line.includes(" up ") && line.includes(" postgres")) return "compose up postgres";
@@ -192,6 +233,8 @@ async function runSmokeInstall(
     clock,
     platform: "linux",
     docker: { command: dockerPath, prefixArgs: [] },
+    // A suíte não pode depender do disco livre de quem a roda.
+    statfs: async () => ({ bsize: 4096, bavail: 25_000_000 }),
     onEvent: (event) => events.push(event),
   });
 
@@ -286,7 +329,12 @@ export async function runInstallerSmokeSanitizedFailure(): Promise<InstallerSmok
       first: first.result,
       second: first.result,
       failedStep: failedEvent?.step,
-      failureMessage: failedEvent?.message ?? first.result.error,
+      // A frase do evento é para gente; o stderr cru (já sem segredos) vai em `detail`.
+      failureMessage: failedEvent
+        ? [failedEvent.message, (failedEvent.detail as { stderr?: string } | undefined)?.stderr]
+            .filter(Boolean)
+            .join("\n")
+        : first.result.error,
     };
   } finally {
     rmSync(dataDir, { recursive: true, force: true });

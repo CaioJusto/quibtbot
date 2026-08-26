@@ -48,24 +48,28 @@ export function linuxDockerInstallPlan(
   return null;
 }
 
+// Estas frases vão direto para a tela de quem instala. Dizem o que fazer, em
+// português; o motivo técnico fica nos detalhes.
 export function dockerDesktopMessage(platform: NodeJS.Platform): string {
   if (platform === "darwin") {
-    return "Install Docker Desktop for Mac and keep it running: https://docs.docker.com/desktop/setup/install/mac-install/";
+    return "O Docker Desktop não está aberto. Abra o Docker Desktop (a baleia) e tente de novo. Se ele não estiver instalado, baixe em https://docs.docker.com/desktop/setup/install/mac-install/";
   }
   if (platform === "win32") {
-    return "Install Docker Desktop for Windows and keep it running: https://docs.docker.com/desktop/setup/install/windows-install/";
+    return "O Docker Desktop não está aberto. Abra o Docker Desktop (a baleia) e tente de novo. Se ele não estiver instalado, baixe em https://docs.docker.com/desktop/setup/install/windows-install/";
   }
-  return "Docker is not available.";
+  return "O Docker não está disponível neste computador.";
 }
 
 export function linuxManualDockerMessage(os: LinuxOsInfo | null): string {
-  const distro = os?.id ?? "your distribution";
-  return `Install Docker Engine for ${distro} using your package manager, enable the docker service, and ensure your user can run 'docker info'. Automatic install was not attempted.`;
+  const distro = os?.id ?? "a sua distribuição";
+  return `Instale o Docker Engine para ${distro} pelo gerenciador de pacotes, ative o serviço docker e confira que o seu usuário consegue rodar 'docker info'. A instalação automática não foi tentada.`;
 }
 
 export function dockerSudoOnlyMessage(): string {
-  return "Docker is only available through sudo on this machine, but passwordless sudo is not configured. Configure passwordless sudo for docker or add your user to the docker group.";
+  return "O Docker só responde com sudo nesta máquina, e o sudo sem senha não está configurado. Configure o sudo sem senha para o docker ou adicione o seu usuário ao grupo docker.";
 }
+
+export { dockerNonInteractiveMessage } from "./macos-docker.js";
 
 async function hasPasswordlessSudo(run: ProcessRunner): Promise<boolean> {
   if (process.getuid?.() === 0) return true;
@@ -73,15 +77,25 @@ async function hasPasswordlessSudo(run: ProcessRunner): Promise<boolean> {
   return probe.code === 0;
 }
 
+/**
+ * Quanto o instalador pode fazer pelo Docker Desktop no Mac: instalar (o install
+ * comum), só abrir um que já está lá ("start-only", usado ao religar um stack já
+ * instalado: nunca baixa nada nem pede a senha) ou nada.
+ */
+export type DesktopInstallPolicy = boolean | "start-only";
+
+/** Por que falhou, quando dá para saber: o app volta para o modo instalação. */
+export type DockerFailureReason = "desktop-missing";
+
 export type EnsureDockerResult =
   | { ok: true; invocation: DockerInvocation }
-  | { ok: false; message: string };
+  | { ok: false; message: string; reason?: DockerFailureReason };
 
 export function composeMissingMessage(platform: NodeJS.Platform): string {
   if (platform === "darwin" || platform === "win32") {
-    return "Docker is running, but 'docker compose' is not available. Update Docker Desktop (Compose ships with it) and try again.";
+    return "O Docker está no ar, mas o 'docker compose' não está disponível. Atualize o Docker Desktop (o Compose vem junto) e tente de novo.";
   }
-  return "Docker is running, but the Compose plugin is missing: 'docker compose version' failed. Install it (Ubuntu/Debian: apt-get install docker-compose-v2 or docker-compose-plugin; Fedora/RHEL: dnf install docker-compose-plugin) and run the installer again.";
+  return "O Docker está no ar, mas falta o plugin do Compose ('docker compose version' falhou). Instale (Ubuntu/Debian: apt-get install docker-compose-v2 ou docker-compose-plugin; Fedora/RHEL: dnf install docker-compose-plugin) e rode o instalador de novo.";
 }
 
 /**
@@ -133,37 +147,43 @@ async function ensureCompose(
   return { ok: false, message: composeMissingMessage(platform) };
 }
 
-export async function ensureDocker(deps: {
+export interface EnsureDockerDeps {
   run: ProcessRunner;
   platform?: NodeJS.Platform;
   arch?: string;
   username?: string;
   clock?: Pick<Clock, "sleep">;
   onProgress?: (message: string) => void;
-  allowDesktopInstall?: boolean;
-}): Promise<EnsureDockerResult> {
+  allowDesktopInstall?: DesktopInstallPolicy;
+  /**
+   * Ninguém na frente da tela: abrir um Docker Desktop já instalado ainda vale, mas
+   * baixar e instalar (que pede a senha do Mac num prompt) não.
+   */
+  nonInteractive?: boolean;
+}
+
+export async function ensureDocker(deps: EnsureDockerDeps): Promise<EnsureDockerResult> {
   const engine = await ensureDockerEngine(deps);
   if (!engine.ok) return engine;
   return ensureCompose(deps, engine.invocation);
 }
 
-async function ensureDockerEngine(deps: {
-  run: ProcessRunner;
-  platform?: NodeJS.Platform;
-  arch?: string;
-  username?: string;
-  clock?: Pick<Clock, "sleep">;
-  onProgress?: (message: string) => void;
-  allowDesktopInstall?: boolean;
-}): Promise<EnsureDockerResult> {
+async function ensureDockerEngine(deps: EnsureDockerDeps): Promise<EnsureDockerResult> {
   const platform = deps.platform ?? process.platform;
   const resolved = await resolveDockerInvocation(deps.run, { platform });
   if (resolved) return { ok: true, invocation: resolved };
 
   if (platform === "darwin") {
-    return deps.allowDesktopInstall
-      ? installDockerDesktopOnMac(deps)
-      : { ok: false, message: dockerDesktopMessage(platform) };
+    if (!deps.allowDesktopInstall) return { ok: false, message: dockerDesktopMessage(platform) };
+    const startOnly = deps.allowDesktopInstall === "start-only";
+    return installDockerDesktopOnMac({
+      run: deps.run,
+      arch: deps.arch,
+      username: deps.username,
+      clock: deps.clock,
+      onProgress: deps.onProgress,
+      nonInteractive: deps.nonInteractive || startOnly,
+    });
   }
 
   if (platform === "win32") {

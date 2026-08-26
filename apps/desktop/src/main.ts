@@ -19,6 +19,8 @@ import {
   createProcessRunner,
   finalizePairingInstall,
   type InstallerEvent,
+  inspectInstallState,
+  isInstallStateComplete,
   nextInstallStep,
   runInstall,
   runPair,
@@ -35,6 +37,7 @@ import {
 } from "./initial-page.js";
 import { InstallEmitContextRegistry } from "./install-emit-context.js";
 import { InstallConcurrencyGate } from "./install-gate.js";
+import { withDesktopRetryHint } from "./install-messages.js";
 import { lanApiUrl } from "./lan.js";
 import {
   claimOwnerEnrollment,
@@ -88,6 +91,8 @@ interface StackStartResult {
   log?: string;
   url?: string;
   warning?: string;
+  /** Religar não achou o Docker: a tela volta ao modo instalação, com botão e termos. */
+  needsInstall?: boolean;
   pairing?: {
     url: string;
     code: string;
@@ -156,6 +161,8 @@ let requestedUrl: string | null = null;
 let activeNavigationId = 0;
 let intentionalNavigationInFlight = false;
 let startupRecoveryMessage: string | null = null;
+/** O stack já instalado está só desligado: a tela de setup religa sozinha ao abrir. */
+let autoStartPending = false;
 let pendingOwnerEnrollment: PendingOwnerEnrollment | null = null;
 let pendingLocalOwnerInvite: { apiBase: string; code: string; expiresAt: number } | null = null;
 let ownerEnrollmentPreparation: Promise<void> | null = null;
@@ -377,6 +384,12 @@ function effectiveWebUrl(userData: string): string {
 function localApiBase(publicUrl: string): string | null {
   const readyUrl = localApiReadyUrl(publicUrl);
   return readyUrl?.replace(/\/ready$/, "") ?? null;
+}
+
+/** O install-state.json diz "completo": o Quibt já mora neste computador. */
+function installedLocally(userData: string): boolean {
+  const inspected = inspectInstallState(userData);
+  return inspected.ok && inspected.state !== null && isInstallStateComplete(inspected.state);
 }
 
 function rememberLocalOwnerInvite(
@@ -768,12 +781,17 @@ async function openInitialPage(win: BrowserWindow) {
   const userData = userDataPath();
   bootstrapTrustedOrigins(userData);
   const target = effectiveWebUrl(userData);
-  const plan = await planInitialNavigation(target, probeUrl, isLocalWebUrl);
+  const plan = await planInitialNavigation(target, probeUrl, isLocalWebUrl, () =>
+    installedLocally(userData),
+  );
 
   if (plan.action === "setup") {
     if (plan.clearRemote) clearRemoteUrl(userData);
     trustedPolicy.setRemote(null);
-    startupRecoveryMessage = plan.message;
+    // Instalado e desligado não é "não responde": a tela de setup religa sozinha e
+    // mostra "Ligando o Quibt Bot…" em vez do aviso de stack indisponível.
+    autoStartPending = plan.autoStart === true;
+    startupRecoveryMessage = autoStartPending ? null : plan.message;
     if (!win.isDestroyed() && existsSync(OFFLINE_PAGE)) {
       await navigateToSetup(win);
     }
@@ -1001,17 +1019,21 @@ async function runLocalInstall(
       },
     });
 
-    const log = logs.join("\n");
     if (!result.ok) {
-      const failedStep = nextInstallStep(result.state);
+      // A frase do orquestrador já diz o que fazer; o stderr cru fica nos detalhes.
+      const failedStep = result.alreadyInstalled ? null : nextInstallStep(result.state);
+      const reason = withDesktopRetryHint(
+        result.error ?? "A instalação falhou. Veja os detalhes técnicos abaixo.",
+      );
+      if (result.errorDetail) logs.push(`[detalhes técnicos]\n${result.errorDetail}`);
       return {
         ok: false,
-        message: failedStep
-          ? `${installEventLabel(failedStep)} falhou. Veja os detalhes técnicos abaixo.`
-          : "A instalação falhou. Veja os detalhes técnicos abaixo.",
-        log,
+        message: failedStep ? `${installEventLabel(failedStep)} falhou: ${reason}` : reason,
+        log: logs.join("\n"),
+        needsInstall: result.dockerMissing === true,
       };
     }
+    const log = logs.join("\n");
 
     if (result.pairing) {
       const apiBase = localApiBase(publicUrl);
@@ -1028,7 +1050,9 @@ async function runLocalInstall(
           ok: true,
           message: result.pairing
             ? "Instalação concluída. Use o código abaixo para parear o celular."
-            : "Stack no ar.",
+            : result.alreadyInstalled
+              ? `Quibt Bot no ar em ${result.url ?? webOrigin}.`
+              : "Stack no ar.",
           log,
           pairing: result.pairing
             ? {
@@ -1044,7 +1068,10 @@ async function runLocalInstall(
     }
     return {
       ok: false,
-      message: "O stack subiu, mas a API /ready ou a UI em :5173 ainda não respondem.",
+      // "Subiu" só quando um compose up de fato rodou nesta chamada.
+      message: result.servicesStarted
+        ? "O stack subiu, mas a API /ready ou a UI em :5173 ainda não respondem. Espere um minuto e tente de novo."
+        : "A instalação consta como concluída, mas a API /ready ou a UI em :5173 não respondem. Tente de novo; se continuar, veja os detalhes técnicos.",
       log,
     };
   } finally {
@@ -1070,6 +1097,13 @@ if (gotLock) {
       const message = startupRecoveryMessage;
       startupRecoveryMessage = null;
       return message;
+    });
+    ipcMain.handle("desktop.autoStartPending", (event) => {
+      // Lido uma vez pela tela de setup: religa o stack instalado sem clique.
+      assertExactSetupRenderer(event);
+      const pending = autoStartPending;
+      autoStartPending = false;
+      return pending;
     });
     ipcMain.handle("desktop.reloadApp", async (event) => {
       assertTrustedOrOfflineRenderer(event);

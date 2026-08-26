@@ -7,12 +7,20 @@ import {
   INSTALL_RELEASE,
   postgresUpInvocation,
   requiredQuibtImages,
+  stackUpInvocation,
 } from "./compose.js";
 import { parseComposePsOutput } from "./compose-ps.js";
 import type { DockerInvocation } from "./docker-invocation.js";
 import { resolveDockerInvocation, runDockerCommand } from "./docker-invocation.js";
-import { ensureDocker } from "./docker-requirements.js";
+import { type DesktopInstallPolicy, ensureDocker } from "./docker-requirements.js";
 import { ensureInstallEnvironment, parseEnvFile } from "./environment.js";
+import {
+  DOCKER_DESKTOP_GONE_MESSAGE,
+  explainDockerFailure,
+  explainInstallLock,
+  explainUpdateRequired,
+} from "./failure-messages.js";
+import { missingImagesLocally, type PullProgress, type StatfsLike } from "./image-pull.js";
 import { acquireInstallLock, releaseInstallLock } from "./install-lock.js";
 import { migrateInvocation, migrationFailureMessage } from "./migrate.js";
 import {
@@ -32,12 +40,14 @@ import {
   type PublicAccessDecision,
   type PublicAccessInput,
 } from "./public-access.js";
+import { pullComposeImages } from "./pull-step.js";
 import { redactInstallerText } from "./redact.js";
 import { type InstallState, type InstallStep, nextInstallStep } from "./state.js";
 import {
   completeInstallStep,
   initialInstallState,
   inspectInstallState,
+  isInstallStateComplete,
   loadInstallState,
   saveInstallState,
 } from "./state-persist.js";
@@ -49,21 +59,33 @@ export interface InstallerEvent {
   status: InstallerEventStatus;
   message: string;
   detail?: Record<string, unknown>;
+  /** Download de imagem em andamento: quem mostra uma barra lê daqui. */
+  progress?: PullProgress;
 }
+
+export type { PullProgress } from "./image-pull.js";
 
 export interface ProcessRunResult {
   code: number;
   stdout: string;
   stderr: string;
   stdoutBytes?: Buffer;
+  /** Preenchido quando o runner matou o processo por tempo (código 124). */
+  timedOut?: "absolute" | "inactivity";
+}
+
+export interface ProcessRunOptions {
+  cwd?: string;
+  /** Teto absoluto. */
+  timeoutMs?: number;
+  /** Mata o processo depois deste tempo sem NENHUMA linha nova em stdout/stderr. */
+  inactivityTimeoutMs?: number;
+  /** Recebe cada linha assim que sai, para mostrar progresso de comandos longos. */
+  onOutput?: (line: string, stream: "stdout" | "stderr") => void;
 }
 
 export interface ProcessRunner {
-  run(
-    command: string,
-    args: string[],
-    options?: { cwd?: string; timeoutMs?: number },
-  ): Promise<ProcessRunResult>;
+  run(command: string, args: string[], options?: ProcessRunOptions): Promise<ProcessRunResult>;
 }
 
 export interface Clock {
@@ -78,7 +100,20 @@ export interface InstallResult {
   pairingPending?: boolean;
   claimedInstruction?: string;
   error?: string;
+  /** O texto técnico (stderr já sem segredos) por trás de `error`. */
+  errorDetail?: string;
   exitCode?: number;
+  /** O estado já estava completo: só religou o stack, sem instalar nada. */
+  alreadyInstalled?: boolean;
+  /** Endereço em que o stack ficou no ar (o mesmo que o celular recebe). */
+  url?: string;
+  /** Um `docker compose up` rodou nesta chamada. */
+  servicesStarted?: boolean;
+  /**
+   * Religar não achou o Docker Desktop no Mac. Quem tem botão volta para o modo
+   * instalação; religar nunca baixa o Docker por conta própria.
+   */
+  dockerMissing?: boolean;
 }
 
 export interface OrchestratorDeps {
@@ -86,6 +121,13 @@ export interface OrchestratorDeps {
   publicUrl: string;
   /** `install --local`: fica em loopback mesmo com IP público e 80/443 livres. */
   forceLocal?: boolean;
+  /**
+   * Sem ninguém na frente da tela: nada de pedir a senha do Mac para instalar o
+   * Docker Desktop — falha com uma frase clara em vez de abrir um prompt.
+   */
+  nonInteractive?: boolean;
+  /** Só os testes trocam: mede o espaço livre antes do download. */
+  statfs?: StatfsLike;
   /**
    * Liga a descoberta do endereço público. O CLI passa `{}` (rede de verdade); os
    * testes injetam `fetch`/`checkPort` falsos; quem omite fica em loopback sem
@@ -163,41 +205,32 @@ function emitEvent(
   });
 }
 
+/** Comandos curtos (up, migrate, exec): cinco minutos bastam. */
+const SHORT_DOCKER_TIMEOUT_MS = 300_000;
+/**
+ * `up --wait` espera a API ficar saudável, e o healthcheck dela dá 180 s de
+ * start_period: num Mac acordando do zero cinco minutos ficavam justos.
+ */
+const STACK_UP_TIMEOUT_MS = 600_000;
+
 async function runDocker(
   deps: Pick<OrchestratorDeps, "run" | "composeFile">,
   docker: DockerInvocation,
   args: string[],
+  timeoutMs = SHORT_DOCKER_TIMEOUT_MS,
 ): Promise<ProcessRunResult> {
   return runDockerCommand(deps.run, docker, args, {
     cwd: path.dirname(deps.composeFile),
-    timeoutMs: 300_000,
+    timeoutMs,
   });
-}
-
-async function runComposeStep(
-  deps: Pick<OrchestratorDeps, "run" | "composeFile" | "dataDir" | "composeMode">,
-  docker: DockerInvocation,
-  step: "pull" | "up",
-): Promise<ProcessRunResult> {
-  const envFile = envFilePath(deps.dataDir);
-  const args = composeInvocation(deps.composeMode, deps.composeFile, envFile, step);
-  return runDocker(deps, docker, args);
 }
 
 async function packagedImagesAvailableLocally(
   deps: Pick<OrchestratorDeps, "run">,
   docker: DockerInvocation,
 ): Promise<boolean> {
-  for (const reference of requiredQuibtImages()) {
-    const inspected = await runDockerCommand(
-      deps.run,
-      docker,
-      ["image", "inspect", "-f", "{{.Id}}", reference],
-      { timeoutMs: 30_000 },
-    );
-    if (inspected.code !== 0 || !inspected.stdout.trim()) return false;
-  }
-  return true;
+  const missing = await missingImagesLocally(deps.run, docker, requiredQuibtImages());
+  return missing.length === 0;
 }
 
 async function runDatabaseMigrate(
@@ -284,29 +317,179 @@ export {
   probeDeploymentNeedsFirstOwner,
 } from "./orchestrator-helpers.js";
 
+/**
+ * `message` é a frase para quem está na frente da tela; `detail` é o stderr cru (já
+ * sem segredos), que vai para os detalhes técnicos e nunca para a linha de status.
+ */
 function fail(
   emit: (event: InstallerEvent) => void,
   step: InstallStep,
   message: string,
   state: InstallState,
-  exitCode = 1,
+  options: {
+    exitCode?: number;
+    detail?: string;
+    servicesStarted?: boolean;
+    dockerMissing?: boolean;
+  } = {},
 ): InstallResult {
-  emit({ step, status: "failed", message });
-  return { ok: false, state, error: message, exitCode };
+  const detail = options.detail?.trim() || undefined;
+  emit({ step, status: "failed", message, detail: detail ? { stderr: detail } : undefined });
+  return {
+    ok: false,
+    state,
+    error: message,
+    errorDetail: detail,
+    exitCode: options.exitCode ?? 1,
+    servicesStarted: options.servicesStarted,
+    dockerMissing: options.dockerMissing,
+  };
 }
 
 function ensureDockerForStep(
-  deps: Pick<OrchestratorDeps, "run" | "platform" | "clock">,
+  deps: Pick<OrchestratorDeps, "run" | "platform" | "clock" | "nonInteractive">,
   step: InstallStep,
   emit: (event: InstallerEvent) => void,
+  options: { allowDesktopInstall?: DesktopInstallPolicy } = {},
 ) {
   return ensureDocker({
     run: deps.run,
     platform: deps.platform,
     clock: deps.clock,
-    allowDesktopInstall: true,
+    allowDesktopInstall: options.allowDesktopInstall ?? true,
+    nonInteractive: deps.nonInteractive,
     onProgress: (message) => emit({ step, status: "running", message }),
   });
+}
+
+/**
+ * Uma falha de `compose up` traduzida; o stderr cru vai só nos detalhes. A fase entra
+ * junto: "denied" aqui é a pasta de dados fora do File sharing, não o ghcr.io.
+ */
+function composeFailure(
+  result: ProcessRunResult,
+  fallback: string,
+  dataDir: string,
+): { message: string; detail: string } {
+  const detail = `${result.stderr}\n${result.stdout}`.trim();
+  return {
+    message: explainDockerFailure(detail, { phase: "up", dataDir }) ?? fallback,
+    detail,
+  };
+}
+
+/** O passo `images` do install: a mesma função que o `update` e a religada usam. */
+async function pullImages(
+  deps: OrchestratorDeps,
+  docker: DockerInvocation,
+  envValues: Record<string, string>,
+  emit: (event: InstallerEvent) => void,
+  step: InstallStep,
+): Promise<{ ok: true } | { ok: false; message: string; detail: string }> {
+  return pullComposeImages({
+    run: deps.run,
+    docker,
+    clock: deps.clock,
+    dataDir: deps.dataDir,
+    composeFile: deps.composeFile,
+    envFile: envFilePath(deps.dataDir),
+    composeMode: deps.composeMode,
+    publicAccess: Boolean(envValues[PUBLIC_HOST_ENV]),
+    statfs: deps.statfs,
+    onProgress: (progress, message) => emit({ step, status: "running", message, progress }),
+    onNotice: (message) => emit({ step, status: "running", message }),
+  });
+}
+
+/**
+ * Estado completo = o Quibt já foi instalado aqui; o que falta é ligar. Depois de um
+ * reboot os containers ficam parados e o app abria a tela de instalação como se
+ * nada existisse. Aqui: confere o Docker (no Mac, abre o Docker Desktop e espera),
+ * `compose up --wait`, espera a API e devolve o endereço.
+ */
+async function startInstalledStack(
+  deps: OrchestratorDeps,
+  state: InstallState,
+  envValues: Record<string, string>,
+  secrets: string[],
+  emit: (event: InstallerEvent) => void,
+  dockerInv: DockerInvocation | undefined,
+): Promise<InstallResult> {
+  emit({ step: "requirements", status: "running", message: "Conferindo o Docker…" });
+  let docker = dockerInv;
+  if (!docker) {
+    // "start-only": abrir um Docker Desktop já instalado sim; baixar o Docker e pedir a
+    // senha do Mac, nunca. Este caminho roda sozinho quando o app abre.
+    const ensured = await ensureDockerForStep(deps, "requirements", emit, {
+      allowDesktopInstall: "start-only",
+    });
+    if (!ensured.ok) {
+      const gone = ensured.reason === "desktop-missing";
+      return fail(
+        emit,
+        "requirements",
+        gone ? DOCKER_DESKTOP_GONE_MESSAGE : ensured.message,
+        state,
+        {
+          dockerMissing: gone,
+        },
+      );
+    }
+    docker = ensured.invocation;
+  }
+  emit({ step: "requirements", status: "succeeded", message: "Docker no ar" });
+
+  const envFile = envFilePath(deps.dataDir);
+  // As imagens somem sozinhas (um "Clean / Purge data" no Docker Desktop, um
+  // `docker system prune -a`): sem isto o `up --wait` baixava 1,7 GB em silêncio, sob um
+  // teto de dez minutos, atrás de uma tela que promete "cerca de um minuto".
+  if (deps.composeMode === "packaged" && !(await packagedImagesAvailableLocally(deps, docker))) {
+    emit({ step: "images", status: "running", message: "Conferindo as imagens do Quibt Bot…" });
+    const pulled = await pullImages(deps, docker, envValues, emit, "images");
+    if (!pulled.ok) {
+      return fail(emit, "images", pulled.message, state, {
+        detail: redactInstallerText(pulled.detail, secrets),
+      });
+    }
+    emit({ step: "images", status: "succeeded", message: "Imagens prontas" });
+  }
+
+  emit({ step: "services", status: "running", message: "Ligando o Quibt Bot…" });
+  const up = await runDocker(
+    deps,
+    docker,
+    stackUpInvocation(deps.composeMode, deps.composeFile, envFile, {
+      publicAccess: Boolean(envValues[PUBLIC_HOST_ENV]),
+    }),
+    STACK_UP_TIMEOUT_MS,
+  );
+  if (up.code !== 0) {
+    const failure = composeFailure(
+      up,
+      "Não consegui ligar os serviços do Quibt Bot. Veja os detalhes técnicos e tente de novo.",
+      deps.dataDir,
+    );
+    return fail(emit, "services", failure.message, state, {
+      detail: redactInstallerText(failure.detail, secrets),
+    });
+  }
+  emit({ step: "services", status: "succeeded", message: "Serviços no ar" });
+
+  emit({ step: "health", status: "running", message: "Esperando a API responder…" });
+  const readyUrl = apiReadyUrl(envValues, deps.publicUrl);
+  const healthy = await waitForReady(readyUrl, deps.fetch, deps.clock);
+  if (!healthy) {
+    return fail(
+      emit,
+      "health",
+      `Os serviços subiram, mas a API ainda não respondeu em ${readyUrl}. Espere um minuto e tente de novo.`,
+      state,
+      { servicesStarted: true },
+    );
+  }
+  const url = reachableUrl(envValues, deps.publicUrl);
+  emit({ step: "health", status: "succeeded", message: `No ar em ${url}` });
+  return { ok: true, state, alreadyInstalled: true, url, servicesStarted: true };
 }
 
 function runningStepMessage(step: InstallStep): string {
@@ -353,10 +536,19 @@ export async function finalizePairingInstall(
 export async function runInstall(deps: OrchestratorDeps): Promise<InstallResult> {
   const lock = acquireInstallLock(deps.dataDir, process.pid, deps.clock.now());
   if (!lock.ok) {
+    // Antes de qualquer segredo existir em memória: pode emitir direto.
+    const message = explainInstallLock(lock.message);
+    deps.onEvent?.({
+      step: "requirements",
+      status: "failed",
+      message,
+      detail: { lock: lock.message },
+    });
     return {
       ok: false,
       state: initialInstallState(INSTALL_RELEASE, deps.clock.now()),
-      error: lock.message,
+      error: message,
+      errorDetail: lock.message,
       exitCode: 1,
     };
   }
@@ -365,15 +557,24 @@ export async function runInstall(deps: OrchestratorDeps): Promise<InstallResult>
   const secrets: string[] = [];
   let emit: (event: InstallerEvent) => void = () => undefined;
   let dockerInv = deps.docker;
+  let servicesStarted = false;
 
   try {
     const inspected = inspectInstallState(deps.dataDir);
     if (!inspected.ok) {
       if (inspected.reason === "update_required") {
+        const message = explainUpdateRequired(inspected.release, INSTALL_RELEASE);
+        deps.onEvent?.({
+          step: "requirements",
+          status: "failed",
+          message,
+          detail: { installedRelease: inspected.release, installerRelease: INSTALL_RELEASE },
+        });
         return {
           ok: false,
           state: initialInstallState(INSTALL_RELEASE, deps.clock.now()),
-          error: inspected.message,
+          error: message,
+          errorDetail: inspected.message,
           exitCode: 2,
         };
       }
@@ -385,6 +586,11 @@ export async function runInstall(deps: OrchestratorDeps): Promise<InstallResult>
     let access: PublicAccessDecision | undefined;
     secrets.push(...collectSecrets(envValues));
     emit = (event: InstallerEvent) => emitEvent(deps.onEvent, event, secrets);
+
+    if (isInstallStateComplete(state)) {
+      return await startInstalledStack(deps, state, envValues, secrets, emit, dockerInv);
+    }
+
     while (true) {
       const step = nextInstallStep(state);
       if (!step) break;
@@ -443,17 +649,14 @@ export async function runInstall(deps: OrchestratorDeps): Promise<InstallResult>
           emit({
             step,
             status: "running",
-            message: "Using verified images already available on this computer",
+            message: "As imagens verificadas já estão neste computador; nada para baixar.",
           });
         } else {
-          const pull = await runComposeStep(deps, dockerInv, "pull");
-          if (pull.code !== 0) {
-            return fail(
-              emit,
-              step,
-              redactInstallerText(pull.stderr || pull.stdout || "image pull failed", secrets),
-              state,
-            );
+          const pulled = await pullImages(deps, dockerInv, envValues, emit, step);
+          if (!pulled.ok) {
+            return fail(emit, step, pulled.message, state, {
+              detail: redactInstallerText(pulled.detail, secrets),
+            });
           }
         }
       }
@@ -469,14 +672,14 @@ export async function runInstall(deps: OrchestratorDeps): Promise<InstallResult>
           deps.composeMode === "packaged"
             ? postgresUpInvocation(deps.composeMode, deps.composeFile, envFile)
             : composeInvocation(deps.composeMode, deps.composeFile, envFile, "up");
-        const up = await runDocker(deps, dockerInv, upArgs);
+        const up = await runDocker(deps, dockerInv, upArgs, STACK_UP_TIMEOUT_MS);
+        servicesStarted = true;
         if (up.code !== 0) {
-          return fail(
-            emit,
-            step,
-            redactInstallerText(up.stderr || up.stdout || "services failed", secrets),
-            state,
-          );
+          const failure = composeFailure(up, "Os serviços do Quibt Bot não subiram.", deps.dataDir);
+          return fail(emit, step, failure.message, state, {
+            detail: redactInstallerText(failure.detail, secrets),
+            servicesStarted,
+          });
         }
       }
 
@@ -494,6 +697,7 @@ export async function runInstall(deps: OrchestratorDeps): Promise<InstallResult>
             step,
             redactInstallerText(migrationFailureMessage(migrate.stderr || migrate.stdout), secrets),
             state,
+            { servicesStarted },
           );
         }
         if (deps.composeMode === "packaged") {
@@ -501,16 +705,21 @@ export async function runInstall(deps: OrchestratorDeps): Promise<InstallResult>
             deps,
             dockerInv,
             appServicesUpInvocation(deps.composeMode, deps.composeFile, envFile, {
-              publicAccess: access?.mode === "public",
+              publicAccess: access?.mode === "public" || Boolean(envValues[PUBLIC_HOST_ENV]),
             }),
+            STACK_UP_TIMEOUT_MS,
           );
+          servicesStarted = true;
           if (appsUp.code !== 0) {
-            return fail(
-              emit,
-              step,
-              redactInstallerText(appsUp.stderr || appsUp.stdout || "app services failed", secrets),
-              state,
+            const failure = composeFailure(
+              appsUp,
+              "Os serviços do Quibt Bot não subiram.",
+              deps.dataDir,
             );
+            return fail(emit, step, failure.message, state, {
+              detail: redactInstallerText(failure.detail, secrets),
+              servicesStarted,
+            });
           }
         }
       }
@@ -518,7 +727,15 @@ export async function runInstall(deps: OrchestratorDeps): Promise<InstallResult>
       if (step === "health") {
         const readyUrl = apiReadyUrl(envValues, deps.publicUrl);
         const healthy = await waitForReady(readyUrl, deps.fetch, deps.clock);
-        if (!healthy) return fail(emit, step, `API not ready at ${readyUrl}`, state);
+        if (!healthy) {
+          return fail(
+            emit,
+            step,
+            `A API não respondeu em ${readyUrl}. Espere um minuto e tente de novo.`,
+            state,
+            { servicesStarted },
+          );
+        }
       }
 
       if (step === "pairing") {
@@ -531,7 +748,13 @@ export async function runInstall(deps: OrchestratorDeps): Promise<InstallResult>
           state = completeInstallStep(state, step, deps.clock.now());
           saveInstallState(deps.dataDir, state);
           emit({ step, status: "succeeded", message: "Deployment already claimed" });
-          return { ok: true, state, claimedInstruction: CLAIMED_PAIRING_INSTRUCTION };
+          return {
+            ok: true,
+            state,
+            claimedInstruction: CLAIMED_PAIRING_INSTRUCTION,
+            url: reachableUrl(envValues, deps.publicUrl),
+            servicesStarted,
+          };
         }
 
         const bootstrapSecret = envValues.BOOTSTRAP_SECRET;
@@ -562,7 +785,7 @@ export async function runInstall(deps: OrchestratorDeps): Promise<InstallResult>
         const reach = reachableUrl(envValues, deps.publicUrl);
         const pairing = buildPairingOutput(reach, reach, minted);
         emit({ step, status: "succeeded", message: "Pairing invite ready" });
-        return { ok: true, state, pairing, pairingPending: true };
+        return { ok: true, state, pairing, pairingPending: true, url: reach, servicesStarted };
       }
 
       state = completeInstallStep(state, step, deps.clock.now());
@@ -570,14 +793,14 @@ export async function runInstall(deps: OrchestratorDeps): Promise<InstallResult>
       emit({ step, status: "succeeded", message: `${step} complete` });
     }
 
-    return { ok: true, state };
+    return { ok: true, state, url: reachableUrl(envValues, deps.publicUrl), servicesStarted };
   } catch (error) {
     const message = redactInstallerText(
       error instanceof Error ? error.message : "install step failed",
       secrets,
     );
     const step = nextInstallStep(state) ?? "health";
-    return fail(emit, step, message, state);
+    return fail(emit, step, message, state, { servicesStarted });
   } finally {
     releaseInstallLock(deps.dataDir);
   }

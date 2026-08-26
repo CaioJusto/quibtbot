@@ -14,6 +14,7 @@ export function AccountSheet({
   onCheckout,
   onPortal,
   onPlans,
+  onModel,
   onMachine,
   onPhone,
   onProfile,
@@ -33,6 +34,8 @@ export function AccountSheet({
   onCheckout: (planId: string) => void;
   onPortal: () => void;
   onPlans: () => void;
+  /** Abre a Conta na aba Modelo: é onde a chave ou a assinatura entram. */
+  onModel: () => void;
   onMachine: () => void;
   onPhone: () => void;
   onProfile: () => void;
@@ -80,6 +83,7 @@ export function AccountSheet({
 
         <MenuItem icon="clock" label="Uso da semana" onClick={onLoadUsage} trailing={usageLabel} />
         <MenuItem icon="puzzle" label="Plugins" onClick={onPlugins} />
+        <MenuItem icon="bot" label="Modelo" onClick={onModel} />
         <MenuItem icon="machine" label="Máquina" onClick={onMachine} />
         <MenuItem icon="phone" label="Celular" onClick={onPhone} />
         {billing?.enabled ? (

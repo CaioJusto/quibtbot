@@ -148,4 +148,58 @@ describe("automatic Docker Desktop installation on macOS", () => {
     if (!result.ok) expect(result.message).toMatch(/não pertence à Docker/i);
     expect(commands).not.toContain("/usr/bin/osascript");
   });
+
+  it("em --non-interactive não baixa nem pede senha: falha dizendo o que instalar", async () => {
+    const commands: string[] = [];
+    const result = await ensureDocker({
+      platform: "darwin",
+      arch: "arm64",
+      username: "test-user",
+      allowDesktopInstall: true,
+      nonInteractive: true,
+      run: {
+        async run(command) {
+          commands.push(command);
+          return missing;
+        },
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.message).toContain("--non-interactive");
+      expect(result.message).toContain("Instale o Docker Desktop");
+    }
+    expect(commands).not.toContain("/usr/bin/curl");
+    expect(commands).not.toContain("/usr/bin/osascript");
+  });
+
+  it("em --non-interactive um Docker Desktop já instalado ainda é aberto e esperado", async () => {
+    const commands: string[] = [];
+    let opened = false;
+    const result = await ensureDocker({
+      platform: "darwin",
+      allowDesktopInstall: true,
+      nonInteractive: true,
+      clock: { sleep: async () => undefined },
+      run: {
+        async run(command, args) {
+          commands.push(command);
+          if (command === "/usr/bin/test") return ok;
+          if (command === "/usr/bin/open") {
+            opened = true;
+            return ok;
+          }
+          if (command === "/Applications/Docker.app/Contents/Resources/bin/docker" && opened) {
+            if (args[0] === "info" || args[0] === "compose") return ok;
+          }
+          return missing;
+        },
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(commands).toContain("/usr/bin/open");
+    expect(commands).not.toContain("/usr/bin/osascript");
+  });
 });

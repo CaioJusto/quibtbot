@@ -3,6 +3,7 @@ import { implement, ORPCError } from "@orpc/server";
 import type {
   AgentHomeStore,
   MemoryStore,
+  NotificationProvider,
   SandboxProvider,
   WakeupDriver,
 } from "@quibt/adapter-kit";
@@ -17,6 +18,9 @@ import {
   destroyBot,
   type EncryptedSecretStore,
   ensureDesktopScreenUrl,
+  failRunsWithoutWorker,
+  isComputerAlreadyStoppedError,
+  isComputerUnreachableError,
   lessonCaptureCommand,
   lessonStartCommand,
   listPiCatalog,
@@ -25,6 +29,7 @@ import {
   type PiOAuthLogins,
   parseLessonCapture,
   probeComputer,
+  probeModelCredential,
   publicComputerBootMessage,
   removePushToken,
   runSandboxCommand,
@@ -71,9 +76,11 @@ import {
   type ResolvedMachine,
   releaseControlLease,
   resolveDeploymentMachine,
+  runLooksStranded,
   scheduleControlReap,
   scopeApprovalDecision,
   titleFromMessage,
+  touchControlLease,
   UNTITLED_TASK,
 } from "@quibt/core";
 import {
@@ -114,6 +121,7 @@ import {
   normalizeWebhookBaseUrl,
   resolveWebhookPublicBase,
 } from "./webhooks.js";
+import { createWorkerPresenceReader, type WorkerPresenceReader } from "./worker-presence.js";
 
 export interface RouterDeps {
   prisma: PrismaClient;
@@ -131,6 +139,12 @@ export interface RouterDeps {
   pool?: Pool;
   /** Lets the sandbox routing drop its cached machine the moment the owner saves a new one. */
   onDeploymentSettingsChanged?: () => void;
+  /** O fetch da sondagem da chave do modelo em `models.connect`; os testes injetam um falso. */
+  probeFetch?: typeof fetch;
+  /** Quem diz se há worker vivo; sem ele, lê o batimento direto do banco. */
+  workerPresence?: WorkerPresenceReader;
+  /** O push do celular, para o run que o reconciliador reprova quando ninguém está olhando. */
+  notifications?: NotificationProvider;
   env: TrustedOriginEnv & {
     defaultProvider: string;
     defaultModel: string;
@@ -151,7 +165,19 @@ export interface RouterDeps {
     resendApiKey?: string;
     /** AGENT_RUNTIME: "pi" no produto; "scripted" só no emulador dos testes. */
     agentRuntime?: string;
+    /**
+     * SIGNUPS_ENABLED cru. Quando está definido, o .env é a única fonte do interruptor de
+     * cadastro: a tela não pode gravar um valor que a próxima subida vai desfazer.
+     */
+    signupsEnabled?: string;
   };
+}
+
+/** Quem diz se há worker: o leitor injetado pela API, ou o batimento lido direto do banco. */
+function workerPresenceFor(deps: RouterDeps): WorkerPresenceReader {
+  return (
+    deps.workerPresence ?? createWorkerPresenceReader({ prisma: deps.prisma, inProcess: false })
+  );
 }
 
 /** The one gate: every edition question in this router answers through it. */
@@ -196,6 +222,14 @@ export function controlDenialMessage(reason: ControlDenial): string {
 /** A prévia parada da tela, por bot: tirar um print custa ~1 s; quem olha em fila divide o mesmo. */
 const PREVIEW_TTL_MS = 3_000;
 const previewCache = new Map<string, { image: string; at: number }>();
+/** Lê o PNG em base64 e apaga o arquivo, guardando o código do base64. */
+const PREVIEW_ENCODE_SCRIPT = 'base64 -w0 "$1"; status=$?; rm -f -- "$1"; exit $status';
+
+/** O retrato de cada bot vai num arquivo só dele: os bots de um Docker dividem o /tmp. */
+export function previewImagePath(botId: string): string {
+  const safe = botId.replace(/[^A-Za-z0-9_-]/g, "");
+  return `/tmp/quibt-preview-${safe || "bot"}.png`;
+}
 
 export function createRouter(deps: RouterDeps) {
   const os = implement(appContract).$context<{
@@ -205,6 +239,7 @@ export function createRouter(deps: RouterDeps) {
     screenOrigin?: string;
   }>();
   const repos = createRepos(deps.prisma);
+  const workerPresence = workerPresenceFor(deps);
 
   const isolated = os.use(async ({ next }) => {
     try {
@@ -238,6 +273,7 @@ export function createRouter(deps: RouterDeps) {
         endpoint: saved?.sandboxEndpoint,
       });
       const needsFirstOwner = await deploymentNeedsFirstOwner(deps.prisma).catch(() => false);
+      const worker = await workerPresence.read();
       return {
         ok: true as const,
         version: "0.1.0",
@@ -251,6 +287,7 @@ export function createRouter(deps: RouterDeps) {
           resendApiKey: deps.env.resendApiKey,
         }),
         needsFirstOwner,
+        worker,
       };
     }),
     me: authed.me.handler(async ({ context }): Promise<Me> => {
@@ -292,6 +329,7 @@ export function createRouter(deps: RouterDeps) {
           hasCredential: Boolean(settings?.sandboxCredentialCipher),
           endpoint: settings?.sandboxEndpoint,
         }).machine,
+        worker: await workerPresence.read(),
       };
     }),
     deployment: {
@@ -356,11 +394,34 @@ export function createRouter(deps: RouterDeps) {
         }));
       }),
       connect: authed.models.connect.handler(async ({ context, input }) => {
+        // A chave é conferida no provedor antes de ser gravada: colada errada, ela
+        // passava pelo onboarding e só falhava na primeira mensagem, com "401" cru.
+        // O emulador dos testes não fala com provedor nenhum, então não há o que sondar.
+        // O que vai ao cofre é o texto limpo — e, num modelo local, a URL na forma que a
+        // sonda aprovou: gravar o que a pessoa colou com um espaço na frente fazia o run
+        // cair no 127.0.0.1 padrão em vez do endereço dela.
+        let plaintext = input.apiKey.trim();
+        let verified = false;
+        if (deps.env.agentRuntime !== "scripted") {
+          const probe = await probeModelCredential(
+            { provider: input.provider, apiKey: input.apiKey },
+            { fetchImpl: deps.probeFetch },
+          );
+          if (!probe.ok) {
+            throw new ORPCError("BAD_REQUEST", {
+              message: probe.message,
+              data: { code: "MODEL_CREDENTIAL_REJECTED", provider: input.provider },
+            });
+          }
+          verified = probe.probed;
+          if (probe.base) plaintext = probe.base;
+        }
         return persistModelCredential(deps, context.actor, {
           provider: input.provider,
-          plaintext: input.apiKey,
+          plaintext,
           label: input.label,
           modelId: input.modelId,
+          verified,
         });
       }),
       beginOAuth: authed.models.beginOAuth.handler(async ({ context, input }) => {
@@ -379,6 +440,7 @@ export function createRouter(deps: RouterDeps) {
         });
         if (result.status !== "connected") return result;
         const credential = await persistModelCredential(deps, context.actor, {
+          verified: true,
           provider: result.provider,
           plaintext: serializeModelSecret({
             kind: "oauth",
@@ -1133,7 +1195,19 @@ export function createRouter(deps: RouterDeps) {
           // banco entregava um endereço que já não existe, e o usuário via preto. Se o
           // provedor não souber responder, seguimos confiando na linha, como antes.
           const stillThere = deps.sandbox.exists
-            ? await deps.sandbox.exists(computerRefFromSession(desktop), ctx).catch(() => true)
+            ? await deps.sandbox
+                .exists(computerRefFromSession(desktop), ctx)
+                .catch((error: unknown) => {
+                  // O supervisor não atendeu (Docker fechado: nas topologias do produto
+                  // ele roda dentro do Docker). Confiar na linha aqui devolvia "ligado"
+                  // com a tela morta; o que a pessoa precisa ler é para abrir o Docker.
+                  if (isComputerUnreachableError(error)) {
+                    throw new ORPCError("INTERNAL_SERVER_ERROR", {
+                      message: publicComputerBootMessage(error),
+                    });
+                  }
+                  return true;
+                })
             : true;
           if (stillThere) {
             scheduleComputerSleep(deps.wakeup, bot.id);
@@ -1169,23 +1243,30 @@ export function createRouter(deps: RouterDeps) {
         const computer = desktop?.computer;
         const providerRef = desktop ? workspaceProviderRef(desktop) : undefined;
         if (desktop && computer && providerRef) {
-          await deps.sandbox.stop(
-            {
-              id: providerRef,
-              botId: bot.id,
-              kind: computer.kind as never,
-              providerRef,
-              display: desktop.display,
-              screenUrl: desktop.screenUrl ?? undefined,
-            },
-            {
-              operationId: "stop",
-              traceId: "stop",
-              workspaceId: context.actor.workspaceId,
-              userId: context.actor.userId,
-              signal: new AbortController().signal,
-            },
-          );
+          try {
+            await deps.sandbox.stop(
+              {
+                id: providerRef,
+                botId: bot.id,
+                kind: computer.kind as never,
+                providerRef,
+                display: desktop.display,
+                screenUrl: desktop.screenUrl ?? undefined,
+              },
+              {
+                operationId: "stop",
+                traceId: "stop",
+                workspaceId: context.actor.workspaceId,
+                userId: context.actor.userId,
+                signal: new AbortController().signal,
+              },
+            );
+          } catch (error) {
+            // O provedor já não tem o que parar (container parado depois de um reboot,
+            // bot que nunca abriu a tela): para quem apertou "Desligar", já está
+            // desligado. Antes a rota lançava aqui e o banco seguia dizendo "ligado".
+            if (!isComputerAlreadyStoppedError(error)) throw error;
+          }
         }
         await deps.prisma.desktopSession.update({
           where: { botId: bot.id },
@@ -1326,8 +1407,17 @@ export function createRouter(deps: RouterDeps) {
             message: controlDenialMessage(check.reason),
           });
         }
+        // Cada tecla é prova de que a pessoa ainda está lá: o prazo anda com o uso, em vez de
+        // vencer no meio de um formulário. Renovar falhando não pode segurar a tecla.
+        const touched = await touchControlLease({ db: deps.prisma, wakeup: deps.wakeup }, desktop, {
+          botId: bot.id,
+          userId: context.actor.userId,
+          use: "input",
+        }).catch(() => undefined);
+        // O prazo novo volta junto para a tela poder escrever "controle até HH:mm" certo.
+        const leaseExpiry = { controlLeaseExpiresAt: touched?.expiresAt.toISOString() ?? null };
         const providerRef = desktop ? workspaceProviderRef(desktop) : undefined;
-        if (!computer || !providerRef) return { ok: true as const };
+        if (!computer || !providerRef) return { ok: true as const, ...leaseExpiry };
         const mapped =
           input.kind === "key"
             ? {
@@ -1378,7 +1468,7 @@ export function createRouter(deps: RouterDeps) {
           },
         );
         scheduleComputerSleep(deps.wakeup, bot.id);
-        return { ok: true as const };
+        return { ok: true as const, ...leaseExpiry };
       }),
       /**
        * Ensinar uma tarefa. As duas pontas exigem o controle na mão de quem pede: o
@@ -1458,7 +1548,10 @@ export function createRouter(deps: RouterDeps) {
             capturedAt: new Date(cached.at).toISOString(),
           };
         }
-        const target = "/tmp/quibt-preview.png";
+        // Um arquivo por bot: no Docker os bots dividem o mesmo /tmp, e dois pollers (o
+        // painel web num bot, o celular noutro) escrevendo o mesmo nome entregavam a
+        // tela de um como retrato do outro, ou um PNG pela metade.
+        const target = previewImagePath(bot.id);
         const run = {
           operationId: "preview",
           traceId: "preview",
@@ -1475,10 +1568,11 @@ export function createRouter(deps: RouterDeps) {
           run,
         );
         if (shot.code !== 0) return { image: null, capturedAt: null };
+        // O PNG some depois de lido, dê certo ou não: o próximo retrato nunca lê um resto.
         const encoded = await runSandboxCommand(
           deps.sandbox,
           computer,
-          ["bash", "-lc", 'base64 -w0 "$1"', "quibt-preview", target],
+          ["bash", "-lc", PREVIEW_ENCODE_SCRIPT, "quibt-preview", target],
           "/home/quibt",
           run,
           6 * 1024 * 1024,
@@ -1545,6 +1639,18 @@ export function createRouter(deps: RouterDeps) {
         const desktop = bot.desktopSession;
         const computer = desktop?.computer;
         const providerRef = desktop ? workspaceProviderRef(desktop) : undefined;
+        // O app manda o heartbeat enquanto a pessoa está com o controle. Ele acorda o
+        // container sempre; o prazo do lease só anda com prova de gente — tecla ou clique
+        // desde a última renovação, ou o `atScreen` de quem está dirigindo a tela embutida.
+        // Uma aba deixada aberta batendo sozinha não segura o teclado do bot.
+        const touched = desktop
+          ? await touchControlLease({ db: deps.prisma, wakeup: deps.wakeup }, desktop, {
+              botId: bot.id,
+              userId: context.actor.userId,
+              use: "heartbeat",
+              atScreen: input.atScreen === true,
+            }).catch(() => undefined)
+          : undefined;
         if (desktop?.state === "running" && computer && providerRef) {
           await touchRunningComputer(
             { sandbox: deps.sandbox, wakeup: deps.wakeup },
@@ -1559,7 +1665,10 @@ export function createRouter(deps: RouterDeps) {
             },
           ).catch(() => undefined);
         }
-        return { ok: true as const };
+        return {
+          ok: true as const,
+          controlLeaseExpiresAt: touched?.expiresAt.toISOString() ?? null,
+        };
       }),
       grantFolder: authed.computer.grantFolder.handler(async ({ context, input }) => {
         if (!context.actor.isDeploymentOwner) throw new ORPCError("FORBIDDEN");
@@ -2482,6 +2591,8 @@ async function persistModelCredential(
     plaintext: string;
     label?: string;
     modelId?: string;
+    /** O servidor falou com o provedor e a credencial passou? A tela só diz "confirmada" se sim. */
+    verified?: boolean;
   },
 ) {
   const stored = await deps.secrets.put(input.plaintext, {
@@ -2530,7 +2641,38 @@ async function persistModelCredential(
     label: cred.label,
     hasKey: true,
     isDefault: true,
+    verified: input.verified ?? false,
   };
+}
+
+/**
+ * Um run sem worker por perto é o silêncio que esta tela mais confunde: a pessoa mandou, nada
+ * acontece, e o composer diz "trabalhando". Vale para o run parado na fila e para o run cujo
+ * worker morreu no meio do trabalho (lease vencido há tempo demais). Em vez de esperar a
+ * varredura periódica da API, o snapshot resolve na hora — o run vira `failed`, a frase entra
+ * no fio e ele deixa de contar como ativo. Um run recente nem é olhado.
+ */
+async function reconcileStrandedRun<
+  T extends {
+    id: string;
+    botId: string;
+    status: string;
+    updatedAt: Date;
+    leaseExpiresAt?: Date | null;
+  },
+>(deps: RouterDeps, run: T | null): Promise<T | null> {
+  if (!run || !runLooksStranded(run)) return run;
+  const presence = workerPresenceFor(deps);
+  const failed = await failRunsWithoutWorker(
+    {
+      prisma: deps.prisma,
+      workerSeenAt: () => presence.seenAt(),
+      apiStartedAt: presence.startedAt,
+      notifications: deps.notifications,
+    },
+    { botId: run.botId },
+  ).catch(() => [] as string[]);
+  return failed.includes(run.id) ? null : run;
 }
 
 async function snapshot(
@@ -2543,7 +2685,7 @@ async function snapshot(
   const bot = await createRepos(deps.prisma).getBot(actor, botId);
   if (!bot.thread) throw new IsolationError();
   const threadId = bot.thread.id;
-  const [conversation, conversations, events, run, last, home] = await Promise.all([
+  const [conversation, conversations, events, queued, last, home] = await Promise.all([
     activeConversationForBot(deps.prisma, botId),
     deps.prisma.conversation.findMany({
       where: { botId },
@@ -2570,6 +2712,7 @@ async function snapshot(
       data: { unread: false },
     }),
   ]);
+  const run = await reconcileStrandedRun(deps, queued);
   const projected = projectMessages(events);
   const rows = await deps.prisma.message.findMany({
     where: {
@@ -2873,7 +3016,7 @@ async function deploymentDto(prisma: PrismaClient, env: RouterDeps["env"]) {
   return {
     ownerUserId: settings?.ownerUserId ?? null,
     deploymentClaimed: Boolean(claim?.claimedAt),
-    signupsEnabled: settings?.signupsEnabled ?? true,
+    signupsEnabled: settings?.signupsEnabled ?? false,
     signupAllowlist: settings?.signupAllowlist
       ? settings.signupAllowlist.split(",").filter(Boolean)
       : [],
@@ -2965,6 +3108,15 @@ async function saveDeploymentMachine(
     webhookPublicUrl?: string | null;
   },
 ) {
+  // Uma fonte só para o cadastro: com SIGNUPS_ENABLED no .env, quem manda é o .env (a API
+  // alinha o interruptor salvo a cada subida). Aceitar a gravação aqui seria prometer uma
+  // troca que o próximo boot desfaz sem avisar — melhor recusar dizendo onde se muda.
+  if (input.signupsEnabled !== undefined && deps.env.signupsEnabled !== undefined) {
+    throw new ORPCError("BAD_REQUEST", {
+      message:
+        "Este deploy decide o cadastro pelo .env: defina SIGNUPS_ENABLED lá e reinicie o Quibt Bot.",
+    });
+  }
   if (input.sandboxProvider) {
     if (!editionGateFor(deps.env).canChooseMachine) {
       throw new ORPCError("FORBIDDEN", {
@@ -3051,7 +3203,7 @@ async function saveDeploymentMachine(
     create: {
       id: "default",
       ownerUserId,
-      signupsEnabled: input.signupsEnabled ?? true,
+      signupsEnabled: input.signupsEnabled ?? false,
       signupAllowlist: (input.signupAllowlist ?? []).join(","),
       sandboxProvider: input.sandboxProvider,
       sandboxEndpoint: input.sandboxEndpoint,

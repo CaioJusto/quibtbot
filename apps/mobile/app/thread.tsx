@@ -1,5 +1,5 @@
 import { ChatMarkdown } from "@quibt/chat-ui/native";
-import { startLiveFeed, threadEventNeedsSnapshotRefresh } from "@quibt/core";
+import { type LiveFeedStatus, startLiveFeed, threadEventNeedsSnapshotRefresh } from "@quibt/core";
 import { DEFAULT_MARK_COLOR, multiAgentBursts } from "@quibt/ui-tokens";
 import * as DocumentPicker from "expo-document-picker";
 import { Image } from "expo-image";
@@ -36,6 +36,7 @@ import {
   type MobileMessage,
   mergeThreadSnapshot,
   rpc,
+  type StreamEnd,
   sendToGroup,
   subscribeGroupThread,
   subscribeThread,
@@ -73,6 +74,13 @@ import {
 } from "../lib/design-system";
 import { FileViewer, type ViewerFile } from "../lib/file-viewer";
 import {
+  connectionChipLabel,
+  createSafetyPoller,
+  isConnectionProblem,
+  RECONNECTING_CHIP_DELAY_MS,
+  userFacingError,
+} from "../lib/live-link";
+import {
   activeComposerToken,
   insertMention,
   insertSlash,
@@ -103,8 +111,6 @@ const EMPTY_MEMBERS: MobileGroup["members"] = [];
 const GROUP_MARK = 30;
 const GROUP_GUTTER = 34;
 const ACTIVE_RUN = ["running", "queued", "leased"];
-/** Safety net for older desktop/VPS proxies that keep an SSE request open but buffer its events. */
-const LIVE_FALLBACK_POLL_MS = 1_500;
 
 /** Pílula de 48 mais o respiro de cima e de baixo: a folga que a conversa reserva. */
 const COMPOSER_HEIGHT = 66;
@@ -182,6 +188,22 @@ export default function Thread() {
   const [skills, setSkills] = useState<Array<{ id: string; name: string }>>([]);
   const [error, setError] = useState<string | null>(null);
   const [planLimitError, setPlanLimitError] = useState(false);
+  /** Estado do fio (SSE), como o live-feed o vê: alimenta o chip "Reconectando…". */
+  const [feedStatus, setFeedStatus] = useState<LiveFeedStatus>("connecting");
+  /** Um poll que falhou por rede com o fio ainda "de pé": também é "reconectando". */
+  const [pollFailed, setPollFailed] = useState(false);
+  /** Se o bot está num run, para o poll de segurança decidir sem reabrir o efeito do fio. */
+  const workingRef = useRef(false);
+  /** Mesma ideia para o poll que falhou: insistir é o que apaga o chip. */
+  const pollFailedRef = useRef(false);
+  pollFailedRef.current = pollFailed;
+  /**
+   * Como o fluxo anterior terminou. Um socket que emudeceu (proxy segurando o SSE) volta
+   * em cerca de um segundo e não merece chip; uma queda de verdade avisa na hora.
+   */
+  const streamEnd = useRef<StreamEnd>("closed");
+  /** A reconexão já dura o bastante para valer o aviso na tela. */
+  const [reconnectingSettled, setReconnectingSettled] = useState(true);
   const [bots, setBots] = useState<MobileBot[]>([]);
   const [group, setGroup] = useState<MobileGroup | null>(null);
   const [computerMenu, setComputerMenu] = useState(false);
@@ -209,11 +231,15 @@ export default function Thread() {
     if (groupId) {
       const next = await getGroupThread(groupId);
       setSnap((prev) => mergeThreadSnapshot(prev, next));
+      // Qualquer volta boa apaga o chip: enviar, reagir ou parar também provam que o
+      // servidor responde, e antes só um `reload` limpava — o aviso ficava preso.
+      setPollFailed(false);
       return next;
     }
     if (!botId) return null;
     const next = await rpc<ThreadState>("threads/get", { botId });
     setSnap((prev) => mergeThreadSnapshot(prev, next));
+    setPollFailed(false);
     return next;
   }, [botId, groupId, isDemo]);
 
@@ -263,16 +289,23 @@ export default function Thread() {
       try {
         await refresh();
         setError(null);
+        setPollFailed(false);
       } catch (err) {
         if (isSessionExpiredError(err)) sessionExpired();
-        else {
-          setError(err instanceof Error ? err.message : "Não foi possível atualizar a conversa");
+        else if (isConnectionProblem(err instanceof Error ? err.message : null)) {
+          // Rede caída é o chip discreto, não o banner vermelho com "Network request failed".
+          setPollFailed(true);
+        } else {
+          setError(userFacingError(err, "Não foi possível atualizar a conversa"));
           setPlanLimitError(isPlanLimitError(err));
         }
       } finally {
         reloadInFlight = false;
       }
     };
+    // Instante do último evento que chegou pelo fio: o poll de segurança só entra em cena
+    // quando o bot trabalha e isto envelhece (proxy segurando o SSE), ou com o fio caído.
+    let lastEventAt = Date.now();
     // Suaviza o streaming: uma rajada de `thread.progress` (cada um com o texto já
     // acumulado) vira um flush a cada ~60 ms, em vez de dezenas de re-renders. Eventos
     // estruturais descarregam o progress pendente e aplicam na hora — ordem preservada.
@@ -280,6 +313,7 @@ export default function Thread() {
       setSnap((prev) => applyMobileThreadEvent(prev, event as ThreadEvent)),
     );
     const onEvent = (event: { type: string }) => {
+      lastEventAt = Date.now();
       if (
         event.type === "thread.progress" ||
         event.type === "thread.message.created" ||
@@ -296,15 +330,38 @@ export default function Thread() {
     };
     // Streams events over SSE; if the socket dies (network change, backgrounding, server
     // restart) it polls until it can reconnect from the latest cursor.
+    setFeedStatus("connecting");
     const feed = startLiveFeed({
-      connect: async (signal) => {
+      onStatus: setFeedStatus,
+      connect: async (signal, opened) => {
+        streamEnd.current = "closed";
         const next = await refresh();
         setError(null);
+        // O silêncio conta do fio recém-aberto, não de antes de o app dormir: sem isto,
+        // voltar do segundo plano no meio de um run fazia o poll buscar o retrato inteiro
+        // a cada 2 s enquanto a ferramenta rodava, justamente o tráfego que cortamos.
+        lastEventAt = Date.now();
         if (signal.aborted) return;
+        // `opened` é o que leva o estado a "connected"; sem ele o chip nunca saberia que
+        // o fio voltou. O stream avisa quando a resposta chegou com corpo.
+        const open = () => {
+          lastEventAt = Date.now();
+          opened();
+        };
         if (groupId) {
-          await subscribeGroupThread(groupId, next?.cursor ?? -1, onEvent, signal);
+          streamEnd.current = await subscribeGroupThread(
+            groupId,
+            next?.cursor ?? -1,
+            onEvent,
+            signal,
+            {
+              onOpen: open,
+            },
+          );
         } else if (botId) {
-          await subscribeThread(botId, next?.cursor ?? -1, onEvent, signal);
+          streamEnd.current = await subscribeThread(botId, next?.cursor ?? -1, onEvent, signal, {
+            onOpen: open,
+          });
         }
       },
       refresh: reload,
@@ -313,7 +370,12 @@ export default function Thread() {
           sessionExpired();
           return;
         }
-        if (err instanceof Error && !/cannot stream|failed \(\d+\)/.test(err.message)) {
+        // Fio caindo é o chip "Reconectando…"; o banner fica para o que a pessoa precisa ler.
+        if (
+          err instanceof Error &&
+          !/cannot stream|failed \(\d+\)/.test(err.message) &&
+          !isConnectionProblem(err.message)
+        ) {
           setError(err.message);
           setPlanLimitError(isPlanLimitError(err));
         }
@@ -321,11 +383,18 @@ export default function Thread() {
     });
     live = feed;
     let paused = false;
-    // SSE remains the immediate path. This small foreground-only snapshot check prevents
-    // an older nginx/VPS from looking connected while holding events in a proxy buffer.
-    const fallbackPoll = setInterval(() => {
-      if (!paused) void reload();
-    }, LIVE_FALLBACK_POLL_MS);
+    // O SSE continua sendo o caminho imediato. O poll de segurança rodava a cada 1,5 s
+    // sempre — e cada volta trocava o snapshot: o fio tremia. Agora só entra com o fio caído
+    // ou quando o bot trabalha e nada chega há mais de 8 s (proxy antigo segurando o SSE),
+    // e o snapshot entra por merge (`mergeThreadSnapshot`), sem apagar o que o fio já mostra.
+    const stopSafetyPoll = createSafetyPoller({
+      status: () => feed.status(),
+      working: () => workingRef.current,
+      lastEventAt: () => lastEventAt,
+      pollFailed: () => pollFailedRef.current,
+      paused: () => paused,
+      reload: () => void reload(),
+    });
     const appState = AppState.addEventListener("change", (state) => {
       if (state === "background" && !paused) {
         paused = true;
@@ -337,11 +406,31 @@ export default function Thread() {
     });
     return () => {
       stopped = true;
-      clearInterval(fallbackPoll);
+      stopSafetyPoll();
+      cadence.dispose();
       appState.remove();
       feed.stop();
     };
   }, [botId, groupId, isDemo, refresh]);
+
+  /**
+   * Num proxy que bufferiza o SSE o vigia derruba o socket mudo a cada ~16 s e a volta leva
+   * cerca de um segundo: o chip piscava "Reconectando…" com tudo funcionando. Uma queda de
+   * verdade (o servidor fechou, o fluxo nem abriu) continua avisando na hora.
+   */
+  useEffect(() => {
+    if (feedStatus !== "reconnecting") {
+      setReconnectingSettled(true);
+      return;
+    }
+    if (streamEnd.current !== "stalled") {
+      setReconnectingSettled(true);
+      return;
+    }
+    setReconnectingSettled(false);
+    const timer = setTimeout(() => setReconnectingSettled(true), RECONNECTING_CHIP_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [feedStatus]);
 
   const composerToken = activeComposerToken(draft, caret);
   const mentionCandidates = useMemo(
@@ -368,6 +457,10 @@ export default function Thread() {
   const working = isGroup
     ? (snap?.runs ?? []).some((run) => ACTIVE_RUN.includes(run.status))
     : Boolean(snap?.run && ACTIVE_RUN.includes(snap.run.status));
+  workingRef.current = working;
+  const connectionChip = isDemo
+    ? null
+    : connectionChipLabel({ status: feedStatus, pollFailed, reconnectingSettled });
 
   async function stopWorkingRuns() {
     if (isDemo || stopping) return;
@@ -403,7 +496,7 @@ export default function Thread() {
       await refresh().catch(() => undefined);
     } catch (err) {
       if (isSessionExpiredError(err)) router.replace("/welcome");
-      else setError(err instanceof Error ? err.message : "Não foi possível parar o agente");
+      else setError(userFacingError(err, "Não foi possível parar o agente"));
     } finally {
       setStopping(false);
     }
@@ -429,7 +522,7 @@ export default function Thread() {
         setAttachments((current) => [...current, stored]);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Não foi possível anexar");
+      setError(userFacingError(err, "Não foi possível anexar"));
     } finally {
       setAttaching(false);
     }
@@ -606,7 +699,7 @@ export default function Thread() {
           );
         }
         setDraft(text);
-        setError(err instanceof Error ? err.message : "Não foi possível enviar");
+        setError(userFacingError(err, "Não foi possível enviar"));
         setPlanLimitError(isPlanLimitError(err));
       }
       return;
@@ -650,7 +743,7 @@ export default function Thread() {
       setAttachments(pendingAttachments);
       setReplyTo(pendingReply);
       setEditMessageId(editing);
-      setError(err instanceof Error ? err.message : "Não foi possível enviar");
+      setError(userFacingError(err, "Não foi possível enviar"));
       setPlanLimitError(isPlanLimitError(err));
     }
   }
@@ -673,7 +766,7 @@ export default function Thread() {
             ? { ...current, messages: rollbackMessages(current.messages, snapshot) }
             : current,
         );
-        setError(err instanceof Error ? err.message : "Não foi possível reagir");
+        setError(userFacingError(err, "Não foi possível reagir"));
         setPlanLimitError(isPlanLimitError(err));
       }
     },
@@ -688,7 +781,7 @@ export default function Thread() {
         await rpc("threads/switchBranch", buildSwitchBranchPayload({ botId, messageId }));
         await refresh();
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Não foi possível trocar a versão");
+        setError(userFacingError(err, "Não foi possível trocar a versão"));
         setPlanLimitError(isPlanLimitError(err));
       }
     },
@@ -858,7 +951,7 @@ export default function Thread() {
         await refresh();
       } catch (err) {
         setSetupAnswers(next.slice(0, 1));
-        setError(err instanceof Error ? err.message : "Não foi possível salvar suas preferências");
+        setError(userFacingError(err, "Não foi possível salvar suas preferências"));
       } finally {
         setSetupPending(false);
       }
@@ -875,7 +968,7 @@ export default function Thread() {
         await rpc("threads/answer", { botId: answerBotId, runId, answer: value });
         await refresh();
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Não foi possível responder o bot");
+        setError(userFacingError(err, "Não foi possível responder o bot"));
         setPlanLimitError(isPlanLimitError(err));
       }
     },
@@ -1191,6 +1284,26 @@ export default function Thread() {
               </Pressable>
             ))}
           </GlassSurface>
+        ) : null}
+
+        {connectionChip && !error ? (
+          // O chip vive por cima da conversa, como o aviso de erro: entrar e sair do fluxo
+          // faria a lista pular justamente enquanto a rede oscila.
+          <View
+            accessibilityLiveRegion="polite"
+            pointerEvents="none"
+            style={[styles.linkChipRow, { top: insets.top + 74 }]}
+          >
+            <View style={styles.linkChip}>
+              <View
+                style={[
+                  styles.linkDot,
+                  { backgroundColor: feedStatus === "offline" ? COLORS.red : COLORS.orange },
+                ]}
+              />
+              <Text style={styles.linkChipText}>{connectionChip}</Text>
+            </View>
+          </View>
         ) : null}
 
         {error ? (
@@ -1908,6 +2021,20 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.card,
   },
   errorText: { color: COLORS.red, fontSize: 14 },
+  linkChipRow: { position: "absolute", left: 0, right: 0, zIndex: 24, alignItems: "center" },
+  linkChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 5,
+    paddingHorizontal: 11,
+    borderRadius: 999,
+    backgroundColor: COLORS.card,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: COLORS.separator,
+  },
+  linkDot: { width: 7, height: 7, borderRadius: 4 },
+  linkChipText: { color: COLORS.secondary, fontSize: 13, fontWeight: "600" },
   headerPing: {
     flexDirection: "row",
     alignItems: "center",

@@ -2,6 +2,7 @@ import type { BillingSnapshot } from "@quibt/contracts";
 import {
   chooseMode,
   chooseProvider,
+  connectedModelNotice,
   displayPlanName,
   displayPlanStatus,
   formatMeter,
@@ -199,7 +200,7 @@ export function AccountSettingsBody({
     setError(null);
     setNotice(null);
     try {
-      await rpc.models.connect({
+      const credential = await rpc.models.connect({
         provider,
         apiKey,
         modelId: selectedModel.id,
@@ -209,9 +210,14 @@ export function AccountSettingsBody({
       // antiga: quem troca de provedor está trocando o que roda, não colecionando chaves.
       await rpc.models.setDefault({ provider, modelId: selectedModel.id });
       setCredentials(await rpc.models.credentials().catch(() => []));
-      setNotice(`Agora os bots usam ${selectedModel.label ?? selectedModel.id}.`);
+      // "Confirmada" só quando o servidor falou mesmo com o provedor: nos que ele não
+      // sonda, a chave fica guardada e a primeira mensagem é que dirá se presta.
+      setNotice(
+        `${connectedModelNotice({ verified: credential.verified, local: tokenSource === "local" })} Agora os bots usam ${selectedModel.label ?? selectedModel.id}.`,
+      );
       setApiKey("");
     } catch (err) {
+      // Chave recusada ou sem crédito: o probe explica em português e nada foi gravado.
       setError(err instanceof Error ? err.message : "Não foi possível conectar o modelo");
     } finally {
       setPending(null);
@@ -437,11 +443,12 @@ export function AccountSettingsBody({
 
           <fieldset className="qb-account__tabs">
             <legend className="sr-only">Fonte do modelo</legend>
+            {/* Mesma ordem do onboarding: a assinatura que a pessoa já paga vem primeiro. */}
             {(
               [
+                ["subscription", "Minha assinatura"],
                 ["key", "Chave OpenRouter"],
                 ["local", "Modelo local"],
-                ["subscription", "Minha assinatura"],
               ] as Array<[TokenSource, string]>
             ).map(([mode, title]) => (
               <button
@@ -500,6 +507,20 @@ export function AccountSettingsBody({
                   className={field}
                 />
               </label>
+              {provider === "openrouter" ? (
+                <p className="qb-account__hint">
+                  Crie a chave em{" "}
+                  <a
+                    href="https://openrouter.ai/keys"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[var(--qb-accent)] underline"
+                  >
+                    openrouter.ai/keys
+                  </a>
+                  . Você paga por uso na sua conta OpenRouter.
+                </p>
+              ) : null}
               <button
                 type="button"
                 disabled={pending !== null || !apiKey.trim() || !selectedModel}

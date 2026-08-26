@@ -1,6 +1,29 @@
 import { PUBLIC_PROFILE } from "./public-access.js";
 
 export const INSTALL_RELEASE = "0.2.11";
+
+export interface DesktopSigning {
+  mac: { signed: boolean; notarized: boolean };
+  win: { signed: boolean };
+  linux: { signed: boolean };
+}
+
+/**
+ * Como os instaladores da tag `v${INSTALL_RELEASE}` foram publicados de fato. O checklist de
+ * release preenche isto a partir dos `signing-status-*.json` anexados à tag (o CI gera o
+ * arquivo; a notarização acontece só no Mac do mantenedor, que substitui o DMG e o status
+ * quando a faz). Site, README e docs escolhem a frase de download por este objeto — nunca
+ * chame um build de assinado ou notarizado sem o status da tag dizer isso.
+ *
+ * v0.2.11: o `QuibtBot.dmg` é o build do CI, `signing-status-mac.json` diz
+ * `signed: false, notarized: false`. Na v0.2.10 (e na v0.2.9) o mantenedor substituiu o DMG
+ * pelo notarizado e o status dizia `true`.
+ */
+export const DESKTOP_SIGNING: DesktopSigning = {
+  mac: { signed: false, notarized: false },
+  win: { signed: false },
+  linux: { signed: false },
+};
 export const QUIBT_IMAGE_PREFIX = "ghcr.io/quibt";
 
 export function requiredQuibtImages(release = INSTALL_RELEASE): string[] {
@@ -77,6 +100,38 @@ export function postgresUpInvocation(
   const base = composeBaseArgs(composeFile, envFile);
   if (mode === "source") return [...base, "up", "-d", "--build", "postgres", "--wait"];
   return [...base, "up", "-d", "--wait", "postgres"];
+}
+
+/**
+ * Religa um stack já instalado: todos os serviços de uma vez, esperando ficarem
+ * saudáveis. Numa instalação pública o profile entra para o Caddy voltar junto.
+ */
+export function stackUpInvocation(
+  mode: ComposeMode,
+  composeFile: string,
+  envFile: string,
+  options: { publicAccess?: boolean } = {},
+): string[] {
+  const base = options.publicAccess
+    ? [...composeBaseArgs(composeFile, envFile), "--profile", PUBLIC_PROFILE]
+    : composeBaseArgs(composeFile, envFile);
+  if (mode === "source") return [...base, "up", "-d", "--build", "--wait"];
+  return [...base, "up", "-d", "--wait"];
+}
+
+/**
+ * As imagens que o Compose vai puxar, já resolvidas (versão, digests do binário de
+ * release e o Caddy só com o profile público). É a lista que vira "imagem 2 de 4".
+ */
+export function composeImagesInvocation(
+  composeFile: string,
+  envFile: string,
+  options: { publicAccess?: boolean } = {},
+): string[] {
+  const base = options.publicAccess
+    ? [...composeBaseArgs(composeFile, envFile), "--profile", PUBLIC_PROFILE]
+    : composeBaseArgs(composeFile, envFile);
+  return [...base, "config", "--images"];
 }
 
 export function appServicesUpInvocation(

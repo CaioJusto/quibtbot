@@ -8,6 +8,7 @@ import { controlLeaseLive } from "@quibt/core";
 import type { PrismaClient } from "@quibt/db";
 import { appendEvent, closeComputerUsage } from "@quibt/db";
 import { computerRefFromSession } from "./computer-boot-claim.js";
+import { isComputerAlreadyStoppedError } from "./docker-sandbox.js";
 import {
   recordLifecycleCleanupIntent,
   resolveLifecycleCleanupIntent,
@@ -108,6 +109,24 @@ async function suspendDesktopSession(
       type: "computer.status",
       payload: { status: "suspended" },
     });
+  }
+}
+
+/**
+ * Parar o que o provedor já não tem (container parado depois de um reboot, sessão que
+ * nunca abriu) é parar. Antes o 404 subia daqui, a linha ficava em "suspending" com o
+ * claim, o recover devolvia a "running" e o sono tentava de novo — oscilando para sempre
+ * num computador que já estava desligado.
+ */
+async function stopUnlessAlreadyStopped(
+  sandbox: SandboxProvider,
+  ref: ComputerRef,
+  context: AdapterContext,
+): Promise<void> {
+  try {
+    await sandbox.stop(ref, context);
+  } catch (error) {
+    if (!isComputerAlreadyStoppedError(error)) throw error;
   }
 }
 
@@ -216,13 +235,13 @@ export async function sleepComputerIfIdle(
       if (!(await validateDesktopSuspendClaim(deps.prisma, botId, claim.token))) {
         throw new Error("lost suspend claim");
       }
-      await deps.sandbox.stop(stopRef, ctx);
+      await stopUnlessAlreadyStopped(deps.sandbox, stopRef, ctx);
     });
     if (!gated.ok) {
       throw new Error("shared stop gate unavailable");
     }
   } else {
-    await deps.sandbox.stop(stopRef, ctx);
+    await stopUnlessAlreadyStopped(deps.sandbox, stopRef, ctx);
   }
 
   if (await finalizeDesktopSuspended(deps.prisma, botId, claim.token)) {

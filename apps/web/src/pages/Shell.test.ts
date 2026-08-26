@@ -38,8 +38,59 @@ describe("dashboard copies the landing product demo", () => {
   });
 
   it("does not keep a screen URL or heartbeat after the lease is gone", () => {
-    expect(shell).toContain("Assuma o controle para ver a tela");
+    expect(shell).not.toContain("Assuma o controle para ver a tela");
     expect(shell).toContain('if (computer?.controlHolder !== "user") return;');
+  });
+
+  it("shows the bot's screen as polled stills while the user does not hold control", () => {
+    // Sem o controle não há stream, mas há retrato: o painel e a tela cheia mostram o
+    // último `computer.preview` com a idade em cima, nunca só a ilustração de mesa.
+    expect(shell).toContain("rpc.computer.preview({ botId: previewBotId })");
+    expect(shell).toContain("shouldPollPreview({");
+    expect(shell).toContain("streaming: pinnedScreenUrl !== null");
+    // O laço (backoff, descarte em voo) é o de preview-poll.ts, testado lá com relógio falso.
+    expect(shell).toContain("createPreviewPoller({");
+    expect(shell).toContain("previewAgeMs(preview, previewNow)");
+    expect(shell).toContain("previewIsStale(previewAge)");
+    expect(shell.match(/className="qb-live-badge/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(shell).toContain('className="qb-screen-still"');
+    expect(shell).toContain("sem prévia · tentando de novo");
+    // A pílula de assumir continua sobre o retrato em tela cheia.
+    expect(shell.match(/className="qb-screen-claim"/g)).toHaveLength(2);
+  });
+
+  it("keeps the last still when a poll fails, and only drops it after a minute", () => {
+    // Uma falha não apaga o retrato: o sub-rótulo avisa por cima dele.
+    expect(shell).toContain("qb-live-badge--sub");
+    // A falha só acende o aviso; apagar o retrato é coisa da saída do efeito, não do poll.
+    expect(shell).toContain("onFailure: () => setPreviewFailed(true)");
+    expect(shell).not.toMatch(/onFailure:[^\n]*setPreview\(null\)/);
+    expect(shell).toContain("previewShown && !screenLost");
+  });
+
+  it("tells 'mine' from 'someone else holds the lease' by the screen URL, not controlHolder", () => {
+    // controlHolder é o campo do banco e vale "user" para a workspace inteira; só quem tem
+    // o lease recebe a URL. Sem ela, é outra pessoa: o retrato continua e o painel avisa.
+    expect(shell).toContain("holdsComputerControl({");
+    expect(shell).toContain("const othersControl = othersHoldControl({");
+    // Nenhum destes três lugares volta a perguntar ao campo do banco de quem é o lease.
+    expect(shell.match(/Outra pessoa está no controle/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(shell).toMatch(/shouldPollPreview\(\{[^}]*screenLost,/s);
+    // Sem o lease não há stream para ter caído: o aviso "a tela caiu" é zerado.
+    expect(shell).toMatch(
+      /if \(holdsControl\) return;\s+screenRetries\.current = 0;\s+setScreenLost\(false\);/,
+    );
+  });
+
+  it("o heartbeat do computador só bate com a aba à vista e escreve o prazo novo na tela", () => {
+    // Aba escondida batendo a cada minuto segurava o teclado de um bot parado esperando
+    // a pessoa — o navegador só desacelera o timer, não o desliga.
+    expect(shell).toContain('if (document.visibilityState !== "visible") return;');
+    expect(shell).toContain(".heartbeat({ botId, atScreen })");
+    // O que se digita dentro do quadro do noVNC não passa pela API: o foco no quadro é a
+    // única prova de uso que a web tem para oferecer.
+    expect(shell).toContain("document.activeElement === screenFrame.current");
+    expect(shell).toContain("withControlLease(current, answer.controlLeaseExpiresAt)");
   });
 
   it("keeps the monitor toggle on the side panel, not a jump to fullscreen", () => {

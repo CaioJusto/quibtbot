@@ -6,14 +6,10 @@ import { COLORS, PrimaryButton, SecondaryButton, SectionCard, textStyles } from 
 /**
  * Sem servidor a inbox mostrava um texto vermelho solto ("Network request failed").
  * Este cartão diz o que aconteceu em português, qual servidor o app procurou e o que
- * fazer: tentar de novo ou apontar para outro Quibt lendo o QR de novo.
+ * fazer: tentar de novo ou apontar para outro Quibt lendo o QR de novo. A regra de
+ * reconhecer uma falha de rede mora em `live-link.ts`, pura, para a conversa usar também.
  */
-export function isConnectionProblem(message: string | null | undefined): boolean {
-  if (!message) return false;
-  return /network request failed|failed to fetch|networkerror|load failed|demorou demais|conexão falhou|não foi possível alcançar|ECONNREFUSED|timed? ?out|HTTP 5\d\d/i.test(
-    message,
-  );
-}
+export { isConnectionProblem } from "./live-link";
 
 export function serverLabel(base: string = currentApiBase()): string {
   try {

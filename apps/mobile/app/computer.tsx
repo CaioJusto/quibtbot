@@ -30,6 +30,7 @@ import {
   screenBridgeMessage,
   screenNotice,
   trackpadReleaseAction,
+  withControlLease,
 } from "../lib/computer";
 import { boundedStrokes, strokesForEdit } from "../lib/computer-keyboard";
 import { COLORS, GlassSurface, softHaptic } from "../lib/design-system";
@@ -312,10 +313,33 @@ export default function Computer() {
 
   useEffect(() => {
     if (!botId || !hasControl || computer?.state !== "running") return;
-    const ping = () => void rpc("computer/heartbeat", { botId }).catch(() => undefined);
+    // Celular no bolso não é gente na frente do computador: os timers do JS seguem rodando
+    // um tempo em segundo plano, e a batida segurava o teclado de um bot que já podia estar
+    // trabalhando. Só bate com o app na frente — como o poll de status logo acima.
+    const ping = () => {
+      if (AppState.currentState === "background") return;
+      // Estar nesta tela com o app à frente é, no celular, estar na frente do computador:
+      // o toque na tela do bot vai direto pelo noVNC, sem passar pela nossa API. Quando o
+      // aparelho bloqueia, o AppState sai de `active` e o prazo volta a correr.
+      void rpc<{ controlLeaseExpiresAt?: string | null }>("computer/heartbeat", {
+        botId,
+        atScreen: true,
+      })
+        .then((answer) => {
+          // O prazo novo, quando houve, mantém o "Você tem o controle até HH:mm" andando.
+          setComputer((current) => withControlLease(current, answer?.controlLeaseExpiresAt));
+        })
+        .catch(() => undefined);
+    };
     ping();
     const timer = setInterval(ping, COMPUTER_HEARTBEAT_MS);
-    return () => clearInterval(timer);
+    const appState = AppState.addEventListener("change", (state) => {
+      if (state === "active") ping();
+    });
+    return () => {
+      clearInterval(timer);
+      appState.remove();
+    };
   }, [botId, hasControl, computer?.state]);
 
   useEffect(() => {
@@ -612,7 +636,7 @@ export default function Computer() {
                 </Text>
                 {hasControl ? (
                   <Text style={{ color: "#4ECB71", fontSize: 13, marginTop: 1 }}>
-                    Você tem o controle
+                    {controlLabel(computer, name)}
                   </Text>
                 ) : null}
               </View>

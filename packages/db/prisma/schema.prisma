@@ -147,7 +147,7 @@ model Invitation {
 model DeploymentSettings {
   id                             String   @id @default("default")
   ownerUserId                    String?
-  signupsEnabled                 Boolean  @default(true)
+  signupsEnabled                 Boolean  @default(false)
   signupAllowlist                String   @default("")
   defaultModelProvider           String?
   defaultModelId                 String?
@@ -170,6 +170,21 @@ model DeploymentClaim {
   updatedAt DateTime  @updatedAt
 
   @@map("deployment_claim")
+}
+
+/**
+ * Batimento do worker: o processo que executa os runs passa aqui a cada ~15 s. É o único
+ * jeito de a API (e a tela) saberem que existe alguém para pegar a fila — sem isto, um
+ * worker que não subiu vira silêncio.
+ */
+model WorkerHeartbeat {
+  id        String   @id
+  version   String
+  startedAt DateTime @default(now())
+  seenAt    DateTime
+
+  @@index([seenAt])
+  @@map("worker_heartbeats")
 }
 
 /**
@@ -712,6 +727,7 @@ model DesktopSession {
   controlLeaseId String?
   controlLeaseUserId String?
   controlLeaseExpiresAt DateTime?
+  controlLastInputAt DateTime?
   controlFence   Int          @default(0)
   bootClaimToken String?
   bootClaimedAt  DateTime?

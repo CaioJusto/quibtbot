@@ -8,6 +8,7 @@ import {
   containerNameForWorkspace,
   screenUrlFor,
   sessionPorts,
+  WORKSPACE_RESTART_POLICY,
   xdotoolCommand,
 } from "./computer-spec.js";
 
@@ -55,6 +56,22 @@ describe("graphical computer spec", () => {
     expect(options.HostConfig.ReadonlyRootfs).toBe(true);
     expect(options.HostConfig.ReadonlyPaths).toContain("/usr/share/novnc");
     expect(options.HostConfig.NetworkMode).toBe("quibt_default");
+  });
+
+  it("volta sozinho depois de reiniciar a máquina ou o Docker", () => {
+    // Sem política de reinício o container ficava `Exited` após um reboot: todo comando
+    // falhava, a tela dizia "ligado" e só `docker start` na mão resolvia.
+    const options = containerCreateOptions({
+      name: "quibt-ws-ws",
+      image: COMPUTER_IMAGE,
+      workspaceId: "ws",
+      homePath: "/var/quibt/workspaces/ws/home",
+      desktopPath: "/var/quibt/workspaces/ws/desktops",
+    });
+    expect(options.HostConfig.RestartPolicy).toEqual({ Name: WORKSPACE_RESTART_POLICY });
+    expect(WORKSPACE_RESTART_POLICY).toBe("unless-stopped");
+    // `--rm` e política de reinício não convivem no Docker.
+    expect(options.HostConfig.AutoRemove).toBe(false);
   });
 
   it("ships a browser desktop, not a fullscreen terminal", () => {

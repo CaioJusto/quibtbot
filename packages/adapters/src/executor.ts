@@ -53,6 +53,7 @@ import { deleteSpawnedBot, spawnBot } from "./child-bots.js";
 import { collectLogIds } from "./composio-connector.js";
 import { bootComputer } from "./computer-boot.js";
 import { capHistory, HISTORY_MESSAGE_CAP } from "./history.js";
+import { PROVIDER_RETRY_PROGRESS_MESSAGE, TRY_AGAIN_HINT } from "./llm-retry.js";
 import { callMcpTool, discoverMcpTools, matchMcpSource, parseMcpToolName } from "./mcp-http.js";
 import {
   PEER_WAIT_TIMEOUT_MS,
@@ -70,6 +71,7 @@ import {
   acquireRunLease,
   botBusyWith,
   deferRunForBusyBot,
+  requeueRunAfterProviderError,
   wakeNextRunForBot,
   watchRunLease,
 } from "./run-lease.js";
@@ -345,6 +347,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
       const runAbort = new AbortController();
       let pausedForApproval = false;
       let pausedForPeer = false;
+      // O run voltou para a fila por erro passageiro do provedor: o job de +5 s o reacorda.
+      let requeued = false;
       // True for the direct webhook delivery (trigger === "webhook", which always also sets
       // webhookId) and for any peer/spawn descendant it causes, however many hops away: those
       // keep their own ordinary trigger ("peer"/"spawn"), but inherit the same webhookId, so
@@ -1314,6 +1318,35 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 paidBy: credential ? "user" : "plan",
               },
             });
+          } else if (event.type === "error") {
+            // Erro passageiro do provedor (429, 502, socket mudo): o run volta para a fila
+            // uma vez em vez de virar uma resposta de erro no chat. Nunca depois de uma
+            // aprovação: o resultado dela vive só na memória deste turno e o recomeço
+            // pediria o mesmo card de novo.
+            if (
+              event.retryable &&
+              !scripted &&
+              !resumedAfterApproval &&
+              (await requeueRunAfterProviderError(deps, {
+                runId,
+                fence,
+                reason: redactSecrets(event.message, runSecrets),
+              }))
+            ) {
+              requeued = true;
+              await publishLiveProgress(deps.prisma, {
+                workspaceId: run.workspaceId,
+                threadId: thread.id,
+                botId: bot.id,
+                runId,
+                payload: { text: PROVIDER_RETRY_PROGRESS_MESSAGE },
+              });
+              await stopRuntime();
+              return;
+            }
+            // Sem nova tentativa automática, a pessoa lê o erro — e, se ele era passageiro,
+            // o convite a tentar de novo.
+            assembled += event.retryable ? `${event.message} ${TRY_AGAIN_HINT}` : event.message;
           } else if (event.type === "done") {
             assembled = assembled || event.text || assembled;
           }
@@ -1401,11 +1434,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // Teammates parked on this run resume as soon as it stops, whatever the outcome.
         await wakeRunsWaitingForPeer(deps, runId).catch(() => undefined);
         // The bot is free again: give its oldest queued run its turn without waiting for the
-        // retry timer.
-        await wakeNextRunForBot(deps, {
-          botId: run.botId,
-          exceptRunId: runId,
-        }).catch(() => undefined);
+        // retry timer. Depois de um requeue o bot não está livre: acordar outro run agora
+        // deixaria ele furar a fila na frente deste, e a pessoa leu "em instantes".
+        if (!requeued) {
+          await wakeNextRunForBot(deps, {
+            botId: run.botId,
+            exceptRunId: runId,
+          }).catch(() => undefined);
+        }
       }
     },
   };

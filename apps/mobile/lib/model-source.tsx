@@ -1,6 +1,7 @@
 import {
   chooseMode,
   chooseProvider,
+  connectedModelNotice,
   localModelUrl,
   providersForMode,
   startPolling,
@@ -183,7 +184,7 @@ export function ModelSourceSection() {
     setError(null);
     setNotice(null);
     try {
-      await rpc("models/connect", {
+      const credential = await rpc<{ verified?: boolean }>("models/connect", {
         provider,
         apiKey,
         modelId: selected.id,
@@ -191,7 +192,10 @@ export function ModelSourceSection() {
       });
       await rpc("models/setDefault", { provider, modelId: selected.id });
       await load();
-      setNotice("Modelo conectado e definido como padrão.");
+      // "Confirmada" só quando o servidor falou mesmo com o provedor.
+      setNotice(
+        `${connectedModelNotice({ verified: Boolean(credential?.verified), local: tokenSource === "local" })} Modelo definido como padrão.`,
+      );
       setApiKey("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível conectar o modelo");
@@ -260,7 +264,13 @@ export function ModelSourceSection() {
       </View>
       <Text style={ui.body}>{modelSourceBody(own, edition)}</Text>
 
+      {/* Mesma ordem do onboarding: a assinatura que a pessoa já paga vem primeiro. */}
       <View style={ui.segment}>
+        <ModeChip
+          label="Assinatura"
+          selected={tokenSource === "subscription"}
+          onPress={() => pickTokenSource("subscription")}
+        />
         <ModeChip
           label="Chave"
           selected={tokenSource === "key"}
@@ -270,11 +280,6 @@ export function ModelSourceSection() {
           label="Local"
           selected={tokenSource === "local"}
           onPress={() => pickTokenSource("local")}
-        />
-        <ModeChip
-          label="Assinatura"
-          selected={tokenSource === "subscription"}
-          onPress={() => pickTokenSource("subscription")}
         />
       </View>
 

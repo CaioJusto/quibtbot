@@ -20,7 +20,18 @@ export const MOBILE_RPC_RETRIES = 2;
 export const MOBILE_RPC_RETRY_DELAY_MS = 400;
 
 function isTransientStatus(status: number) {
-  return status === 502 || status === 503 || status === 429;
+  // 504 é o gateway desistindo de esperar a API — tão passageiro quanto o 502, e antes
+  // aparecia na tela já na primeira tentativa.
+  return status === 502 || status === 503 || status === 504 || status === 429;
+}
+
+/**
+ * O 502/503/504 do proxy chegava à tela como "rpc threads/get failed": jargão, e é a falha
+ * mais comum de uma VPS com o container reiniciando. A frase é nossa e leva o código junto,
+ * então `isConnectionProblem` a reconhece pelo "HTTP 5xx" e a tela mostra o chip de rede.
+ */
+export function unreachableMessage(status: number) {
+  return `Não foi possível alcançar o seu Quibt (HTTP ${status}).`;
 }
 
 function isTransientNetworkError(error: unknown) {
@@ -127,7 +138,12 @@ async function apiFetch(input: string, init: RequestInit): Promise<Response> {
     const timer = setTimeout(() => controller.abort(), MOBILE_REQUEST_TIMEOUT_MS);
     try {
       const res = await fetch(input, { ...init, signal: controller.signal });
-      if (res.ok || !isTransientStatus(res.status) || attempt === MOBILE_RPC_RETRIES) {
+      if (res.ok || !isTransientStatus(res.status)) return res;
+      if (attempt === MOBILE_RPC_RETRIES) {
+        // Devolver o 502 calado fazia cada chamada inventar a própria mensagem a partir de
+        // um corpo HTML que não parseia. Um 5xx que insistiu é falha de rede, e diz isso.
+        if (res.status >= 500) throw new Error(unreachableMessage(res.status));
+        // 429 e afins voltam inteiros: a resposta traz a mensagem que a pessoa precisa ler.
         return res;
       }
       lastError = new Error(`HTTP ${res.status}`);
@@ -404,7 +420,11 @@ export async function rpc<T>(
   };
   if (!res.ok || parsed.error) {
     const payload = parsed.error ?? (isRpcErrorJson(parsed.json) ? parsed.json : undefined);
-    const error = new Error(payload?.message ?? `rpc ${proc} failed`) as Error & {
+    // Sem mensagem no corpo e com status de servidor, quem responde é o proxy (HTML, não
+    // JSON): a pessoa lê que não deu para alcançar o Quibt, não "rpc threads/get failed".
+    const fallback =
+      !res.ok && res.status >= 500 ? unreachableMessage(res.status) : `rpc ${proc} failed`;
+    const error = new Error(payload?.message ?? fallback) as Error & {
       code?: string;
       data?: unknown;
     };
@@ -628,13 +648,35 @@ export type ThreadEvent = {
   payload?: Record<string, unknown>;
 };
 
+/**
+ * Sem byte nenhum (nem keepalive) por este tanto, o socket está meio-aberto: trocar de
+ * Wi-Fi para 4G com o app aberto deixa o `read()` pendurado para sempre, sem erro, e a
+ * conversa parece ligada enquanto nada chega. O oRPC manda um keepalive a cada 5 s, então
+ * 15 s de silêncio é o socket morto — a leitura é derrubada e o live-feed reconecta.
+ */
+export const STREAM_STALL_MS = 15_000;
+
+export type SubscribeOptions = {
+  /** Chamado quando o stream abriu de fato (resposta OK com corpo): é o "connected" do feed. */
+  onOpen?: () => void;
+  stallMs?: number;
+};
+
+/**
+ * Como o fluxo terminou. `stalled` é o vigia derrubando um socket mudo — o caso do proxy que
+ * bufferiza o SSE, em que reconectar é rotina e não vale assustar a pessoa com o chip;
+ * `closed` é o servidor fechando de verdade; `aborted` é a tela saindo.
+ */
+export type StreamEnd = "aborted" | "closed" | "stalled";
+
 export async function subscribeThread(
   botId: string,
   cursor: number,
   onEvent: (event: ThreadEvent) => void,
   signal: AbortSignal,
-) {
-  await subscribeEvents("threads/subscribe", { botId, cursor }, onEvent, signal);
+  options: SubscribeOptions = {},
+): Promise<StreamEnd> {
+  return subscribeEvents("threads/subscribe", { botId, cursor }, onEvent, signal, options);
 }
 
 export async function subscribeGroupThread(
@@ -642,8 +684,9 @@ export async function subscribeGroupThread(
   cursor: number,
   onEvent: (event: ThreadEvent) => void,
   signal: AbortSignal,
-) {
-  await subscribeEvents("botGroups/subscribe", { groupId, cursor }, onEvent, signal);
+  options: SubscribeOptions = {},
+): Promise<StreamEnd> {
+  return subscribeEvents("botGroups/subscribe", { groupId, cursor }, onEvent, signal, options);
 }
 
 type StreamingFetch = (input: string, init: RequestInit) => Promise<Response>;
@@ -673,7 +716,8 @@ async function subscribeEvents(
   input: Record<string, unknown>,
   onEvent: (event: ThreadEvent) => void,
   signal: AbortSignal,
-) {
+  options: SubscribeOptions = {},
+): Promise<StreamEnd> {
   const streamFetch = await loadStreamingFetch();
   let res: Response;
   try {
@@ -689,7 +733,7 @@ async function subscribeEvents(
       signal,
     });
   } catch (error) {
-    if (signal.aborted) return;
+    if (signal.aborted) return "aborted";
     throw error;
   }
   if (res.status === 401) {
@@ -698,13 +742,37 @@ async function subscribeEvents(
   }
   if (!res.ok) throw new Error(`rpc ${proc} failed (${res.status})`);
   if (!res.body) throw new Error(`rpc ${proc} cannot stream on this device`);
+  options.onOpen?.();
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  // O vigia conta qualquer byte — keepalive inclusive — e não a linha parseada: um
+  // keepalive é sinal de vida tanto quanto um evento.
+  const stallMs = options.stallMs ?? STREAM_STALL_MS;
+  let lastByteAt = Date.now();
+  let wentQuiet = false;
+  let stalled: (() => void) | undefined;
+  const stall = new Promise<{ done: true; value: undefined }>((resolve) => {
+    stalled = () => resolve({ done: true, value: undefined });
+  });
+  const watchdog = setInterval(
+    () => {
+      if (Date.now() - lastByteAt < stallMs) return;
+      clearInterval(watchdog);
+      wentQuiet = true;
+      stalled?.();
+      // Também cancela a leitura: num socket meio-aberto o `read()` nunca voltaria.
+      reader.cancel().catch(() => undefined);
+    },
+    Math.max(10, Math.min(5_000, Math.floor(stallMs / 2))),
+  );
   try {
     while (!signal.aborted) {
-      const { done, value } = await reader.read();
+      // Terminar como "o servidor fechou" (em vez de lançar) é o que faz o live-feed
+      // reconectar sem passar por um erro na tela.
+      const { done, value } = await Promise.race([reader.read(), stall]);
       if (done) break;
+      lastByteAt = Date.now();
       buffer += decoder.decode(value, { stream: true });
       const chunks = buffer.split("\n\n");
       buffer = chunks.pop() ?? "";
@@ -724,11 +792,14 @@ async function subscribeEvents(
       }
     }
   } catch (error) {
-    if (signal.aborted) return;
+    if (signal.aborted) return "aborted";
     throw error;
   } finally {
+    clearInterval(watchdog);
     reader.cancel().catch(() => undefined);
   }
+  if (signal.aborted) return "aborted";
+  return wentQuiet ? "stalled" : "closed";
 }
 
 /**
@@ -743,10 +814,14 @@ async function subscribeEvents(
  * servidor ainda não gravou. Assim que o servidor materializa cada uma, ela some
  * sozinha do carregado, sem tremer.
  */
-export function mergeThreadSnapshot<T extends { messages: MobileMessage[]; cursor?: number }>(
-  prev: T | null,
-  next: T,
-): T {
+export function mergeThreadSnapshot<
+  T extends {
+    messages: MobileMessage[];
+    cursor?: number;
+    run?: { id: string } | null;
+    runs?: Array<{ id: string }>;
+  },
+>(prev: T | null, next: T): T {
   if (!prev) return next;
   const committedRunIds = new Set(
     next.messages.map((message) => message.runId).filter((id): id is string => Boolean(id)),
@@ -754,10 +829,14 @@ export function mergeThreadSnapshot<T extends { messages: MobileMessage[]; curso
   const committedNonces = new Set(
     next.messages.map((message) => message.clientNonce).filter((n): n is string => Boolean(n)),
   );
+  const activeRunIds = activeRunIdsOf(next);
   const carried = prev.messages.filter((message) => {
     // Bolha de "trabalhando" que o servidor ainda não materializou como resposta final.
     if (message.id.startsWith("progress:")) {
-      return Boolean(message.runId) && !committedRunIds.has(message.runId as string);
+      if (!message.runId || committedRunIds.has(message.runId)) return false;
+      // Um run que acabou sem resposta (falhou, foi parado) com o SSE já morto deixava a
+      // bolha presa para sempre: o snapshot só traz runs vivos, então "não está lá" é fim.
+      return activeRunIds === null || activeRunIds.has(message.runId);
     }
     // Mensagem otimista (a que você acabou de enviar) que o servidor ainda não gravou.
     // Sem isto o poll a apagava e ela reaparecia — o chat "piscando" ao enviar.
@@ -766,6 +845,19 @@ export function mergeThreadSnapshot<T extends { messages: MobileMessage[]; curso
   });
   if (carried.length === 0) return next;
   return { ...next, messages: [...next.messages, ...carried] };
+}
+
+/**
+ * Os runs que o servidor diz estarem vivos — `run` no fio de um bot, `runs` no grupo. Um
+ * snapshot que não fala de runs (`undefined`) devolve `null`: aí não se decide nada por ele.
+ */
+function activeRunIdsOf(snapshot: {
+  run?: { id: string } | null;
+  runs?: Array<{ id: string }>;
+}): Set<string> | null {
+  if (Array.isArray(snapshot.runs)) return new Set(snapshot.runs.map((run) => run.id));
+  if (snapshot.run === undefined) return null;
+  return new Set(snapshot.run ? [snapshot.run.id] : []);
 }
 
 export function applyMobileThreadEvent<

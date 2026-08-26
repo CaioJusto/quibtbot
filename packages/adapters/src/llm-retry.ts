@@ -1,6 +1,30 @@
+/**
+ * Tempo até o provedor responder os cabeçalhos da chamada. O SDK só conta até a
+ * resposta começar; o silêncio no meio do stream é vigiado por LLM_IDLE_TIMEOUT_MS.
+ */
 export const LLM_TIMEOUT_MS = 120_000;
-export const LLM_RETRY_ATTEMPTS = 2;
-export const LLM_RETRY_BASE_MS = 500;
+/** Tentativas a mais que o pi-ai faz por chamada em 408/409/429/5xx (o padrão dele é 0). */
+export const LLM_MAX_RETRIES = 3;
+/** Um `retry-after` maior que isto falha na hora, em vez de deixar o bot parado esperando. */
+export const LLM_MAX_RETRY_DELAY_MS = 20_000;
+/** Sem nenhum evento do agente por este tempo, o turno é abortado como "provedor parou". */
+export const LLM_IDLE_TIMEOUT_MS = 180_000;
+export const PROVIDER_STALLED_MESSAGE = "O provedor parou de responder.";
+/** O que o chat mostra enquanto o run volta para a fila — sem o erro cru do provedor. */
+export const PROVIDER_RETRY_PROGRESS_MESSAGE =
+  "O modelo demorou para responder. Vou tentar de novo em instantes…";
+/** Acrescentado a um erro passageiro quando não vai haver nova tentativa automática. */
+export const TRY_AGAIN_HINT = "Tente de novo.";
+
+/** As opções que toda chamada de modelo (agente principal e subagente) leva ao pi-ai. */
+export function llmStreamOptions<T extends object | undefined>(options: T) {
+  return {
+    ...options,
+    maxRetries: LLM_MAX_RETRIES,
+    maxRetryDelayMs: LLM_MAX_RETRY_DELAY_MS,
+    timeoutMs: LLM_TIMEOUT_MS,
+  };
+}
 
 export function isRetryableLlmError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
@@ -12,6 +36,10 @@ export function isRetryableLlmError(error: unknown): boolean {
   return false;
 }
 
+/**
+ * Limite de tempo para uma chamada que não passa pelo pi-ai (o caminho Ollama /
+ * openai-compatible): rejeita com "timed out" no prazo e com "aborted" se o pai cancelar.
+ */
 export async function withTimeout<T>(
   work: (signal: AbortSignal) => Promise<T>,
   ms: number,
@@ -39,28 +67,4 @@ export async function withTimeout<T>(
     clearTimeout(timer);
     parent?.removeEventListener("abort", onParent);
   }
-}
-
-export async function withRetry<T>(
-  work: (attempt: number) => Promise<T>,
-  opts?: { attempts?: number; baseMs?: number; shouldRetry?: (error: unknown) => boolean },
-): Promise<T> {
-  const attempts = opts?.attempts ?? LLM_RETRY_ATTEMPTS;
-  const baseMs = opts?.baseMs ?? LLM_RETRY_BASE_MS;
-  const shouldRetry = opts?.shouldRetry ?? isRetryableLlmError;
-  let last: unknown;
-  for (let attempt = 0; attempt <= attempts; attempt += 1) {
-    try {
-      return await work(attempt);
-    } catch (error) {
-      last = error;
-      if (attempt === attempts || !shouldRetry(error)) throw error;
-      await sleep(baseMs * 2 ** attempt);
-    }
-  }
-  throw last instanceof Error ? last : new Error(String(last));
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

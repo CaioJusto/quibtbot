@@ -12,12 +12,19 @@ Public site: [quibt.com.br](https://quibt.com.br).
 
 ## Download
 
-Landing buttons point at GitHub Releases:
+Landing buttons point at GitHub Releases. The release attaches only the stable names
+(`DESKTOP_ARTIFACT_NAMES` in `scripts/release-version.mjs`); the version lives in the tag, so the
+URL is `https://github.com/CaioJusto/quibtbot/releases/download/v<version>/<name>`:
 
-- macOS Apple silicon: `QuibtBot-<version>.dmg`
-- macOS Intel preview: `QuibtBot-<version>-intel.dmg` when attached to that release
-- Windows 64-bit: `QuibtBot-<version>-setup.exe` (one-click NSIS, no admin)
-- Linux x64: `QuibtBot-<version>.AppImage`
+- macOS Apple silicon: `QuibtBot.dmg` — on `v0.2.11` this is the CI build, unsigned and not notarized; macOS warns the first time, **right-click → Open**
+- macOS Intel: no installer yet; run from source (`pnpm dev` + `pnpm desktop`)
+- Windows 64-bit: `QuibtBot-setup.exe` — unsigned test installer (one-click NSIS, no admin); SmartScreen warns, choose **More info → Run anyway**; install Docker Desktop yourself
+- Linux x64: `QuibtBot.AppImage` — unsigned test build; needs `libfuse2`, mark it executable and run it; install Docker (Engine or Desktop) yourself
+
+The sentence shown next to each button comes from `DESKTOP_SIGNING` in
+`packages/installer/src/compose.ts` (site, README and this page follow it). It is filled at
+release time from the `signing-status-*.json` files attached to the tag — see the gate in
+[`release-readiness.md`](./release-readiness.md#release-rule).
 
 Until a release is published, build the artifacts locally (below) and open the installer from `apps/desktop/out/`.
 
@@ -71,9 +78,9 @@ The bot does **not** click your host desktop. Navigation inside the computer pan
 
 | Platform | Release status                                                                                                                  | What is still missing                                                                                                                                       |
 | -------- | ------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| macOS    | The `v0.2.11` Apple-silicon `.dmg` is Developer ID signed, notarized and stapled: `spctl` reports `accepted / source=Notarized Developer ID`. | Intel (x64) is not published; Apple silicon only.                                                            |
-| Windows  | No desktop installer is published. Run from source (`pnpm dev` + `pnpm desktop`).                                                            | Authenticode certificate. Until it exists, SmartScreen would call any build an unknown publisher.            |
-| Linux    | No desktop AppImage is published; `v0.2.11` ships the x64/arm64 `quibtbot` CLI binaries for server installs.                                  | No store signature. Mark the downloaded binary executable before running it.                                 |
+| macOS    | The `v0.2.11` Apple-silicon `QuibtBot.dmg` is the CI build: `signing-status-mac.json` says `signed: false, notarized: false`, `codesign -dv` answers "not signed at all" and `spctl -a -t open` rejects it. The first launch is **right-click → Open**. The `v0.2.10` and `v0.2.9` DMGs are Developer ID signed, notarized and stapled (`spctl` reports `accepted / source=Notarized Developer ID`); on `v0.2.9` the maintainer replaced the CI DMG and its status file by the notarized ones. | The same swap on `v0.2.11` (DMG, `signing-status-mac.json`, checksums), then `DESKTOP_SIGNING.mac` becomes `true`. Intel (x64) is not published; Apple silicon only. |
+| Windows  | `QuibtBot-setup.exe` is published as an **unsigned test build**; `signing-status-win.json` says `signed: false`. SmartScreen warns: **More info → Run anyway**. | Authenticode certificate. Until it exists, SmartScreen calls the installer an unknown publisher.              |
+| Linux    | `QuibtBot.AppImage` is published as an **unsigned test build**; `v0.2.11` also ships the x64/arm64 `quibtbot` CLI binaries for server installs.   | No store signature. Needs `libfuse2`; mark the download executable before running it; Docker Engine or Desktop is installed by the user. |
 
 For a maintainer release on macOS, the project-local hooks sign both the app and DMG, submit each
 to Apple, wait for acceptance, and staple the tickets:
@@ -92,17 +99,18 @@ or notarized unless its attached status and Gatekeeper checks confirm it.
 ## First launch
 
 1. Open Quibt Bot. On macOS the setup wizard detects Docker Desktop, Colima and Homebrew outside Finder's reduced `PATH`. If Docker is truly absent, the wizard downloads the official DMG for the Mac architecture, validates Docker Inc.'s code signature and Apple notarization, asks for administrator authorization once, launches Docker and waits for the daemon before continuing. Windows still requires Docker Desktop and Linux requires Docker Engine/Desktop.
-2. The wizard generates secrets and runs Compose when the compose file is available (source checkout or bundled `extraResources`). You can also point `QUIBT_WEB_URL` at a remote deploy.
-3. Sign up, bring an OpenRouter key, a local Ollama / OpenAI-compatible URL, or a ChatGPT / Copilot / SuperGrok subscription. Pick the machine (Docker, your VPS, E2B, Box) in onboarding or **Settings → Máquina**. Each choice opens a short guide: what to install, where to copy the key, and whether bots share one computer or each get their own. See [onboarding.md](./onboarding.md) and [computers.md](./computers.md).
-4. Connect the phone. **Settings → Celular** shows a QR with the server URL (`quibt://connect?api=…`), and a **Liberar entrada por 2 minutos** button. Press it and the QR also carries a one-time pairing code, so the phone signs in without a password; leave it unpressed and the QR only points the phone at this server, which then asks for the account. The code is minted from the session on this computer, expires in two minutes, works once, and dies when the screen closes. The phone talks to that API — not to the Electron window. On this computer the private QR uses the machine's Tailscale address, so the HTTP hop stays inside the encrypted tailnet; ordinary same-Wi-Fi HTTP is not advertised. **Qualquer rede** puts a user-owned HTTPS origin in the QR instead — a Cloudflare Tunnel or Tailscale Funnel you run yourself, pointed at `http://127.0.0.1:5173` (the Quibt window, which already proxies `/api`, `/rpc` and `/novnc`). Quibt does not host or sell that tunnel; if it is paid, you pay the provider. The laptop still has to stay on. If the Quibt server runs on a VPS, remote supervisor, or Box VM — not on this laptop — the phone keeps working when the laptop is off, without a tunnel.
+2. The wizard generates secrets and runs Compose when the compose file is available (source checkout or bundled `extraResources`). Images already on this machine are skipped, so the free-space check, the announced size and the “image 2 of 4” counter only ever describe what is still missing (10 GB free is required only when nothing is downloaded yet, never less than 2 GB). It shows a progress bar per image (layers done/total) and, because `docker pull` without a TTY prints nothing while a layer transfers, a heartbeat every 10 s (“baixando a camada 3 de 9 há 1m20s…”). A download is only given up on after 15 minutes with no output at all (one hour per image, absolute) and is retried up to three times; already-downloaded layers stay cached, so re-running the wizard only fetches what is missing. `quibtbot update` downloads with the same progress, patience and retries. You can also point `QUIBT_WEB_URL` at a remote deploy.
+3. **Second launch.** When the stack is installed but stopped (after a reboot, or after quitting Docker), the app does not show the install wizard again: it opens Docker Desktop if needed, downloads any image that disappeared (a “Clean / Purge data”, a `docker system prune -a`) with the same progress bar, runs `docker compose up --wait` itself and shows “Ligando o Quibt Bot…” with the current step, then opens the product. Restarting never installs Docker Desktop and never asks for the Mac password: if Docker Desktop is gone, the screen says so and goes back to install mode with the button and the Docker terms in sight. If it fails for another reason, the real error and a **Tentar de novo** button appear. `quibtbot install` on a machine that is already installed does the same and prints “já instalado e no ar em <URL>”.
+4. Sign up, bring an OpenRouter key, a local Ollama / OpenAI-compatible URL, or a ChatGPT / Copilot / SuperGrok subscription. Pick the machine (Docker, your VPS, E2B, Box) in onboarding or **Settings → Máquina**. Each choice opens a short guide: what to install, where to copy the key, and whether bots share one computer or each get their own. See [onboarding.md](./onboarding.md) and [computers.md](./computers.md).
+5. Connect the phone. **Settings → Celular** shows a QR with the server URL (`quibt://connect?api=…`), and a **Liberar entrada por 2 minutos** button. Press it and the QR also carries a one-time pairing code, so the phone signs in without a password; leave it unpressed and the QR only points the phone at this server, which then asks for the account. The code is minted from the session on this computer, expires in two minutes, works once, and dies when the screen closes. The phone talks to that API — not to the Electron window. On this computer the private QR uses the machine's Tailscale address, so the HTTP hop stays inside the encrypted tailnet; ordinary same-Wi-Fi HTTP is not advertised. **Qualquer rede** puts a user-owned HTTPS origin in the QR instead — a Cloudflare Tunnel or Tailscale Funnel you run yourself, pointed at `http://127.0.0.1:5173` (the Quibt window, which already proxies `/api`, `/rpc` and `/novnc`). Quibt does not host or sell that tunnel; if it is paid, you pay the provider. The laptop still has to stay on. If the Quibt server runs on a VPS, remote supervisor, or Box VM — not on this laptop — the phone keeps working when the laptop is off, without a tunnel.
 
 The desktop app does **not** run model commands as your macOS, Windows, or Linux user unless you explicitly choose the `desktop` sandbox (refused in production). Default local computer is Docker.
 
 ## Uninstall
 
-Dragging the app to the Trash leaves the Docker containers, the bot computers, ~6 GB of images
-and the data directory behind — and the next launch still finds that stack running, so the
-setup wizard never shows again. Use **Quibt Bot → Desinstalar o Quibt Bot…** instead: it
+Dragging the app to the Trash leaves the Docker containers, the bot computers, ~10 GB of images
+and the data directory behind — and the next launch finds the install state complete, so the
+app relaunches that stack by itself instead of showing the setup wizard. Use **Quibt Bot → Desinstalar o Quibt Bot…** instead: it
 confirms once, offers to keep your data (database and bot homes) and/or the Docker images for
 a faster reinstall, removes everything else the installer created (`docker compose down --volumes`, containers labelled
 `quibt.managed=true`, `ghcr.io/quibt/*` images, `~/Library/Application Support/Quibt Bot`),

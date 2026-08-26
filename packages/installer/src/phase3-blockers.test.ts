@@ -255,6 +255,7 @@ describe("first install on missing path", () => {
       },
       clock: { now: () => new Date("2026-08-17T00:00:00.000Z"), sleep: async () => undefined },
       platform: "linux",
+      statfs: async () => ({ bsize: 4096, bavail: 25_000_000 }),
     });
 
     expect(result.ok).toBe(true);
@@ -272,6 +273,8 @@ describe("complete rollback", () => {
     const result = await runUpdate({
       dataDir,
       composeFile: COMPOSE_FILE,
+      // A suíte não pode depender do disco livre de quem a roda.
+      statfs: async () => ({ bsize: 4096, bavail: 25_000_000 }),
       targetRelease: "0.2.11",
       run: makeUpdateRunner("migrate-fail"),
       fetch: async (url) => {
@@ -306,6 +309,8 @@ describe("complete rollback", () => {
     const result = await runUpdate({
       dataDir,
       composeFile: COMPOSE_FILE,
+      // A suíte não pode depender do disco livre de quem a roda.
+      statfs: async () => ({ bsize: 4096, bavail: 25_000_000 }),
       targetRelease: "0.2.11",
       run: makeUpdateRunner("rollback-db-fail"),
       fetch: async () => new Response("down", { status: 503 }),

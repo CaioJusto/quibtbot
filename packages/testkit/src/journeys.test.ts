@@ -13,6 +13,8 @@ process.env.WAKEUP_DRIVER = "memory";
 process.env.SANDBOX_PROVIDER = "fake";
 process.env.AGENT_RUNTIME = "scripted";
 process.env.BOOTSTRAP_SECRET ??= "journey-bootstrap-secret-32chars-min";
+// O cadastro nasce fechado; as jornadas criam vários usuários e abrem de propósito.
+process.env.SIGNUPS_ENABLED = "true";
 
 const JOURNEY_BOOTSTRAP_SECRET = process.env.BOOTSTRAP_SECRET;
 

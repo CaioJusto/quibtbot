@@ -31,6 +31,16 @@ describe("permission broker", () => {
 
   it("auto-approves a safe shell when the bot is in auto mode", () => {
     expect(autoDecision({ autoApprove: true }, "shell", "ls -la")).toBe("auto-approved shell");
+    // Comando comum com interpretador, pipe ou encadeamento também roda sem card.
+    expect(autoDecision({ autoApprove: true }, "shell", "python -c 'print(1)'")).toBe(
+      "auto-approved shell",
+    );
+    expect(autoDecision({ autoApprove: true }, "shell", "xdotool click 1 && sleep 1")).toBe(
+      "auto-approved shell",
+    );
+    // O broker legado é opt-in: sem autoApprove explícito, pede.
+    expect(autoDecision({}, "shell", "python -c 'print(1)'")).toBeNull();
+    expect(autoDecision({ autoApprove: false }, "shell", "xdotool click 1")).toBeNull();
   });
 
   it("keys command tools by exact operation so Always allow stays narrow", () => {
@@ -42,11 +52,21 @@ describe("permission broker", () => {
     expect(approvalKey("remember", "fact")).toBe("remember");
   });
 
-  it("asks for shell unless auto-approved or one-shot", () => {
-    const ask = decideToolPermission({}, "shell", { command: "ls" });
+  it("asks for shell unless auto-approved, whitelisted or one-shot", () => {
+    const ask = decideToolPermission({}, "shell", { command: "python3 x.py" });
     expect(ask.action).toBe("ask");
-    const once = decideToolPermission({}, "shell", { command: "ls" }, approvalKey("shell", "ls"));
+    const once = decideToolPermission(
+      {},
+      "shell",
+      { command: "python3 x.py" },
+      approvalKey("shell", "python3 x.py"),
+    );
     expect(once).toEqual({ action: "allow", reason: "allow-once" });
+    // Sem opt-in, o vocabulário mínimo (ls, pwd, git status…) ainda passa sem card.
+    expect(decideToolPermission({}, "shell", { command: "ls" })).toEqual({
+      action: "allow",
+      reason: "auto-approved safe command",
+    });
   });
 
   it("parses answers and checkpoints", () => {

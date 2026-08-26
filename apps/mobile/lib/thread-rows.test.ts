@@ -203,10 +203,13 @@ describe("thread screen list", () => {
     expect(screen).not.toContain("tailSpaceFor");
   });
 
-  it("keeps old VPS proxies fresh while the chat is active", () => {
-    expect(screen).toContain("LIVE_FALLBACK_POLL_MS = 1_500");
-    expect(screen).toContain("if (!paused) void reload()");
-    expect(screen).toContain("clearInterval(fallbackPoll)");
+  it("guarda um lugar fixo para o chip do fio, por cima da conversa", () => {
+    // A decisão de quando pollar e o que o chip diz é testada de verdade em
+    // live-link.test.ts; aqui fica só o lugar dele na tela, que é o que esta suíte sabe ver.
+    expect(screen).toContain("connectionChip");
+    expect(screen).toContain('accessibilityLiveRegion="polite"');
+    expect(screen).toContain("styles.linkChipRow");
+    expect(screen).toContain("insets.top + 74");
   });
 
   it("sends the user to the login on the first 401 instead of reconnecting", () => {

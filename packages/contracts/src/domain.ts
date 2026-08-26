@@ -332,6 +332,15 @@ export const ModelCredentialSchema = z.object({
   isDefault: z.boolean(),
 });
 
+/**
+ * O que `models.connect` devolve. `verified` diz se o servidor consultou o provedor
+ * antes de gravar: só OpenRouter, xAI, Ollama e OpenAI-compatible são sondados, e a
+ * tela só pode escrever "confirmada ✓" quando isto é true.
+ */
+export const ModelConnectResultSchema = ModelCredentialSchema.extend({
+  verified: z.boolean(),
+});
+
 export const ComputerCatalogItemSchema = z.object({
   kind: z.string(),
   family: z.string(),
@@ -418,6 +427,17 @@ export const DeploymentSettingsSchema = z.object({
 });
 export type DeploymentSettings = z.infer<typeof DeploymentSettingsSchema>;
 
+/**
+ * O worker é quem executa os runs; a API só o enxerga pelo batimento que ele grava no banco.
+ * `alive` é "visto há menos de 60 s". Um servidor antigo não manda o campo, e um servidor
+ * antigo não é um worker morto: o padrão fica em vivo.
+ */
+export const WorkerPresenceSchema = z.object({
+  alive: z.boolean(),
+  lastSeenAt: z.string().nullable(),
+});
+export type WorkerPresence = z.infer<typeof WorkerPresenceSchema>;
+
 export const MeSchema = z.object({
   userId: Id,
   email: z.string().email(),
@@ -435,6 +455,7 @@ export const MeSchema = z.object({
   // Same shape as DeploymentSettings.sandboxProvider: the machine in force is one concept, so the
   // two places that report it cannot drift into different types.
   sandboxProvider: z.string().nullable(),
+  worker: WorkerPresenceSchema.default({ alive: true, lastSeenAt: null }),
 });
 export type Me = z.infer<typeof MeSchema>;
 

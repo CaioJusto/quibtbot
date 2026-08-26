@@ -1,6 +1,7 @@
 import {
   chooseMode,
   chooseProvider,
+  initialTokenSource,
   localModelUrl,
   modelSaveAction,
   nextStepAfterModel,
@@ -123,13 +124,24 @@ export default function Onboarding() {
       setCatalog(models ?? []);
       setConnectedProviders(new Set((credentials ?? []).map((entry) => entry.provider)));
       const preferred = models.find((entry) => entry.provider === "openrouter") ?? models[0];
+      // "Minha assinatura" é o primeiro cartão e começa marcado, como no web; o provedor
+      // selecionado tem de ser um que esse cartão lista.
+      const source = initialTokenSource({
+        catalog: models,
+        preferred,
+        connected: (credentials ?? []).map((entry) => entry.provider),
+        fallback: "key",
+      });
       if (preferred) {
-        setProvider(preferred.provider);
-        setModelId(preferred.id);
-        setTokenSource(
-          preferred.subscription || preferred.signIn === "device-code" ? "subscription" : "key",
+        const start = chooseMode(
+          { provider: preferred.provider, modelId: preferred.id, apiKey: "" },
+          models,
+          source,
         );
+        setProvider(start.provider);
+        setModelId(start.modelId);
       }
+      setTokenSource(source);
       setEdition(next);
       setStep(productSteps(next, choose, owner, health?.sandbox ?? null)[0]);
     });
@@ -508,7 +520,13 @@ function ModelStep({
       <Text style={styles.heroSubtitle}>
         Você paga o modelo direto a quem o faz. Dá para pular.
       </Text>
+      {/* Mesma ordem do web: a assinatura que a pessoa já paga vem primeiro. */}
       <View style={styles.modeRow}>
+        <ModeCard
+          title="Minha assinatura"
+          selected={tokenSource === "subscription"}
+          onPress={() => onTokenSource("subscription")}
+        />
         <ModeCard
           title="Chave OpenRouter"
           selected={tokenSource === "key"}
@@ -518,11 +536,6 @@ function ModelStep({
           title="Modelo local"
           selected={tokenSource === "local"}
           onPress={() => onTokenSource("local")}
-        />
-        <ModeCard
-          title="Minha assinatura"
-          selected={tokenSource === "subscription"}
-          onPress={() => onTokenSource("subscription")}
         />
       </View>
       <View style={styles.providerList}>
@@ -562,6 +575,18 @@ function ModelStep({
             secureTextEntry={tokenSource !== "local"}
             style={styles.input}
           />
+          {selectedProvider === "openrouter" ? (
+            <Text style={styles.keyHint}>
+              Crie a chave em{" "}
+              <Text
+                style={{ color: COLORS.blue }}
+                onPress={() => void Linking.openURL("https://openrouter.ai/keys")}
+              >
+                openrouter.ai/keys
+              </Text>
+              . Você paga por uso na sua conta OpenRouter.
+            </Text>
+          ) : null}
         </>
       ) : null}
       {tokenSource === "subscription" ? (
@@ -922,6 +947,7 @@ const styles = StyleSheet.create({
     borderColor: COLORS.separator,
   },
   error: { color: COLORS.red, fontSize: 14, lineHeight: 20, marginTop: 16 },
+  keyHint: { color: COLORS.secondary, fontSize: 13, lineHeight: 18, marginTop: 8 },
   primaryButton: {
     height: 52,
     borderRadius: 999,

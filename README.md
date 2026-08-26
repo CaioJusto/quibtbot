@@ -25,16 +25,19 @@
 
 Each bot has one thread, one computer, memory, routines, and history. You run the stack on your machine. Packages live under `@quibt/*`. This repository is the complete product.
 
-> **Where this is:** `v0.2.11` is published and running. What that means concretely: the
-> Apple-silicon DMG is Developer ID signed **and** notarized (`spctl` reports
-> `accepted / source=Notarized Developer ID`), the three container images are public and
-> multi-architecture, and CI proves the Linux path on every run — a real Docker host boots a bot
-> computer and the VPS Compose stack comes up and answers.
+> **Where this is:** `v0.2.11` is published and running. What that means concretely: the three
+> container images are public and multi-architecture, and CI proves the Linux path on every run —
+> a real Docker host boots a bot computer and the VPS Compose stack comes up and answers.
 >
-> What is **not** covered yet: there is no signed Windows installer and no Linux desktop package
-> (run from source there), and a public multi-user deployment still needs the isolation and TLS
-> choices in [Security model](#security-model) — Docker and `remote-supervisor` assume one trusted
-> owner. The evidence behind each claim is in the
+> What is **not** covered yet: the `v0.2.11` desktop installers are the CI builds, **unsigned** on
+> every platform. The Apple-silicon `QuibtBot.dmg` attached to `v0.2.11` is not notarized
+> (`signing-status-mac.json` says `signed: false, notarized: false`), so macOS warns the first
+> time — **right-click → Open**. The notarized DMG exists for `v0.2.10` (and `v0.2.9`, where the
+> maintainer replaced the CI DMG by the notarized one); the same swap is pending for `v0.2.11`.
+> The Windows installer and the Linux AppImage are unsigned test builds (Intel Macs run from
+> source), and a public multi-user deployment still needs the isolation and TLS choices in
+> [Security model](#security-model) — Docker and `remote-supervisor` assume one trusted owner.
+> The evidence behind each claim, per tag, is in the
 > [release-readiness ledger](docs/release-readiness.md).
 
 ## Download
@@ -42,18 +45,20 @@ Each bot has one thread, one computer, memory, routines, and history. You run th
 The desktop app wraps the same UI the browser shows. The API, worker, and bot computer still run on
 **your** machine — the app is a window, not a service in someone else's cloud.
 
-| Platform | Installer |
-| --- | --- |
-| macOS (Apple silicon) | [`QuibtBot.dmg` (v0.2.11)](https://github.com/CaioJusto/quibtbot/releases/download/v0.2.11/QuibtBot.dmg) |
-| Linux / macOS (server) | `quibtbot` CLI — the one-line install below |
-| Windows | Run from source (`pnpm dev`) until a signed installer ships |
+| Platform | Installer | One sentence |
+| --- | --- | --- |
+| macOS (Apple silicon) | [`QuibtBot.dmg`](https://github.com/CaioJusto/quibtbot/releases/download/v0.2.11/QuibtBot.dmg) | CI build, unsigned and not notarized: macOS warns the first time — **right-click → Open**. |
+| macOS (Intel) | — | No installer yet: run from source (`pnpm dev` + `pnpm desktop`). |
+| Windows (64-bit) | [`QuibtBot-setup.exe`](https://github.com/CaioJusto/quibtbot/releases/download/v0.2.11/QuibtBot-setup.exe) | Unsigned test installer: SmartScreen warns (**More info → Run anyway**), and you install Docker Desktop yourself. |
+| Linux (x64) | [`QuibtBot.AppImage`](https://github.com/CaioJusto/quibtbot/releases/download/v0.2.11/QuibtBot.AppImage) | Unsigned test AppImage: needs `libfuse2`, mark it executable and run it; you install Docker (Engine or Desktop) yourself. |
+| Linux / macOS (server) | `quibtbot` CLI | The one-line install below; no desktop app involved. |
 
-The Apple-silicon DMG is Developer ID signed **and notarized**: macOS opens it without the
-"unidentified developer" warning. Windows and Linux desktop installers are not published yet —
-the Windows one needs an Authenticode certificate, and until then SmartScreen would call it an
-unknown publisher. See [`docs/desktop.md`](docs/desktop.md).
+The file names above never change; the version lives in the release tag. The sentence next to
+each installer follows `DESKTOP_SIGNING` in `packages/installer/src/compose.ts`, filled from the
+`signing-status-*.json` files attached to the tag. Details are in
+[`docs/desktop.md`](docs/desktop.md).
 
-The `v0.2.11` release publishes that signed Apple-silicon app, standalone macOS/Linux
+The `v0.2.11` release publishes those three desktop installers, standalone macOS/Linux/Windows
 `quibtbot` binaries, matching SHA-256 files, and public multi-architecture Docker images from
 the same tag. Use the immutable, version-matched command below:
 
@@ -117,7 +122,7 @@ pnpm desktop:pack:linux # x64 AppImage → apps/desktop/out/
 | | |
 | --- | --- |
 | **A bot** | One thread, one graphical Linux desktop of its own, memory, routines, history. Talk to it in the app; it browses, downloads, writes files and runs commands on that desktop. |
-| **Your model** | An OpenRouter key, a local Ollama / LM Studio URL, or the ChatGPT / Claude / Copilot / SuperGrok subscription you already pay for. Quibt sells no tokens and takes no cut. |
+| **Your model** | An OpenRouter key, a local Ollama / LM Studio URL, or the ChatGPT / Copilot / SuperGrok subscription you already pay for. Quibt sells no tokens and takes no cut. |
 | **Your machine** | Docker on this computer (default), your own VPS, E2B, or Box. The choice is made in onboarding and can change later in Ajustes → Máquina. |
 | **Three clients** | Web, desktop (Electron, macOS/Windows/Linux) and phone (iOS/Android) — all clients of the same API, so a bot started on the laptop keeps working from the phone. |
 | **Your data** | Postgres and the bot home directories live on the machine you installed onto. Uninstall takes them with it if you want. |
@@ -150,7 +155,7 @@ curl -s http://127.0.0.1:3100/health
 curl -s http://127.0.0.1:3100/ready
 ```
 
-`/health` should show `"runtime":"pi"`, `"sandbox":"docker"`, and `"wakeup":"graphile"`. `/ready` checks that Postgres answers.
+`/health` should show `"runtime":"pi"`, `"sandbox":"docker"`, `"wakeup":"graphile"`, and `"worker":{"alive":true,...}` — the worker writes a heartbeat every 15 s; `alive:false` means nothing will pick up the queue, and the app says so in the chat. `/ready` checks that Postgres answers.
 
 Product defaults are Pi + Docker + Graphile. `pnpm verify:fast` pins emulators (`AGENT_RUNTIME=scripted`, `SANDBOX_PROVIDER=fake`, `WAKEUP_DRIVER=memory`) so default tests never call live models or Composio.
 
@@ -186,8 +191,8 @@ With `SANDBOX_SCREEN_NETWORK=internal` (what `infra/compose` sets) each workspac
 - Packaged releases pin the three Quibt container images by immutable digest. Source checkout
   Compose builds the code in the checkout. The API host port is loopback-only; browsers and phones
   reach `/api`, `/rpc`, and `/novnc` through the web origin.
-- Generated self-host environments keep registration closed (`SIGNUPS_ENABLED=false`) until the
-  owner explicitly opens it. Never expose Postgres, the supervisor, or port `3100` publicly.
+- Registration is closed by default (`SIGNUPS_ENABLED=false`) on every path until the owner
+  explicitly opens it. Never expose Postgres, the supervisor, or port `3100` publicly.
 - Docker and `remote-supervisor` are for a trusted, single-owner workspace. Bots in one workspace
   share a Unix/container boundary. Use one sandbox/VM per bot (E2B or Box) when bots or tenants are
   mutually untrusted.

@@ -1,17 +1,27 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { chmod, lstat, mkdir } from "node:fs/promises";
 import path from "node:path";
-import { MAX_WORKSPACE_SESSIONS } from "./computer-spec.js";
+import { MAX_WORKSPACE_SESSIONS, WORKSPACE_RESTART_POLICY } from "./computer-spec.js";
 
-export type SupervisorErrorStatus = 400 | 401 | 403 | 404 | 409 | 500;
+export type SupervisorErrorStatus = 400 | 401 | 403 | 404 | 409 | 500 | 503;
+
+/**
+ * Código legível por máquina que acompanha a mensagem. O adapter (`docker-sandbox.ts`)
+ * lê o código para dizer ao bot e à pessoa o que houve — "estava desligado e foi
+ * religado", "abra o Docker" — em vez de um "computer request failed" igual para tudo.
+ */
+export type SupervisorErrorCode = "computer-stopped" | "docker-down";
 
 /** Error whose message is safe to return to the caller. */
 export class SupervisorError extends Error {
   readonly status: SupervisorErrorStatus;
+  readonly code: SupervisorErrorCode | undefined;
 
-  constructor(message: string, status: SupervisorErrorStatus = 400) {
+  constructor(message: string, status: SupervisorErrorStatus = 400, code?: SupervisorErrorCode) {
     super(message);
     this.name = "SupervisorError";
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -22,9 +32,211 @@ export class SupervisorError extends Error {
 export function publicError(error: unknown): {
   status: SupervisorErrorStatus;
   message: string;
+  code?: SupervisorErrorCode;
 } {
-  if (error instanceof SupervisorError) return { status: error.status, message: error.message };
+  if (error instanceof SupervisorError) {
+    return {
+      status: error.status,
+      message: error.message,
+      ...(error.code ? { code: error.code } : {}),
+    };
+  }
   return { status: 500, message: "computer request failed" };
+}
+
+// ── Erros do Docker ──────────────────────────────────────────────────────────
+// O dockerode devolve dois tipos de erro: o daemon respondeu (HTTP, com `statusCode`)
+// ou nem chegou lá (erro de socket, com `code` do Node). Confundir os dois era o que
+// fazia um Docker fechado virar "computer not found" — e a API, acreditando que o
+// container tinha sumido, esquecia a linha do banco e tentava provisionar outro.
+
+export const DOCKER_DOWN_MESSAGE =
+  "O Docker não está respondendo: abra o Docker (ou o serviço dele) e tente de novo.";
+
+/**
+ * Quem lê esta frase é o bot, não a pessoa: ela sobe pelo stderr do exec e pela recusa
+ * do clique. "Toque em Ligar" não serve — o bot não tem botão nenhum; o que ele tem é o
+ * terminal. A frase para a pessoa mora no adapter (`computerErrorMessage`, audiência
+ * "person"), porque só lá se sabe que a tela do dono está do outro lado.
+ */
+export const COMPUTER_STOPPED_MESSAGE =
+  "O computador estava desligado; rode um comando de terminal para religá-lo e abra a tela de novo antes de clicar.";
+
+export const COMPUTER_REVIVED_MESSAGE =
+  "O computador estava desligado e foi religado. As janelas abertas antes se perderam; os arquivos da pasta de casa continuam lá.";
+
+export const COMPUTER_REVIVE_DOCKER_DOWN_MESSAGE =
+  "O computador estava desligado e não conseguiu religar: abra o Docker e tente de novo.";
+
+export const COMPUTER_REVIVE_FAILED_MESSAGE =
+  "O computador estava desligado e não conseguiu religar.";
+
+const DOCKER_UNREACHABLE_CODES = new Set([
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "ENOENT",
+  "EPIPE",
+  "ETIMEDOUT",
+  "EAI_AGAIN",
+  "ENETUNREACH",
+  "EHOSTUNREACH",
+]);
+
+/** O daemon respondeu "não existe" (container, imagem, rede). */
+export function isDockerNotFound(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { statusCode?: unknown }).statusCode === 404
+  );
+}
+
+/** Já rodava: `start` num container que outro pedido ligou no meio do caminho. */
+export function isDockerAlreadyStarted(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { statusCode?: unknown }).statusCode === 304
+  );
+}
+
+/** O daemon não respondeu: socket sumiu, Docker fechado ou reiniciando. */
+export function isDockerUnreachable(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const code = (error as { code?: unknown }).code;
+  if (typeof code === "string" && DOCKER_UNREACHABLE_CODES.has(code)) return true;
+  const message = error instanceof Error ? error.message : "";
+  return /socket hang up/i.test(message);
+}
+
+export function dockerDownError(): SupervisorError {
+  return new SupervisorError(DOCKER_DOWN_MESSAGE, 503, "docker-down");
+}
+
+export function computerStoppedError(): SupervisorError {
+  return new SupervisorError(COMPUTER_STOPPED_MESSAGE, 409, "computer-stopped");
+}
+
+/**
+ * Religar um container parado falhou. Com o Docker fora, o que a pessoa precisa saber é
+ * "abra o Docker"; em qualquer outro caso, o motivo que o `start` deu (código de saída,
+ * EAGAIN) vai junto, porque só ele explica o que fazer.
+ */
+export function explainReviveFailure(error: unknown): SupervisorError {
+  if (error instanceof SupervisorError && error.code === "docker-down") {
+    return new SupervisorError(COMPUTER_REVIVE_DOCKER_DOWN_MESSAGE, 503, "docker-down");
+  }
+  const detail = error instanceof SupervisorError ? error.message.trim() : "";
+  return new SupervisorError(
+    detail ? `${COMPUTER_REVIVE_FAILED_MESSAGE} ${detail}` : COMPUTER_REVIVE_FAILED_MESSAGE,
+    500,
+    "computer-stopped",
+  );
+}
+
+/**
+ * Containers criados antes desta versão nasceram sem política de reinício: depois de
+ * reiniciar o Mac ou o Docker ficavam `Exited` até alguém dar `docker start` na mão.
+ * `docker update --restart` corrige no lugar, sem recriar (e sem perder as janelas).
+ */
+export function containerNeedsRestartPolicy(info: {
+  HostConfig?: { RestartPolicy?: { Name?: string } | undefined };
+}): boolean {
+  return info.HostConfig?.RestartPolicy?.Name !== WORKSPACE_RESTART_POLICY;
+}
+
+// ── Religar um container parado ──────────────────────────────────────────────
+// Mora aqui, e não no `index.ts`, porque o `index.ts` abre o Docker e escuta uma porta só
+// de ser importado: nada dele entra num teste. O Docker é injetado, e as duas memórias do
+// supervisor (sessões e caixas) vêm por parâmetro.
+
+/** O mínimo que o revive precisa saber do container. */
+export type ContainerRunState = { State: { Running: boolean; Status?: string } };
+
+export interface ReviveDocker<TInfo extends ContainerRunState = ContainerRunState> {
+  /** Só para o log. */
+  readonly id: string;
+  /** `inspect` que já separou "não existe" (404) de "o Docker não respondeu" (503). */
+  inspect(): Promise<TInfo>;
+  /** Liga o container e devolve o estado depois; adota a política de reinício no caminho. */
+  start(info: TInfo): Promise<TInfo>;
+  /** Refaz as conferências do provision: `/run` é tmpfs e nasce vazio a cada boot. */
+  verify(): Promise<void>;
+}
+
+/** As duas memórias do supervisor, para o revive poder esquecê-las. */
+export interface WorkspaceMemory {
+  sessions: Map<string, { containerId: string; workspaceId: string }>;
+  workspaceBoxes: Map<string, { containerId: string; displays: Map<string, number> }>;
+}
+
+/** Tudo que o supervisor guardava daquela caixa morreu com o container. */
+export function forgetWorkspaceMemory(
+  memory: WorkspaceMemory,
+  workspaceId: string,
+  containerId: string,
+): void {
+  memory.workspaceBoxes.delete(workspaceId);
+  for (const [key, session] of memory.sessions) {
+    if (session.workspaceId === workspaceId || session.containerId === containerId) {
+      memory.sessions.delete(key);
+    }
+  }
+}
+
+/**
+ * Religa um container de workspace parado, uma vez por workspace de cada vez (a fila é a
+ * mesma das sessões: dois bots acordando juntos não disputam o `start`). Quem chega
+ * depois encontra o container já de pé e recebe `revived:false`, sem um segundo `start`.
+ */
+export function reviveStoppedContainer<TInfo extends ContainerRunState>(
+  docker: ReviveDocker<TInfo>,
+  workspaceId: string,
+  memory: WorkspaceMemory,
+): Promise<{ info: TInfo; revived: boolean }> {
+  return withWorkspaceSessionLock(workspaceId, async () => {
+    const current = await docker.inspect();
+    if (current.State.Running) return { info: current, revived: false };
+    console.log(
+      `workspace container ${docker.id.slice(0, 12)} is ${current.State.Status ?? "stopped"}; starting it again`,
+    );
+    forgetWorkspaceMemory(memory, workspaceId, docker.id);
+    let info: TInfo;
+    try {
+      info = await docker.start(current);
+    } catch (error) {
+      // Com o Docker fora, o `start` nem chega ao daemon: o recado é "abra o Docker",
+      // nunca um ECONNREFUSED cru vindo de dentro do supervisor.
+      throw explainReviveFailure(isDockerUnreachable(error) ? dockerDownError() : error);
+    }
+    await docker.verify();
+    return { info, revived: true };
+  });
+}
+
+/**
+ * O que fazer com um container que existe mas não roda: `revive` liga antes de seguir
+ * (exec, abrir a tela, clicar); `allow` devolve como está, sem sessão, para quem só quer
+ * parar ou apagar; `reject` recusa com `computer-stopped`.
+ */
+export type StoppedContainerPolicy = "revive" | "allow" | "reject";
+
+/** `halted` significa "devolva o container como está, sem sessão". */
+export async function applyStoppedContainerPolicy<TInfo extends ContainerRunState>(
+  policy: StoppedContainerPolicy,
+  docker: ReviveDocker<TInfo>,
+  info: TInfo,
+  workspaceId: string,
+  memory: WorkspaceMemory,
+): Promise<{ info: TInfo; revived: boolean; halted: boolean }> {
+  if (policy === "revive") {
+    const result = await reviveStoppedContainer(docker, workspaceId, memory);
+    return { ...result, halted: false };
+  }
+  // Parado: o que a memória guarda desta caixa é de antes de parar.
+  forgetWorkspaceMemory(memory, workspaceId, docker.id);
+  if (policy === "reject") throw computerStoppedError();
+  return { info, revived: false, halted: true };
 }
 
 /**
@@ -248,6 +460,55 @@ export const SESSION_PROBE_COMMAND = [
   // pode ser de outro processo. Só um Xvfb vivo naquele pid conta como sessão.
   'for d in /quibt-desktops/*/; do [ -f "$d/session.pid" ] || continue; p=$(cat "$d/session.pid" 2>/dev/null); [ -n "$p" ] || continue; kill -0 "$p" 2>/dev/null || continue; [ "$(cat /proc/$p/comm 2>/dev/null)" = Xvfb ] || continue; echo "$(basename "$d") $(cat "$d/display" 2>/dev/null)"; done',
 ];
+
+/**
+ * Onde fica escrito, por bot, o display que é dele.
+ *
+ * O display não é detalhe de runtime: o uid da sessão é `10000+display` e
+ * `/quibt-desktops/<bot>` nasce 700 desse uid. Depois de um reboot o container volta com
+ * a memória do supervisor vazia; realocar por ordem de chegada dava ao bot B o display do
+ * bot A, o `chmod 700` da pasta do outro falha e nenhum dos dois volta a ter tela.
+ *
+ * O `quibt-session` grava `<dir>/display` dentro da pasta do bot, mas ninguém consegue ler
+ * de lá: a pasta é 700 do dono e o computador roda com `CapDrop: ALL`, então nem o root
+ * atravessa modo de arquivo (é o mesmo motivo pelo qual a senha do VNC só é lida como o
+ * dono da sessão). Por isso a lembrança mora ao lado, numa pasta do root — legível por
+ * qualquer sessão, gravável só pelo supervisor — dentro do mesmo bind mount, que sobrevive
+ * ao reboot. O ponto no nome a esconde do glob que procura sessões vivas, que não pega
+ * nomes começados por ponto.
+ */
+export const SESSION_DISPLAY_RECORD_DIR = "/quibt-desktops/.displays";
+
+/** Lista `<botId> <display>` do que está gravado, com a sessão viva ou morta. Roda como root. */
+export const SESSION_RECORDED_PROBE_COMMAND = [
+  "bash",
+  "-lc",
+  `for f in ${SESSION_DISPLAY_RECORD_DIR}/*; do [ -f "$f" ] || continue; echo "$(basename "$f") $(cat "$f" 2>/dev/null)"; done`,
+];
+
+/** Grava o display deste bot para o próximo boot do container. Roda como root. */
+export function recordSessionDisplayCommand(botId: string, display: number): string[] {
+  if (!SESSION_BOT_ID.test(botId)) throw new SupervisorError("invalid session id");
+  sessionUser(display);
+  return [
+    "bash",
+    "-lc",
+    [
+      `dir="${SESSION_DISPLAY_RECORD_DIR}"`,
+      // A raiz é 1777 (sticky): qualquer sessão cria coisas ali, mas só o dono apaga a
+      // dele. A pasta das lembranças nasce do root e fica 755 — todos leem, ninguém mais
+      // escreve. O `test ! -L` fecha a única janela: um bot que corresse na frente e
+      // deixasse um link no lugar faria o root escrever do outro lado dele.
+      'test ! -L "$dir" || exit 1',
+      'mkdir -p "$dir" && chmod 755 "$dir"',
+      'test ! -L "$dir/$1"',
+      'printf %s "$2" > "$dir/$1"',
+    ].join("\n"),
+    "quibt-display-record",
+    botId,
+    String(display),
+  ];
+}
 
 /**
  * Can the container's own user write its home?
@@ -477,6 +738,53 @@ export function allocateDisplay(
 }
 
 /**
+ * O display de um bot tem de ser o mesmo depois de religar o container.
+ *
+ * `allocateDisplay` só conhece a memória do processo, que um reboot zera: o primeiro bot
+ * a acordar levava o display 1, mesmo que ele fosse de outro, e a sessão morria no
+ * `chmod 700` de uma pasta que pertence a outro uid. Aqui entram duas lembranças que
+ * sobrevivem ao reboot — a preferida (o que o banco guarda para este bot, via cabeçalho
+ * `x-quibt-display`) e a gravada em disco (`/quibt-desktops/<bot>/display`) — sem nunca
+ * roubar um display de quem está vivo.
+ *
+ * Ordem: pedido explícito do provision (falha com 409 se estiver ocupado) → preferido →
+ * gravado → o menor livre que não seja reserva de outro bot → o menor livre. O último
+ * degrau existe para um workspace com mais bots do que displays não travar em ninguém.
+ */
+export function allocateStableDisplay(
+  used: Map<string, number>,
+  botId: string,
+  options: {
+    /** Display pedido no corpo do provision: continua sendo um pedido firme. */
+    requested?: number;
+    /** O que o chamador lembra deste bot (linha do banco). Cede se estiver ocupado. */
+    preferred?: number;
+    /** `<botId> <display>` gravado no disco do container, vivo ou morto. */
+    recorded?: Map<string, number>;
+  } = {},
+): number {
+  const current = used.get(botId);
+  if (current) return current;
+  if (options.requested) return allocateDisplay(used, botId, options.requested);
+  const taken = new Set([...used].filter(([id]) => id !== botId).map(([, display]) => display));
+  const isFree = (display: number | undefined): display is number =>
+    Number.isInteger(display) &&
+    (display as number) >= 1 &&
+    (display as number) <= MAX_WORKSPACE_SESSIONS &&
+    !taken.has(display as number);
+  if (isFree(options.preferred)) return options.preferred;
+  const recorded = options.recorded;
+  if (isFree(recorded?.get(botId))) return recorded!.get(botId)!;
+  const reserved = new Set(
+    [...(recorded ?? [])].filter(([id]) => id !== botId).map(([, display]) => display),
+  );
+  for (let display = 1; display <= MAX_WORKSPACE_SESSIONS; display += 1) {
+    if (!taken.has(display) && !reserved.has(display)) return display;
+  }
+  return allocateDisplay(used, botId);
+}
+
+/**
  * Caches a one-shot async step, but forgets a rejection so a transient image build
  * failure does not brick every later request until the process restarts.
  */
@@ -595,4 +903,32 @@ export function explainContainerExit(
       : `O computador saiu com código ${exitCode ?? "desconhecido"}.`,
     500,
   );
+}
+
+/**
+ * A raiz dos desktops fica 1777 — qualquer sessão cria a sua ali e só o dono apaga a
+ * dele, como em `/tmp`. Escrito daqui, do host, nunca de dentro do container, onde
+ * `CapDrop: ALL` proíbe. Dono não se mexe: o supervisor nem sempre é root (`pnpm dev`
+ * e o CI rodam como gente comum) e mudar dono exige privilégio.
+ *
+ * Mora aqui, e não no `index.ts`, para o teste não precisar subir o supervisor inteiro
+ * (que abre o Docker e escuta uma porta só de ser importado).
+ */
+export async function hardenDesktopRoot(desktopRoot: string) {
+  const info = await lstat(desktopRoot).catch(() => undefined);
+  if (info?.isSymbolicLink()) throw new SupervisorError("desktop storage path is a link", 500);
+  if (!info) await mkdir(desktopRoot, { recursive: true });
+  await chmod(desktopRoot, 0o1777);
+  // Relido de propósito: um chmod que "passa" mas não fica (bind mount, fs sem suporte)
+  // deixava o dir 755 root, o dono da sessão não conseguia criar o desktop dele e a
+  // tela morria em "framebuffer failed" — silenciosamente, só na hora de assumir o
+  // controle. Melhor o install falhar aqui, com nome, do que o celular ficar
+  // "conectando" para sempre.
+  const mode = (await lstat(desktopRoot)).mode & 0o7777;
+  if (mode !== 0o1777) {
+    throw new SupervisorError(
+      `desktop root ${desktopRoot} ficou com modo ${mode.toString(8)}, esperado 1777`,
+      500,
+    );
+  }
 }

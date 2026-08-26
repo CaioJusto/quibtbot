@@ -46,6 +46,23 @@ describe("changing the AI provider from Conta", () => {
     expect(src).toContain("chooseMode(");
     expect(src).toContain("localModelUrl(provider)");
   });
+
+  it("segue a ordem do onboarding: assinatura, chave OpenRouter, modelo local", () => {
+    const subscription = src.indexOf('["subscription", "Minha assinatura"]');
+    const key = src.indexOf('["key", "Chave OpenRouter"]');
+    const local = src.indexOf('["local", "Modelo local"]');
+    expect(subscription).toBeGreaterThan(-1);
+    expect(subscription).toBeLessThan(key);
+    expect(key).toBeLessThan(local);
+    expect(src).not.toContain("Claude");
+  });
+
+  it("confirma a chave que o servidor conferiu e aponta onde ela nasce", () => {
+    // A frase vem do core: "confirmada" só quando o servidor sondou o provedor.
+    expect(src).toContain("connectedModelNotice({ verified: credential.verified");
+    expect(src).toContain('href="https://openrouter.ai/keys"');
+    expect(src).toContain("Você paga por uso na sua conta OpenRouter");
+  });
 });
 
 describe("conta sem e-mail e sem senha", () => {
