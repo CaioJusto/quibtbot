@@ -368,6 +368,52 @@ describe("Pi agent runtime", () => {
     expect(new Set(ids).size).toBe(2);
     expect(ids.every((id) => id.startsWith("r:shell"))).toBe(true);
   });
+
+  it("returns a computer observation as image content without repeating base64 in details", async () => {
+    const executeTool = vi.fn(async () => ({
+      ok: true,
+      action: "click",
+      snapshot: { id: "snap-1", createdAt: "2026-08-26T00:00:00.000Z" },
+      observation: { mimeType: "image/png", data: "cG5n" },
+    }));
+    const host = {
+      queue: { push: () => undefined },
+      request: { runId: "r-computer", executeTool },
+      signal: new AbortController().signal,
+      depth: 0,
+    } as unknown as ToolHost;
+    const tool = toAgentTool(
+      {
+        name: "computer",
+        description: "computer",
+        inputSchema: { type: "object", properties: {} },
+      },
+      host,
+    );
+
+    const result = await tool.execute(
+      "call-1",
+      { action: "click", x: 10, y: 20 },
+      host.signal,
+      () => undefined,
+    );
+
+    expect(result.content).toEqual([
+      {
+        type: "text",
+        text: JSON.stringify({
+          ok: true,
+          action: "click",
+          snapshot: { id: "snap-1", createdAt: "2026-08-26T00:00:00.000Z" },
+          observation: { mimeType: "image/png", attached: true },
+        }),
+      },
+      { type: "image", data: "cG5n", mimeType: "image/png" },
+    ]);
+    expect(result.details).not.toMatchObject({
+      observation: { data: expect.anything() },
+    });
+  });
 });
 
 describe("chamadas ao provedor", () => {

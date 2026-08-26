@@ -40,6 +40,8 @@ export class DesktopSandboxProvider implements SandboxProvider {
       adapterVersion: "0.1.0",
       capabilities: {
         graphical: true,
+        // This adapter represents the service host, not an agent sandbox.
+        agentInput: false,
         pty: true,
         snapshots: true,
         takeover: true,

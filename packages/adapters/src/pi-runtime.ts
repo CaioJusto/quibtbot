@@ -470,6 +470,18 @@ export function toAgentTool(tool: ConnectorTool, host: ToolHost): AgentTool {
           details: { result },
         };
       }
+      if (tool.name === "computer") {
+        const visual = computerToolObservation(authorizedResult);
+        if (visual) {
+          return {
+            content: [
+              { type: "text", text: summarizeToolResult(visual.summary) },
+              { type: "image", data: visual.data, mimeType: visual.mimeType },
+            ],
+            details: visual.summary,
+          };
+        }
+      }
       return {
         content: [{ type: "text", text: summarizeToolResult(authorizedResult) }],
         details: authorizedResult,
@@ -716,6 +728,34 @@ function jsonSchemaParameters(schema: Record<string, unknown>) {
     >;
   }
   return Type.Object(fields);
+}
+
+function computerToolObservation(result: unknown): {
+  data: string;
+  mimeType: "image/png";
+  summary: unknown;
+} | null {
+  if (!result || typeof result !== "object") return null;
+  const row = result as Record<string, unknown>;
+  const observation =
+    row.observation && typeof row.observation === "object"
+      ? (row.observation as Record<string, unknown>)
+      : null;
+  if (
+    observation?.mimeType !== "image/png" ||
+    typeof observation.data !== "string" ||
+    !observation.data
+  ) {
+    return null;
+  }
+  return {
+    data: observation.data,
+    mimeType: "image/png",
+    summary: {
+      ...row,
+      observation: { mimeType: "image/png", attached: true },
+    },
+  };
 }
 
 function jsonField(spec: unknown): ReturnType<typeof Type.String> {

@@ -77,6 +77,7 @@ export class E2BSandboxProvider implements SandboxProvider {
       adapterVersion: "0.1.0",
       capabilities: {
         graphical: true,
+        agentInput: true,
         pty: true,
         snapshots: true,
         takeover: true,

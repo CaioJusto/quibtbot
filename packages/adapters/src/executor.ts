@@ -1,8 +1,10 @@
 import type {
   AgentHomeStore,
   AgentRuntime,
+  ComputerInput,
   ComputerRef,
   ConnectorProvider,
+  ControlLeaseRef,
   MemoryStore,
   NotificationMessage,
   NotificationProvider,
@@ -405,7 +407,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
       // Native Pi effects cannot be meaningfully resumed from a webhook approval card: there
       // is no person behind the run, and the first model turn has already ended. Make those
       // capabilities unavailable instead of letting the runtime perform them before approval.
-      const tools = unattended
+      let tools = unattended
         ? allTools.filter(
             (tool) => tool.name !== "run_subagent" && tool.name !== "request_takeover",
           )
@@ -463,6 +465,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
         oauthCredential = resolved.oauthCredential;
         runSecrets = [...deps.secrets, ...resolved.redact];
         computer = await ensureComputer(deps, bot.id, context);
+        if (!sandboxSupportsAgentInput(deps.sandbox, computer)) {
+          tools = tools.filter((tool) => tool.name !== "computer");
+        }
         if (!apiKey && !oauthCredential && !scripted) {
           throw new Error(MISSING_MODEL_MESSAGE);
         }
@@ -515,6 +520,39 @@ export function createRunExecutor(deps: ExecutorDeps) {
         executionId: string,
         _applied: Awaited<ReturnType<typeof recordEffect>>,
       ): Promise<unknown> => {
+        if (name === "computer") {
+          if (!sandboxSupportsAgentInput(deps.sandbox, computer)) {
+            return {
+              error: `The ${computer.kind} sandbox does not support agent computer input.`,
+              capability: "agentInput",
+              available: false,
+            };
+          }
+          return deps.prisma.$transaction(
+            async (tx) => {
+              const control = await lockComputerForAgent(tx, {
+                runId,
+                workerId,
+                runFence: fence,
+                botId: bot.id,
+              });
+              if (!control.ok) return control;
+              return executeComputerToolAction({
+                sandbox: deps.sandbox,
+                computer,
+                args,
+                lease: {
+                  leaseId: `agent:${runId}:${control.controlFence}`,
+                  holder: "bot",
+                  fence: control.controlFence,
+                },
+                context,
+                capture: () => captureComputerImage(deps.sandbox, computer, context),
+              });
+            },
+            { timeout: COMPUTER_TOOL_TRANSACTION_TIMEOUT_MS },
+          );
+        }
         if (name === "write_file") {
           const filePath = String(args.path ?? "notes/result.txt");
           const content = String(args.content ?? "");
@@ -1133,6 +1171,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
               instructions: [
                 bot.instructions || `${bot.name}: ${bot.title}\n${bot.description}`,
                 ...groupLines,
+                tools.some((tool) => tool.name === "computer")
+                  ? "Use computer to inspect and operate the graphical desktop. Call it with exactly one action, inspect the fresh screenshot it returns, and only then choose the next action. computer screenshots are observations for you; use screenshot when the person asked to receive the image in chat."
+                  : "",
                 'You have a persistent computer with a real graphical desktop and a browser. Use open_url to open HTTP or HTTPS pages inside that browser without asking for approval; never use shell/xdg-open for normal page navigation. Use write_file to save files into your home (they appear in Files). Use shell to run commands in that computer. Use the memory tool proactively for durable facts (MEMORY.md = your notes, USER.md = who the user is; add/replace/remove compact § entries). Use save_skill when the user wants to reuse a method (they can type /Name later). Use create_routine when they want work on a schedule. When you hit something only the person can do — a login or password, a two-factor or captcha, a payment, a file chooser, or any choice you should not make for them — call request_takeover with a plain reason ("preciso que você faça o login no banco") and stop there; do not guess a password, invent data, or click past it. Prefer asking to acting when you are unsure and the action is hard to undo. Use destination.write only for connected destination records.',
                 // Sem esta linha o modelo não sabia que enxerga a própria tela: com o bot
                 // instruído, o texto de fallback do runtime que ensinava `screenshot` era
@@ -1944,6 +1985,275 @@ export function sandboxCwd(raw: unknown, home = "/home/quibt"): string {
   }
   if (!value.startsWith("/")) return `${home}/${value}`.replace(/\/+$/, "");
   return value.length > 1 ? value.replace(/\/+$/, "") : value;
+}
+
+const COMPUTER_WAIT_MAX_MS = 10_000;
+const COMPUTER_TOOL_TRANSACTION_TIMEOUT_MS = 20_000;
+const COMPUTER_OBSERVATION_MAX_BYTES = 8 * 1024 * 1024;
+const COMPUTER_MODIFIERS = new Set(["ctrl", "alt", "shift", "super"]);
+
+type SandboxAgentInputCapabilities = {
+  agentInput?: boolean;
+};
+
+type SandboxWithComputerDescriptor = SandboxProvider & {
+  describeFor?(computer: ComputerRef): ReturnType<SandboxProvider["describe"]>;
+};
+
+export function sandboxSupportsAgentInput(
+  sandbox: SandboxProvider,
+  computer?: ComputerRef,
+): boolean {
+  const routed = sandbox as SandboxWithComputerDescriptor;
+  const descriptor =
+    computer && routed.describeFor ? routed.describeFor(computer) : sandbox.describe();
+  return (descriptor.capabilities as SandboxAgentInputCapabilities).agentInput === true;
+}
+
+type ComputerToolTransaction = Pick<Prisma.TransactionClient, "run" | "desktopSession">;
+
+export async function lockComputerForAgent(
+  tx: ComputerToolTransaction,
+  input: { runId: string; workerId: string; runFence: number; botId: string; now?: Date },
+): Promise<
+  | { ok: true; controlFence: number }
+  | {
+      ok: false;
+      error: string;
+      code: "run_lease_lost" | "computer_not_running" | "takeover_active";
+    }
+> {
+  // Updating rows to their current owners acquires database locks. A stale worker or expired
+  // lease cannot inject input, and takeover cannot cross the action -> observation boundary.
+  const runLock = await tx.run.updateMany({
+    where: {
+      id: input.runId,
+      status: "running",
+      leaseOwner: input.workerId,
+      leaseFence: input.runFence,
+      leaseExpiresAt: { gt: input.now ?? new Date() },
+    },
+    data: { leaseOwner: input.workerId },
+  });
+  if (runLock.count !== 1) {
+    return {
+      ok: false,
+      error: "Computer action refused because the run lease is no longer active.",
+      code: "run_lease_lost",
+    };
+  }
+  const session = await tx.desktopSession.findUnique({
+    where: { botId: input.botId },
+    select: {
+      state: true,
+      controlFence: true,
+    },
+  });
+  if (session?.state !== "running") {
+    return {
+      ok: false,
+      error: "Computer action refused because the desktop is not running.",
+      code: "computer_not_running",
+    };
+  }
+  const controlLock = await tx.desktopSession.updateMany({
+    where: {
+      botId: input.botId,
+      state: "running",
+      controlHolder: "bot",
+      controlFence: session.controlFence,
+    },
+    data: { controlHolder: "bot" },
+  });
+  if (controlLock.count !== 1) {
+    return {
+      ok: false,
+      error: "Computer action refused because a person has control of the desktop.",
+      code: "takeover_active",
+    };
+  }
+  return { ok: true, controlFence: session.controlFence };
+}
+
+export type ComputerToolAction =
+  | { action: "screenshot" }
+  | { action: "click"; input: ComputerInput }
+  | { action: "type"; input: ComputerInput }
+  | { action: "key"; input: ComputerInput }
+  | { action: "scroll"; input: ComputerInput }
+  | { action: "wait"; milliseconds: number };
+
+function finiteCoordinate(value: unknown): number | null {
+  const number = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(number) || number < 0) return null;
+  return Math.round(number);
+}
+
+export function parseComputerToolAction(
+  args: Record<string, unknown>,
+): ComputerToolAction | { error: string } {
+  const action = String(args.action ?? "")
+    .trim()
+    .toLowerCase();
+  if (action === "screenshot") return { action };
+  if (action === "click") {
+    const x = finiteCoordinate(args.x);
+    const y = finiteCoordinate(args.y);
+    if (x === null || y === null) return { error: "click requires non-negative x and y." };
+    const button = args.button == null ? "left" : String(args.button).toLowerCase();
+    if (button !== "left" && button !== "right") {
+      return { error: "click button must be left or right." };
+    }
+    return {
+      action,
+      input: { kind: "pointer", type: "click", x, y, button },
+    };
+  }
+  if (action === "type") {
+    const text = typeof args.text === "string" ? args.text : "";
+    if (!text) return { error: "type requires non-empty text." };
+    if (text.length > 32_768) return { error: "type text is limited to 32768 characters." };
+    return { action, input: { kind: "clipboard", text } };
+  }
+  if (action === "key") {
+    const key = typeof args.key === "string" ? args.key.trim() : "";
+    if (!key) return { error: "key requires a key name." };
+    if (key.length > 64) return { error: "key name is limited to 64 characters." };
+    const modifiers = Array.isArray(args.modifiers)
+      ? args.modifiers.map((value) => String(value).toLowerCase())
+      : [];
+    if (modifiers.length > 8 || modifiers.some((modifier) => !COMPUTER_MODIFIERS.has(modifier))) {
+      return { error: "key modifiers must be ctrl, alt, shift, or super." };
+    }
+    return { action, input: { kind: "key", key, modifiers } };
+  }
+  if (action === "scroll") {
+    const direction = String(args.direction ?? "down").toLowerCase();
+    if (direction !== "up" && direction !== "down") {
+      return { error: "scroll direction must be up or down." };
+    }
+    return {
+      action,
+      input: { kind: "key", key: direction === "up" ? "Page_Up" : "Page_Down" },
+    };
+  }
+  if (action === "wait") {
+    const requested = args.milliseconds == null ? 1_000 : Number(args.milliseconds);
+    if (!Number.isFinite(requested) || requested < 0) {
+      return { error: "wait milliseconds must be a non-negative number." };
+    }
+    return {
+      action,
+      milliseconds: Math.min(COMPUTER_WAIT_MAX_MS, Math.round(requested)),
+    };
+  }
+  return {
+    error: "action must be screenshot, click, type, key, scroll, or wait.",
+  };
+}
+
+function waitForComputer(milliseconds: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.reject(signal.reason ?? new Error("computer action aborted"));
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(done, milliseconds);
+    function done() {
+      signal.removeEventListener("abort", aborted);
+      resolve();
+    }
+    function aborted() {
+      clearTimeout(timer);
+      reject(signal.reason ?? new Error("computer action aborted"));
+    }
+    signal.addEventListener("abort", aborted, { once: true });
+  });
+}
+
+export async function executeComputerToolAction(input: {
+  sandbox: SandboxProvider;
+  computer: ComputerRef;
+  args: Record<string, unknown>;
+  lease: ControlLeaseRef;
+  context: {
+    operationId: string;
+    traceId: string;
+    workspaceId: string;
+    userId: string;
+    botId?: string;
+    runId?: string;
+    signal: AbortSignal;
+  };
+  capture?: () => Promise<{ mimeType: "image/png"; data: string } | { error: string }>;
+  wait?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
+}) {
+  const parsed = parseComputerToolAction(input.args);
+  if ("error" in parsed) return parsed;
+  if (parsed.action === "wait") {
+    await (input.wait ?? waitForComputer)(parsed.milliseconds, input.context.signal);
+  } else if ("input" in parsed) {
+    await input.sandbox.sendInput(input.computer, parsed.input, input.lease, input.context);
+  }
+  const snapshot = await input.sandbox.snapshot(input.computer, input.context);
+  const observation = input.capture ? await input.capture() : undefined;
+  if (observation && "error" in observation) {
+    return {
+      ok: false as const,
+      action: parsed.action,
+      snapshot,
+      observation,
+      error: observation.error,
+    };
+  }
+  return {
+    ok: true as const,
+    action: parsed.action,
+    snapshot,
+    ...(observation ? { observation } : {}),
+  };
+}
+
+async function captureComputerImage(
+  sandbox: SandboxProvider,
+  computer: ComputerRef,
+  context: {
+    operationId: string;
+    traceId: string;
+    workspaceId: string;
+    userId: string;
+    botId?: string;
+    runId?: string;
+    signal: AbortSignal;
+  },
+): Promise<{ mimeType: "image/png"; data: string } | { error: string }> {
+  const target = screenshotPath(Date.now());
+  const shot = await runSandboxCommand(
+    sandbox,
+    computer,
+    screenshotCommand(target),
+    "/home/quibt",
+    context,
+  );
+  if (shot.code !== 0) {
+    return { error: `Visual observation failed: ${shot.stderr.trim() || shot.code}` };
+  }
+  const encoded = await runSandboxCommand(
+    sandbox,
+    computer,
+    [
+      "bash",
+      "-lc",
+      'base64 -w0 -- "$1"; status=$?; rm -f -- "$1"; exit $status',
+      "quibt-computer",
+      target,
+    ],
+    "/home/quibt",
+    context,
+    COMPUTER_OBSERVATION_MAX_BYTES,
+  );
+  const data = encoded.stdout.trim();
+  if (encoded.code !== 0 || !data || encoded.stderr.includes("[output truncated]")) {
+    return { error: "Visual observation could not be encoded within the size limit." };
+  }
+  return { mimeType: "image/png", data };
 }
 
 export async function runSandboxCommand(
