@@ -526,3 +526,88 @@ describe("toHistory", () => {
     expect(JSON.stringify(history)).not.toContain("Assistant:");
   });
 });
+
+describe("modelo local (ollama / openai-compatible)", () => {
+  async function collectLocal(runtime: PiAgentRuntime, signal?: AbortSignal) {
+    const events: AgentRuntimeEvent[] = [];
+    for await (const event of runtime.run(
+      {
+        botId: "b",
+        threadId: "t",
+        runId: `local-${Math.random().toString(36).slice(2)}`,
+        prompt: "oi",
+        instructions: "teste",
+        history: [],
+        tools: [],
+        model: { provider: "ollama", id: "llama3.2", apiKey: "http://127.0.0.1:11434/v1" },
+        executeTool: async () => ({ ok: true }),
+      },
+      {
+        operationId: "1",
+        traceId: "1",
+        workspaceId: "w",
+        userId: "u",
+        signal: signal ?? new AbortController().signal,
+      },
+    )) {
+      events.push(event);
+    }
+    return events;
+  }
+
+  it("desiste de um Ollama mudo em vez de deixar o bot em Trabalhando… para sempre", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(
+        (_url, init) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+          }),
+      );
+    try {
+      const events = await collectLocal(new PiAgentRuntime({ idleTimeoutMs: 30 }));
+      expect(events).toContainEqual({
+        type: "error",
+        message: PROVIDER_STALLED_MESSAGE,
+        retryable: true,
+      });
+      expect(events.at(-1)).toEqual({ type: "done", text: PROVIDER_STALLED_MESSAGE });
+      // O fetch pendurado é cortado junto: o LM Studio não fica com a chamada aberta.
+      expect(fetchSpy.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it("trata um 503 do modelo local como erro passageiro, não como resposta do bot", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response("", { status: 503 }));
+    try {
+      const events = await collectLocal(new PiAgentRuntime({}));
+      expect(events[0]).toMatchObject({ type: "error", retryable: true });
+      expect(events.some((event) => event.type === "text")).toBe(false);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it("responde normalmente quando o modelo local responde", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ choices: [{ message: { content: "olá do Ollama" } }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    try {
+      const events = await collectLocal(new PiAgentRuntime({}));
+      expect(events).toEqual([
+        { type: "text", text: "olá do Ollama" },
+        { type: "done" },
+      ]);
+      expect(fetchSpy.mock.calls[0]?.[0]).toBe("http://127.0.0.1:11434/v1/chat/completions");
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+});

@@ -1,6 +1,7 @@
 import type { WakeupJob } from "@quibt/adapter-kit";
 import type { PrismaClient } from "@quibt/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { PROVIDER_STALLED_MESSAGE } from "./llm-retry.js";
 import {
   acquireRunLease,
   BOT_BUSY_RETRY_MS,
@@ -60,7 +61,7 @@ function matches(row: RunRow, where: Where): boolean {
 
 function runStore(rows: RunRow[]) {
   const enqueued: Array<Record<string, unknown>> = [];
-  const attempts = { count: 0, updated: [] as Where[] };
+  const attempts = { rows: [] as Array<{ status: string }>, updated: [] as Where[] };
   const prisma = {
     run: {
       updateMany: vi.fn(async ({ where, data }: { where: Where; data: Partial<RunRow> }) => {
@@ -87,7 +88,10 @@ function runStore(rows: RunRow[]) {
       ),
     },
     attempt: {
-      count: vi.fn(async () => attempts.count),
+      // Conta como o Prisma conta: só os attempts que casam com o filtro pedido.
+      count: vi.fn(async ({ where }: { where: { status?: string } }) =>
+        attempts.rows.filter((row) => !where.status || row.status === where.status).length,
+      ),
       updateMany: vi.fn(async ({ where }: { where: Where }) => {
         attempts.updated.push(where);
         return { count: 1 };
@@ -366,7 +370,11 @@ describe("expired lease reaper", () => {
         leaseExpiresAt: new Date(Date.now() - 1),
       }),
     ]);
-    store.attempts.count = 3;
+    store.attempts.rows = [
+      { status: "abandoned" },
+      { status: "abandoned" },
+      { status: "abandoned" },
+    ];
     const result = await reapExpiredLeases({ prisma: store.prisma, wakeup: store.wakeup });
     expect(result.failed).toEqual(["run-1"]);
     expect(store.rows[0]!.status).toBe("failed");
@@ -469,7 +477,7 @@ describe("requeue after a provider error", () => {
     ]);
     const requeued = await requeueRunAfterProviderError(
       { prisma: store.prisma, wakeup: store.wakeup },
-      { runId: "run-1", fence: 3, reason: "O provedor parou de responder. Tente de novo." },
+      { runId: "run-1", fence: 3, reason: PROVIDER_STALLED_MESSAGE },
     );
     expect(requeued).toBe(true);
     expect(store.rows[0]!).toMatchObject({
@@ -493,7 +501,7 @@ describe("requeue after a provider error", () => {
     const store = runStore([
       queuedRun({ status: "running", leaseOwner: "worker-1", leaseFence: 4 }),
     ]);
-    store.attempts.count = 1;
+    store.attempts.rows = [{ status: "retried" }];
     const requeued = await requeueRunAfterProviderError(
       { prisma: store.prisma, wakeup: store.wakeup },
       { runId: "run-1", fence: 4, reason: "429" },
@@ -501,6 +509,22 @@ describe("requeue after a provider error", () => {
     expect(requeued).toBe(false);
     expect(store.rows[0]!.status).toBe("running");
     expect(store.enqueued).toEqual([]);
+  });
+
+  it("counts only spent retries: an attempt still running does not block the first one", async () => {
+    const store = runStore([
+      queuedRun({ status: "running", leaseOwner: "worker-1", leaseFence: 3 }),
+    ]);
+    // O attempt deste turno está "running", e cada retomada depois de uma aprovação abre
+    // mais um: contar todos zeraria a única tentativa que o run tem direito.
+    store.attempts.rows = [{ status: "running" }, { status: "completed" }];
+    expect(
+      await requeueRunAfterProviderError(
+        { prisma: store.prisma, wakeup: store.wakeup },
+        { runId: "run-1", fence: 3, reason: "502" },
+      ),
+    ).toBe(true);
+    expect(store.rows[0]!.status).toBe("queued");
   });
 
   it("does not touch a run another worker already took over", async () => {

@@ -15,6 +15,7 @@ import {
   LLM_IDLE_TIMEOUT_MS,
   llmStreamOptions,
   PROVIDER_STALLED_MESSAGE,
+  withTimeout,
 } from "./llm-retry.js";
 
 const running = new Map<string, AbortController>();
@@ -100,6 +101,9 @@ export class PiAgentRuntime implements AgentRuntime {
       ? AbortSignal.any([context.signal, controller.signal])
       : controller.signal;
     const queue = createQueue();
+    // Depois que uma ferramenta rodou, o turno não pode recomeçar do zero: o executor
+    // reexecutaria o shell, reenviaria o arquivo, pediria a mesma aprovação de novo.
+    let toolsRan = false;
 
     const work = (async () => {
       try {
@@ -118,6 +122,7 @@ export class PiAgentRuntime implements AgentRuntime {
             prompt: request.prompt,
             instructions: request.instructions,
             signal,
+            timeoutMs: this.options.idleTimeoutMs ?? LLM_IDLE_TIMEOUT_MS,
           })) {
             queue.push(event);
           }
@@ -191,6 +196,7 @@ export class PiAgentRuntime implements AgentRuntime {
 
         let streamed = "";
         agent.subscribe((event) => {
+          if (event.type === "tool_execution_start") toolsRan = true;
           if (
             event.type === "message_update" &&
             event.assistantMessageEvent.type === "text_delta"
@@ -236,7 +242,7 @@ export class PiAgentRuntime implements AgentRuntime {
         }
 
         if (stalled) {
-          queue.push({ type: "error", message: PROVIDER_STALLED_MESSAGE, retryable: true });
+          queue.push({ type: "error", message: PROVIDER_STALLED_MESSAGE, retryable: !toolsRan });
           queue.push({ type: "done", text: PROVIDER_STALLED_MESSAGE });
           return;
         }
@@ -246,7 +252,7 @@ export class PiAgentRuntime implements AgentRuntime {
             type: "error",
             message: userFacingError(error),
             // Um cancelamento também chega como "aborted"; ele não é erro do provedor.
-            retryable: !signal.aborted && isRetryableLlmError(error),
+            retryable: !toolsRan && !signal.aborted && isRetryableLlmError(error),
           });
           queue.push({ type: "done", text: sanitizeError(error) });
           return;
@@ -263,7 +269,7 @@ export class PiAgentRuntime implements AgentRuntime {
         queue.push({
           type: "error",
           message: userFacingError(raw),
-          retryable: !signal.aborted && isRetryableLlmError(raw),
+          retryable: !toolsRan && !signal.aborted && isRetryableLlmError(raw),
         });
         queue.push({ type: "done", text: message });
       } finally {
@@ -892,6 +898,11 @@ function localBaseUrl(provider: string, apiKey: string): string {
   return "http://127.0.0.1:1234/v1";
 }
 
+/**
+ * O caminho local não passa pelo pi-ai, então não herda retry, timeout nem vigia: sem o
+ * limite abaixo, um LM Studio carregando um modelo grande deixava o bot em "Trabalhando…"
+ * para sempre, com o lease renovado.
+ */
 async function* streamOpenAiCompatible(input: {
   provider: string;
   modelId: string;
@@ -899,33 +910,52 @@ async function* streamOpenAiCompatible(input: {
   prompt: string;
   instructions?: string;
   signal: AbortSignal;
+  timeoutMs: number;
 }): AsyncIterable<AgentRuntimeEvent> {
   const base = localBaseUrl(input.provider, input.apiKey);
-  const res = await fetch(`${base}/chat/completions`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      model: input.modelId,
-      stream: false,
-      messages: [
-        ...(input.instructions ? [{ role: "system", content: input.instructions }] : []),
-        { role: "user", content: input.prompt },
-      ],
-    }),
-    signal: input.signal,
-  });
-  if (!res.ok) {
-    yield {
-      type: "text",
-      text: `O modelo local em ${base} respondeu ${res.status}.`,
-    };
-    yield { type: "done" };
+  type Reply = { ok: boolean; status: number; text: string };
+  let reply: Reply;
+  try {
+    reply = await withTimeout<Reply>(
+      async (signal) => {
+        const res = await fetch(`${base}/chat/completions`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            model: input.modelId,
+            stream: false,
+            messages: [
+              ...(input.instructions ? [{ role: "system", content: input.instructions }] : []),
+              { role: "user", content: input.prompt },
+            ],
+          }),
+          signal,
+        });
+        if (!res.ok) return { ok: false, status: res.status, text: "" };
+        const body = (await res.json()) as {
+          choices?: Array<{ message?: { content?: string } }>;
+        };
+        return { ok: true, status: res.status, text: body.choices?.[0]?.message?.content ?? "" };
+      },
+      input.timeoutMs,
+      input.signal,
+    );
+  } catch (error) {
+    // Cancelamento pela pessoa não é o provedor calado: sobe como "aborted", sem retry.
+    if (input.signal.aborted) throw error;
+    if (error instanceof Error && /timed out/.test(error.message)) {
+      yield { type: "error", message: PROVIDER_STALLED_MESSAGE, retryable: true };
+      yield { type: "done", text: PROVIDER_STALLED_MESSAGE };
+      return;
+    }
+    throw error;
+  }
+  if (!reply.ok) {
+    const message = `O modelo local em ${base} respondeu ${reply.status}.`;
+    yield { type: "error", message, retryable: isRetryableLlmError(String(reply.status)) };
+    yield { type: "done", text: message };
     return;
   }
-  const body = (await res.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
-  const text = body.choices?.[0]?.message?.content ?? "";
-  if (text) yield { type: "text", text };
+  if (reply.text) yield { type: "text", text: reply.text };
   yield { type: "done" };
 }
