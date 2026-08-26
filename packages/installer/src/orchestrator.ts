@@ -3,7 +3,6 @@ import path from "node:path";
 import {
   appServicesUpInvocation,
   type ComposeMode,
-  composeImagesInvocation,
   composeInvocation,
   INSTALL_RELEASE,
   postgresUpInvocation,
@@ -13,23 +12,15 @@ import {
 import { parseComposePsOutput } from "./compose-ps.js";
 import type { DockerInvocation } from "./docker-invocation.js";
 import { resolveDockerInvocation, runDockerCommand } from "./docker-invocation.js";
-import { ensureDocker } from "./docker-requirements.js";
+import { type DesktopInstallPolicy, ensureDocker } from "./docker-requirements.js";
 import { ensureInstallEnvironment, parseEnvFile } from "./environment.js";
 import {
+  DOCKER_DESKTOP_GONE_MESSAGE,
   explainDockerFailure,
   explainInstallLock,
   explainUpdateRequired,
 } from "./failure-messages.js";
-import {
-  checkDiskSpace,
-  DOWNLOAD_NOTICE,
-  listComposeImages,
-  PULL_ABSOLUTE_TIMEOUT_MS,
-  type PullProgress,
-  pullImagesWithProgress,
-  pullWithProgress,
-  type StatfsLike,
-} from "./image-pull.js";
+import { missingImagesLocally, type PullProgress, type StatfsLike } from "./image-pull.js";
 import { acquireInstallLock, releaseInstallLock } from "./install-lock.js";
 import { migrateInvocation, migrationFailureMessage } from "./migrate.js";
 import {
@@ -49,6 +40,7 @@ import {
   type PublicAccessDecision,
   type PublicAccessInput,
 } from "./public-access.js";
+import { pullComposeImages } from "./pull-step.js";
 import { redactInstallerText } from "./redact.js";
 import { type InstallState, type InstallStep, nextInstallStep } from "./state.js";
 import {
@@ -117,6 +109,11 @@ export interface InstallResult {
   url?: string;
   /** Um `docker compose up` rodou nesta chamada. */
   servicesStarted?: boolean;
+  /**
+   * Religar não achou o Docker Desktop no Mac. Quem tem botão volta para o modo
+   * instalação; religar nunca baixa o Docker por conta própria.
+   */
+  dockerMissing?: boolean;
 }
 
 export interface OrchestratorDeps {
@@ -228,37 +225,12 @@ async function runDocker(
   });
 }
 
-/** A raiz onde o Docker guarda as imagens; se não der para descobrir, ignora. */
-async function dockerRootDir(
-  deps: Pick<OrchestratorDeps, "run">,
-  docker: DockerInvocation,
-): Promise<string | null> {
-  const info = await runDockerCommand(
-    deps.run,
-    docker,
-    ["info", "--format", "{{.DockerRootDir}}"],
-    {
-      timeoutMs: 30_000,
-    },
-  );
-  if (info.code !== 0) return null;
-  return info.stdout.trim() || null;
-}
-
 async function packagedImagesAvailableLocally(
   deps: Pick<OrchestratorDeps, "run">,
   docker: DockerInvocation,
 ): Promise<boolean> {
-  for (const reference of requiredQuibtImages()) {
-    const inspected = await runDockerCommand(
-      deps.run,
-      docker,
-      ["image", "inspect", "-f", "{{.Id}}", reference],
-      { timeoutMs: 30_000 },
-    );
-    if (inspected.code !== 0 || !inspected.stdout.trim()) return false;
-  }
-  return true;
+  const missing = await missingImagesLocally(deps.run, docker, requiredQuibtImages());
+  return missing.length === 0;
 }
 
 async function runDatabaseMigrate(
@@ -354,7 +326,12 @@ function fail(
   step: InstallStep,
   message: string,
   state: InstallState,
-  options: { exitCode?: number; detail?: string; servicesStarted?: boolean } = {},
+  options: {
+    exitCode?: number;
+    detail?: string;
+    servicesStarted?: boolean;
+    dockerMissing?: boolean;
+  } = {},
 ): InstallResult {
   const detail = options.detail?.trim() || undefined;
   emit({ step, status: "failed", message, detail: detail ? { stderr: detail } : undefined });
@@ -365,6 +342,7 @@ function fail(
     errorDetail: detail,
     exitCode: options.exitCode ?? 1,
     servicesStarted: options.servicesStarted,
+    dockerMissing: options.dockerMissing,
   };
 }
 
@@ -372,33 +350,35 @@ function ensureDockerForStep(
   deps: Pick<OrchestratorDeps, "run" | "platform" | "clock" | "nonInteractive">,
   step: InstallStep,
   emit: (event: InstallerEvent) => void,
+  options: { allowDesktopInstall?: DesktopInstallPolicy } = {},
 ) {
   return ensureDocker({
     run: deps.run,
     platform: deps.platform,
     clock: deps.clock,
-    allowDesktopInstall: true,
+    allowDesktopInstall: options.allowDesktopInstall ?? true,
     nonInteractive: deps.nonInteractive,
     onProgress: (message) => emit({ step, status: "running", message }),
   });
 }
 
-/** Uma falha de `compose up` traduzida; o stderr cru vai só nos detalhes. */
+/**
+ * Uma falha de `compose up` traduzida; o stderr cru vai só nos detalhes. A fase entra
+ * junto: "denied" aqui é a pasta de dados fora do File sharing, não o ghcr.io.
+ */
 function composeFailure(
   result: ProcessRunResult,
   fallback: string,
+  dataDir: string,
 ): { message: string; detail: string } {
   const detail = `${result.stderr}\n${result.stdout}`.trim();
-  return { message: explainDockerFailure(detail) ?? fallback, detail };
+  return {
+    message: explainDockerFailure(detail, { phase: "up", dataDir }) ?? fallback,
+    detail,
+  };
 }
 
-/**
- * O download das imagens, com o que faltava: checagem de disco antes, uma imagem por
- * vez com progresso por camadas, timeout por inatividade (e não de cinco minutos
- * absolutos, que derrubava qualquer conexão abaixo de ~45 Mbps) e até três tentativas.
- * A partir do código (`source`) o passo é um `compose build`, longo e sem camadas,
- * mas com o mesmo streaming e a mesma paciência.
- */
+/** O passo `images` do install: a mesma função que o `update` e a religada usam. */
 async function pullImages(
   deps: OrchestratorDeps,
   docker: DockerInvocation,
@@ -406,57 +386,19 @@ async function pullImages(
   emit: (event: InstallerEvent) => void,
   step: InstallStep,
 ): Promise<{ ok: true } | { ok: false; message: string; detail: string }> {
-  const cwd = path.dirname(deps.composeFile);
-  const envFile = envFilePath(deps.dataDir);
-  const publicAccess = Boolean(envValues[PUBLIC_HOST_ENV]);
-
-  if (deps.composeMode === "source") {
-    const build = await runDockerCommand(
-      deps.run,
-      docker,
-      composeInvocation(deps.composeMode, deps.composeFile, envFile, "pull"),
-      { cwd, timeoutMs: PULL_ABSOLUTE_TIMEOUT_MS, inactivityTimeoutMs: 10 * 60_000 },
-    );
-    if (build.code !== 0) {
-      const failure = composeFailure(build, "A construção das imagens a partir do código falhou.");
-      return { ok: false, message: failure.message, detail: failure.detail };
-    }
-    return { ok: true };
-  }
-
-  const dockerRoot = await dockerRootDir(deps, docker);
-  const disk = await checkDiskSpace(
-    [path.resolve(deps.dataDir), ...(dockerRoot ? [dockerRoot] : [])],
-    deps.statfs,
-  );
-  if (!disk.ok) return { ok: false, message: disk.message, detail: "" };
-
-  emit({ step, status: "running", message: DOWNLOAD_NOTICE });
-  const pullDeps = {
+  return pullComposeImages({
     run: deps.run,
     docker,
     clock: deps.clock,
-    cwd,
-    onProgress: (progress: PullProgress, message: string) =>
-      emit({ step, status: "running", message, progress }),
-    onNotice: (message: string) => emit({ step, status: "running", message }),
-  };
-  const images = await listComposeImages(
-    deps.run,
-    docker,
-    composeImagesInvocation(deps.composeFile, envFile, { publicAccess }),
-    cwd,
-  );
-  const outcome =
-    images.length > 0
-      ? await pullImagesWithProgress(pullDeps, images)
-      : await pullWithProgress(
-          pullDeps,
-          composeInvocation(deps.composeMode, deps.composeFile, envFile, "pull"),
-          { image: "imagens do Quibt Bot", index: 1, count: 1 },
-        );
-  if (!outcome.ok) return { ok: false, message: outcome.message, detail: outcome.detail };
-  return { ok: true };
+    dataDir: deps.dataDir,
+    composeFile: deps.composeFile,
+    envFile: envFilePath(deps.dataDir),
+    composeMode: deps.composeMode,
+    publicAccess: Boolean(envValues[PUBLIC_HOST_ENV]),
+    statfs: deps.statfs,
+    onProgress: (progress, message) => emit({ step, status: "running", message, progress }),
+    onNotice: (message) => emit({ step, status: "running", message }),
+  });
 }
 
 /**
@@ -476,14 +418,43 @@ async function startInstalledStack(
   emit({ step: "requirements", status: "running", message: "Conferindo o Docker…" });
   let docker = dockerInv;
   if (!docker) {
-    const ensured = await ensureDockerForStep(deps, "requirements", emit);
-    if (!ensured.ok) return fail(emit, "requirements", ensured.message, state);
+    // "start-only": abrir um Docker Desktop já instalado sim; baixar o Docker e pedir a
+    // senha do Mac, nunca. Este caminho roda sozinho quando o app abre.
+    const ensured = await ensureDockerForStep(deps, "requirements", emit, {
+      allowDesktopInstall: "start-only",
+    });
+    if (!ensured.ok) {
+      const gone = ensured.reason === "desktop-missing";
+      return fail(
+        emit,
+        "requirements",
+        gone ? DOCKER_DESKTOP_GONE_MESSAGE : ensured.message,
+        state,
+        {
+          dockerMissing: gone,
+        },
+      );
+    }
     docker = ensured.invocation;
   }
   emit({ step: "requirements", status: "succeeded", message: "Docker no ar" });
 
-  emit({ step: "services", status: "running", message: "Ligando o Quibt Bot…" });
   const envFile = envFilePath(deps.dataDir);
+  // As imagens somem sozinhas (um "Clean / Purge data" no Docker Desktop, um
+  // `docker system prune -a`): sem isto o `up --wait` baixava 1,7 GB em silêncio, sob um
+  // teto de dez minutos, atrás de uma tela que promete "cerca de um minuto".
+  if (deps.composeMode === "packaged" && !(await packagedImagesAvailableLocally(deps, docker))) {
+    emit({ step: "images", status: "running", message: "Conferindo as imagens do Quibt Bot…" });
+    const pulled = await pullImages(deps, docker, envValues, emit, "images");
+    if (!pulled.ok) {
+      return fail(emit, "images", pulled.message, state, {
+        detail: redactInstallerText(pulled.detail, secrets),
+      });
+    }
+    emit({ step: "images", status: "succeeded", message: "Imagens prontas" });
+  }
+
+  emit({ step: "services", status: "running", message: "Ligando o Quibt Bot…" });
   const up = await runDocker(
     deps,
     docker,
@@ -496,6 +467,7 @@ async function startInstalledStack(
     const failure = composeFailure(
       up,
       "Não consegui ligar os serviços do Quibt Bot. Veja os detalhes técnicos e tente de novo.",
+      deps.dataDir,
     );
     return fail(emit, "services", failure.message, state, {
       detail: redactInstallerText(failure.detail, secrets),
@@ -703,7 +675,7 @@ export async function runInstall(deps: OrchestratorDeps): Promise<InstallResult>
         const up = await runDocker(deps, dockerInv, upArgs, STACK_UP_TIMEOUT_MS);
         servicesStarted = true;
         if (up.code !== 0) {
-          const failure = composeFailure(up, "Os serviços do Quibt Bot não subiram.");
+          const failure = composeFailure(up, "Os serviços do Quibt Bot não subiram.", deps.dataDir);
           return fail(emit, step, failure.message, state, {
             detail: redactInstallerText(failure.detail, secrets),
             servicesStarted,
@@ -739,7 +711,11 @@ export async function runInstall(deps: OrchestratorDeps): Promise<InstallResult>
           );
           servicesStarted = true;
           if (appsUp.code !== 0) {
-            const failure = composeFailure(appsUp, "Os serviços do Quibt Bot não subiram.");
+            const failure = composeFailure(
+              appsUp,
+              "Os serviços do Quibt Bot não subiram.",
+              deps.dataDir,
+            );
             return fail(emit, step, failure.message, state, {
               detail: redactInstallerText(failure.detail, secrets),
               servicesStarted,

@@ -1,15 +1,28 @@
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   checkDiskSpace,
+  downloadNotice,
+  formatElapsed,
   formatGigabytes,
   listComposeImages,
+  MIN_REQUIRED_FREE_BYTES,
+  missingImagesLocally,
   PULL_ATTEMPTS,
+  PULL_INACTIVITY_TIMEOUT_MS,
   PullLayerTracker,
   type PullProgress,
   progressMessage,
   pullImagesWithProgress,
+  pullWithProgress,
+  quietProgressMessage,
+  REQUIRED_FREE_BYTES,
+  requiredFreeBytesFor,
   shortImageName,
 } from "./image-pull.js";
+import { createProcessRunner } from "./index.js";
 import type { ProcessRunner, ProcessRunResult } from "./orchestrator.js";
 
 const DOCKER = { command: "docker", prefixArgs: [] };
@@ -50,6 +63,7 @@ describe("nomes e mensagens", () => {
   it("diz imagem N de M e as camadas quando já as conhece", () => {
     const base: PullProgress = {
       image: "ghcr.io/quibt/quibt-stack:0.2.11",
+      label: "quibt-stack:0.2.11",
       index: 2,
       count: 4,
       layersDone: 0,
@@ -170,6 +184,7 @@ describe("pullImagesWithProgress", () => {
     expect(outcome).toEqual({ ok: true });
     expect(progress[0]).toEqual({
       image: "ghcr.io/quibt/quibt-stack:0.2.11",
+      label: "quibt-stack:0.2.11",
       index: 1,
       count: 2,
       layersDone: 0,
@@ -177,6 +192,7 @@ describe("pullImagesWithProgress", () => {
     });
     expect(progress).toContainEqual({
       image: "ghcr.io/quibt/quibt-stack:0.2.11",
+      label: "quibt-stack:0.2.11",
       index: 1,
       count: 2,
       layersDone: 1,
@@ -184,6 +200,7 @@ describe("pullImagesWithProgress", () => {
     });
     expect(progress.at(-1)).toEqual({
       image: "postgres:16",
+      label: "postgres:16",
       index: 2,
       count: 2,
       layersDone: 2,
@@ -192,7 +209,7 @@ describe("pullImagesWithProgress", () => {
     expect(messages).toContain("Baixando imagem 1 de 2: quibt-stack:0.2.11 — 1/2 camadas");
     expect(messages).toContain("postgres:16 pronta");
     for (const opts of options as Array<{ inactivityTimeoutMs?: number; timeoutMs?: number }>) {
-      expect(opts.inactivityTimeoutMs).toBe(180_000);
+      expect(opts.inactivityTimeoutMs).toBe(900_000);
       expect(opts.timeoutMs).toBe(3_600_000);
     }
   });
@@ -249,8 +266,141 @@ describe("pullImagesWithProgress", () => {
     if (outcome.ok) return;
     expect(attempts.get("ghcr.io/quibt/quibt-computer:0.2.11")).toBe(PULL_ATTEMPTS);
     expect(outcome.message).toContain("quibt-computer:0.2.11 falhou 3 vezes");
-    expect(outcome.message).toContain("ficou 3 minutos sem progresso");
+    expect(outcome.message).toContain("ficou 15 minutos sem progresso");
+    expect(outcome.message).toContain("rode a instalação de novo");
+    expect(outcome.message).not.toContain("clique");
     expect(outcome.message).toContain("o que já baixou fica guardado");
     expect(outcome.detail).toBe("process produced no output for 180 s");
+  });
+});
+
+describe("paciência com uma camada grande", () => {
+  it("tolera quinze minutos de silêncio, não três", () => {
+    // Sem TTY o docker não imprime nada enquanto baixa; três minutos matavam a camada
+    // do apt do quibt-computer numa conexão doméstica.
+    expect(PULL_INACTIVITY_TIMEOUT_MS).toBe(15 * 60_000);
+  });
+
+  it("formata o tempo decorrido do jeito que se lê esperando", () => {
+    expect(formatElapsed(0)).toBe("0s");
+    expect(formatElapsed(20_000)).toBe("20s");
+    expect(formatElapsed(80_000)).toBe("1m20s");
+    expect(formatElapsed(120_000)).toBe("2m");
+  });
+
+  it("diz em que camada está e há quanto tempo", () => {
+    const progress: PullProgress = {
+      image: "ghcr.io/quibt/quibt-computer:0.2.11",
+      label: "quibt-computer:0.2.11",
+      index: 3,
+      count: 4,
+      layersDone: 2,
+      layersTotal: 9,
+    };
+    expect(quietProgressMessage(progress, 80_000)).toBe(
+      "Baixando imagem 3 de 4: quibt-computer:0.2.11 — baixando a camada 3 de 9 há 1m20s…",
+    );
+    expect(quietProgressMessage({ ...progress, layersTotal: 0, layersDone: 0 }, 15_000)).toBe(
+      "Baixando imagem 3 de 4: quibt-computer:0.2.11 — sem novidade há 15s; o download continua.",
+    );
+  });
+
+  it("um pull real que fica mudo enquanto baixa não é morto e dá sinal de vida", async () => {
+    const binDir = mkdtempSync(path.join(tmpdir(), "quibt-quiet-pull-"));
+    const dockerPath = path.join(binDir, "docker");
+    const bytesPath = path.join(binDir, "layer.bytes");
+    // Como o docker de verdade sem TTY: anuncia a camada e cala a boca enquanto baixa.
+    writeFileSync(
+      dockerPath,
+      `#!/bin/sh
+echo "aaaaaaaaaaaa: Pulling fs layer"
+i=0
+while [ $i -lt 12 ]; do
+  printf 'x' >> "${bytesPath}"
+  sleep 0.1
+  i=$((i+1))
+done
+echo "aaaaaaaaaaaa: Pull complete"
+exit 0
+`,
+      { mode: 0o755 },
+    );
+    chmodSync(dockerPath, 0o755);
+
+    try {
+      const progress: PullProgress[] = [];
+      const messages: string[] = [];
+      const started = Date.now();
+      const outcome = await pullWithProgress(
+        {
+          run: createProcessRunner(),
+          docker: { command: dockerPath, prefixArgs: [] },
+          clock: { sleep: async () => undefined },
+          onProgress: (entry, message) => {
+            progress.push(entry);
+            messages.push(message);
+          },
+          onNotice: () => undefined,
+          // A janela de silêncio continua a de produção (15 min): o que o teste encurta
+          // é só o sinal de vida.
+          heartbeatIntervalMs: 100,
+        },
+        ["pull", "ghcr.io/quibt/quibt-computer:0.2.11"],
+        { image: "ghcr.io/quibt/quibt-computer:0.2.11", index: 1, count: 1 },
+      );
+
+      expect(outcome).toEqual({ ok: true });
+      expect(Date.now() - started).toBeGreaterThan(500);
+      // O download estava mesmo andando enquanto o docker não falava.
+      expect(readFileSync(bytesPath, "utf8").length).toBeGreaterThan(1);
+      const alive = progress.filter((entry) => entry.quietMs !== undefined);
+      expect(alive.length).toBeGreaterThan(1);
+      expect(messages.some((message) => /baixando a camada 1 de 1 há \d+s…$/.test(message))).toBe(
+        true,
+      );
+      expect(progress.at(-1)).toMatchObject({ layersDone: 1, layersTotal: 1 });
+    } finally {
+      rmSync(binDir, { recursive: true, force: true });
+    }
+  }, 20_000);
+});
+
+describe("retomada: só o que falta", () => {
+  it("separa as imagens que já estão no disco", async () => {
+    const asked: string[] = [];
+    const run: ProcessRunner = {
+      async run(_command, args) {
+        const reference = args.at(-1) as string;
+        asked.push(reference);
+        if (reference.includes("quibt-stack"))
+          return { code: 0, stdout: "sha256:aa\n", stderr: "" };
+        return { code: 1, stdout: "", stderr: "Error: No such image" };
+      },
+    };
+    expect(
+      await missingImagesLocally(run, DOCKER, [
+        "ghcr.io/quibt/quibt-stack:0.2.11",
+        "ghcr.io/quibt/quibt-computer:0.2.11",
+      ]),
+    ).toEqual(["ghcr.io/quibt/quibt-computer:0.2.11"]);
+    expect(asked).toHaveLength(2);
+  });
+
+  it("exige o disco proporcional ao que falta, com piso e teto", () => {
+    expect(requiredFreeBytesFor(4, 4)).toBe(REQUIRED_FREE_BYTES);
+    expect(requiredFreeBytesFor(0, 0)).toBe(REQUIRED_FREE_BYTES);
+    expect(requiredFreeBytesFor(2, 4)).toBe(5_000_000_000);
+    expect(requiredFreeBytesFor(1, 4)).toBe(2_500_000_000);
+    expect(requiredFreeBytesFor(1, 10)).toBe(MIN_REQUIRED_FREE_BYTES);
+  });
+
+  it("anuncia só o tamanho do que falta", () => {
+    expect(downloadNotice(4, 4)).toContain("1,7 GB");
+    expect(downloadNotice(1, 4)).toBe(
+      "Falta 1 imagem de 4 (cerca de 0,4 GB). O resto já está no disco.",
+    );
+    expect(downloadNotice(2, 4)).toBe(
+      "Faltam 2 imagens de 4 (cerca de 0,9 GB). O resto já está no disco.",
+    );
   });
 });

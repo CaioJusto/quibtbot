@@ -37,6 +37,7 @@ import {
 } from "./initial-page.js";
 import { InstallEmitContextRegistry } from "./install-emit-context.js";
 import { InstallConcurrencyGate } from "./install-gate.js";
+import { withDesktopRetryHint } from "./install-messages.js";
 import { lanApiUrl } from "./lan.js";
 import {
   claimOwnerEnrollment,
@@ -90,6 +91,8 @@ interface StackStartResult {
   log?: string;
   url?: string;
   warning?: string;
+  /** Religar não achou o Docker: a tela volta ao modo instalação, com botão e termos. */
+  needsInstall?: boolean;
   pairing?: {
     url: string;
     code: string;
@@ -1019,12 +1022,15 @@ async function runLocalInstall(
     if (!result.ok) {
       // A frase do orquestrador já diz o que fazer; o stderr cru fica nos detalhes.
       const failedStep = result.alreadyInstalled ? null : nextInstallStep(result.state);
-      const reason = result.error ?? "A instalação falhou. Veja os detalhes técnicos abaixo.";
+      const reason = withDesktopRetryHint(
+        result.error ?? "A instalação falhou. Veja os detalhes técnicos abaixo.",
+      );
       if (result.errorDetail) logs.push(`[detalhes técnicos]\n${result.errorDetail}`);
       return {
         ok: false,
         message: failedStep ? `${installEventLabel(failedStep)} falhou: ${reason}` : reason,
         log: logs.join("\n"),
+        needsInstall: result.dockerMissing === true,
       };
     }
     const log = logs.join("\n");

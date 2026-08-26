@@ -60,6 +60,10 @@ function writeFakeDocker(
 } {
   const logPath = path.join(binDir, "commands.log");
   const dockerPath = path.join(binDir, "docker");
+  // O docker falso guarda o que já "baixou": sem isso `image inspect` não teria como
+  // dizer que a segunda passada não precisa baixar nada de novo.
+  const storeDir = path.join(binDir, "images");
+  mkdirSync(storeDir, { recursive: true });
   const failPull = options.failPull ? "1" : "";
   const failPullMessage =
     options.failPullMessage ?? "pull failed: DATABASE_PASSWORD=secret123 BOOTSTRAP_SECRET=abc123";
@@ -68,10 +72,27 @@ function writeFakeDocker(
     dockerPath,
     `#!/bin/sh
 LOG="${logPath}"
+STORE="${storeDir}"
 echo "$@" >> "$LOG"
+marker() {
+  printf '%s/%s' "$STORE" "$(printf '%s' "$1" | tr -c 'A-Za-z0-9' '_')"
+}
 case "$1" in
   info)
     exit 0
+    ;;
+  image)
+    if [ "$2" = "inspect" ]; then
+      for ref in "$@"; do :; done
+      if [ -f "$(marker "$ref")" ]; then
+        echo "sha256:aaaaaaaaaaaa"
+        exit 0
+      fi
+      echo "Error: No such image: $ref" >&2
+      exit 1
+    fi
+    echo "fake docker: unknown image invocation: $*" >&2
+    exit 1
     ;;
   pull)
     if [ -n "${failPull}" ]; then
@@ -80,6 +101,7 @@ case "$1" in
     fi
     echo "aaaaaaaaaaaa: Pulling fs layer"
     echo "aaaaaaaaaaaa: Pull complete"
+    touch "$(marker "$2")"
     exit 0
     ;;
   compose)

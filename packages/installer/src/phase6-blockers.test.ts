@@ -467,6 +467,8 @@ describe("state validation split", () => {
     const result = await runUpdate({
       dataDir,
       composeFile: COMPOSE_FILE,
+      // A suíte não pode depender do disco livre de quem a roda.
+      statfs: async () => ({ bsize: 4096, bavail: 25_000_000 }),
       targetRelease: "0.2.11",
       run: {
         async run(command, args) {

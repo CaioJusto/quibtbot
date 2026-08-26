@@ -358,7 +358,12 @@ describe("runCliAsync", () => {
           : new Response("not found", { status: 404 }),
       run: {
         async run(command, args) {
-          commands.push([command, ...args].join(" "));
+          const joined = [command, ...args].join(" ");
+          commands.push(joined);
+          // As imagens continuam no disco desde a instalação: nada para baixar.
+          if (joined.includes("image inspect")) {
+            return { code: 0, stdout: "sha256:local\n", stderr: "" };
+          }
           return { code: 0, stdout: "", stderr: "" };
         },
       },
