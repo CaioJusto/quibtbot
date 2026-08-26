@@ -1,6 +1,7 @@
 import {
   chooseMode,
   chooseProvider,
+  connectedModelNotice,
   localModelUrl,
   providersForMode,
   startPolling,
@@ -183,7 +184,7 @@ export function ModelSourceSection() {
     setError(null);
     setNotice(null);
     try {
-      await rpc("models/connect", {
+      const credential = await rpc<{ verified?: boolean }>("models/connect", {
         provider,
         apiKey,
         modelId: selected.id,
@@ -191,9 +192,9 @@ export function ModelSourceSection() {
       });
       await rpc("models/setDefault", { provider, modelId: selected.id });
       await load();
-      // O servidor conferiu a chave no provedor antes de gravar: dá para afirmar.
+      // "Confirmada" só quando o servidor falou mesmo com o provedor.
       setNotice(
-        `${tokenSource === "local" ? "Servidor confirmado ✓" : "Chave confirmada ✓"} Modelo definido como padrão.`,
+        `${connectedModelNotice({ verified: Boolean(credential?.verified), local: tokenSource === "local" })} Modelo definido como padrão.`,
       );
       setApiKey("");
     } catch (err) {

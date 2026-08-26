@@ -2,6 +2,7 @@ import type { BillingSnapshot } from "@quibt/contracts";
 import {
   chooseMode,
   chooseProvider,
+  connectedModelNotice,
   displayPlanName,
   displayPlanStatus,
   formatMeter,
@@ -199,7 +200,7 @@ export function AccountSettingsBody({
     setError(null);
     setNotice(null);
     try {
-      await rpc.models.connect({
+      const credential = await rpc.models.connect({
         provider,
         apiKey,
         modelId: selectedModel.id,
@@ -209,9 +210,10 @@ export function AccountSettingsBody({
       // antiga: quem troca de provedor está trocando o que roda, não colecionando chaves.
       await rpc.models.setDefault({ provider, modelId: selectedModel.id });
       setCredentials(await rpc.models.credentials().catch(() => []));
-      // O servidor conferiu a chave no provedor antes de gravar: dá para afirmar.
+      // "Confirmada" só quando o servidor falou mesmo com o provedor: nos que ele não
+      // sonda, a chave fica guardada e a primeira mensagem é que dirá se presta.
       setNotice(
-        `${tokenSource === "local" ? "Servidor confirmado ✓" : "Chave confirmada ✓"} Agora os bots usam ${selectedModel.label ?? selectedModel.id}.`,
+        `${connectedModelNotice({ verified: credential.verified, local: tokenSource === "local" })} Agora os bots usam ${selectedModel.label ?? selectedModel.id}.`,
       );
       setApiKey("");
     } catch (err) {

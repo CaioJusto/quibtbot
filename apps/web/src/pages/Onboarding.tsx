@@ -1,6 +1,7 @@
 import type { BillingSnapshot, ComputerCatalogItem } from "@quibt/contracts";
 import {
   catalogPlans,
+  connectedModelNotice,
   formatPlanPrice,
   machineStepNeeded,
   type Plan,
@@ -71,7 +72,7 @@ function billingText(entry: CatalogEntry | undefined): string {
 /** Tempo para ler "Chave confirmada ✓" antes de a etapa seguinte entrar. */
 const KEY_CONFIRMED_PAUSE_MS = 700;
 
-type KeyStatus = { kind: "ok" } | { kind: "error"; message: string };
+type KeyStatus = { kind: "ok"; verified: boolean } | { kind: "error"; message: string };
 
 const PRESETS: Array<{ name: string; title: string; color: string; shape: MarkShape }> = [
   { name: "Quib", title: "Assistente", color: "#5B7FE5", shape: "strobi" },
@@ -307,13 +308,15 @@ export function OnboardingPage() {
       } else {
         if (action.kind === "connect") {
           setKeyStatus(null);
+          let verified = false;
           try {
-            await rpc.models.connect({
+            const credential = await rpc.models.connect({
               provider,
               apiKey,
               modelId,
               label: selected?.providerName ?? provider,
             });
+            verified = credential.verified;
           } catch (err) {
             // O servidor conferiu a chave no provedor e recusou: nada foi gravado, e a
             // razão fica junto do campo, não num erro genérico no rodapé.
@@ -323,7 +326,7 @@ export function OnboardingPage() {
             });
             return;
           }
-          setKeyStatus({ kind: "ok" });
+          setKeyStatus({ kind: "ok", verified });
         }
         await rpc.models.setDefault({ provider, modelId });
         if (action.kind === "connect") {
@@ -739,7 +742,10 @@ export function OnboardingPage() {
                     ) : null}
                     {keyStatus?.kind === "ok" ? (
                       <p role="status" className="mt-2 text-[13px] font-medium text-[#2C8A4B]">
-                        {tokenSource === "local" ? "Servidor confirmado ✓" : "Chave confirmada ✓"}
+                        {connectedModelNotice({
+                          verified: keyStatus.verified,
+                          local: tokenSource === "local",
+                        })}
                       </p>
                     ) : null}
                     {keyStatus?.kind === "error" ? (

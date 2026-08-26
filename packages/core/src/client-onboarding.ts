@@ -4,12 +4,36 @@ import type { QuibtEdition } from "./edition.js";
 export type ClientOnboardingStep = "plan" | "model" | "machine" | "bot";
 
 /**
+ * Onde a pessoa resolve qualquer erro de modelo: o botão "Conectar modelo" ao lado do
+ * erro e Conta → Modelo. O runtime e o executor terminam as suas mensagens com isto,
+ * para que nenhuma delas mande para um lugar que o menu não tem ("Modelos e tokens").
+ */
+export const MODEL_CONNECT_HINT = "Toque em Conectar modelo, ou vá em Conta → Modelo.";
+
+/**
  * What the chat shows when a turn has no model key and no subscription. It names the
  * two places that really exist: the "Conectar modelo" button next to this error and
  * Conta → Modelo (the menu never had a "Conta" model item to paste a key into).
  */
-export const MISSING_MODEL_MESSAGE =
-  "Não tenho um modelo conectado. Toque em Conectar modelo, ou vá em Conta → Modelo.";
+export const MISSING_MODEL_MESSAGE = `Não tenho um modelo conectado. ${MODEL_CONNECT_HINT}`;
+
+/**
+ * O que a tela diz depois de `models.connect`. O servidor só sonda OpenRouter, xAI,
+ * Ollama e OpenAI-compatible; para os outros a chave é guardada sem consulta, e dizer
+ * "confirmada ✓" ali era promessa falsa: a primeira mensagem ainda podia falhar com 401.
+ */
+export function connectedModelNotice(input: { verified: boolean; local: boolean }): string {
+  if (!input.verified) return "Chave guardada. Vai ser conferida na primeira mensagem.";
+  return input.local ? "Servidor confirmado ✓" : "Chave confirmada ✓";
+}
+
+/**
+ * Dica ao lado do campo de URL do modelo local. `localModelUrl` continua em 127.0.0.1,
+ * que é o certo quando a API roda no próprio computador (`pnpm dev`); no app desktop e
+ * no compose a API está num container, e 127.0.0.1 ali é o próprio container.
+ */
+export const LOCAL_MODEL_DOCKER_HINT =
+  "Se o Quibt roda em Docker (app desktop ou compose), troque 127.0.0.1 por host.docker.internal.";
 
 /**
  * Erros de chave, crédito ou modelo ausente que um botão "Conectar modelo" resolve.
@@ -120,6 +144,27 @@ export function initialTokenSource<T extends ProviderEntry>(input: {
     return modeForProvider(input.preferred);
   }
   return input.catalog.some((entry) => entry.signIn === "device-code") ? "subscription" : "key";
+}
+
+/**
+ * Qual entrada do catálogo abre selecionada: a credencial padrão da conta, depois
+ * qualquer provedor já conectado, depois o OpenRouter. O mobile fixava o OpenRouter e
+ * quem tinha só o Copilot conectado caía em "Minha assinatura" apontando para outro
+ * provedor, com "Continuar" travado até trocar na mão.
+ */
+export function preferredCatalogEntry<T extends ProviderEntry>(
+  catalog: T[],
+  credentials: Iterable<{ provider: string; isDefault?: boolean }>,
+): T | undefined {
+  const saved = [...credentials];
+  const byProvider = (provider: string | undefined) =>
+    provider ? catalog.find((entry) => entry.provider === provider) : undefined;
+  return (
+    byProvider(saved.find((credential) => credential.isDefault)?.provider) ??
+    catalog.find((entry) => saved.some((credential) => credential.provider === entry.provider)) ??
+    byProvider("openrouter") ??
+    catalog[0]
+  );
 }
 
 export function localModelUrl(provider: string): string {
