@@ -7,7 +7,6 @@ import type {
   Connection,
   GroupThreadSnapshot,
   Routine,
-  ThreadMessage,
   ThreadSnapshot,
 } from "@quibt/contracts";
 import type { LiveFeedStatus } from "@quibt/core";
@@ -48,9 +47,24 @@ import { applyGroupThreadEvent, applyThreadEvent } from "../lib/apply-thread-eve
 import { type Attachment, attachmentTooBig, uploadAttachment } from "../lib/attachments";
 import { authClient } from "../lib/auth";
 import { buildPaletteItems, opensPalette, type PaletteItem } from "../lib/command-palette";
+import {
+  type ComposerDraft,
+  conversationKey,
+  type DraftMap,
+  draftAt,
+  putDraft,
+  readStoredDrafts,
+  writeStoredDrafts,
+} from "../lib/composer-drafts";
+import { filesFromTransfer, transferHasFiles } from "../lib/composer-drop";
 import { dayStamps } from "../lib/day-stamps";
 import { desktopBridge, trafficLightInset } from "../lib/desktop";
-import { shortcutFromKey, starterPrompts, visibleShortcutTargets } from "../lib/desktop-shortcuts";
+import {
+  opensThreadSearch,
+  shortcutFromKey,
+  starterPrompts,
+  visibleShortcutTargets,
+} from "../lib/desktop-shortcuts";
 import {
   activeComposerToken,
   insertMention,
@@ -80,6 +94,7 @@ import {
   shouldFetchScreenUrl,
 } from "../lib/screen-url";
 import { groupAuthor, peerAuthor } from "../lib/thread-authors";
+import { stepMatch, threadMatches } from "../lib/thread-search";
 import type { TranscribeStatus } from "../lib/transcribe";
 import { isAnsweringMessage } from "../lib/turn-start";
 import { createVoiceRecorder, extensionFor, formatDuration, voiceSupported } from "../lib/voice";
@@ -155,15 +170,28 @@ export function ShellPage() {
   const [snapshot, setSnapshot] = useState<ThreadSnapshot | null>(null);
   const [groupSnapshot, setGroupSnapshot] = useState<GroupThreadSnapshot | null>(null);
   const [peers, setPeers] = useState<Bot[]>([]);
-  const [draft, setDraft] = useState("");
+  /**
+   * Um rascunho por conversa, não um por app: o texto, os anexos e o recado citado ficam
+   * atrelados ao bot ou ao grupo em que foram escritos. O que está na tela é sempre a
+   * entrada de `chatKey`; trocar de conversa só troca qual entrada é lida.
+   */
+  const chatKey = conversationKey({ botId, groupId });
+  const [drafts, setDrafts] = useState<DraftMap>(() => readStoredDrafts());
+  const draftsRef = useRef(drafts);
+  draftsRef.current = drafts;
+  const currentDraft = draftAt(drafts, chatKey);
+  const draft = currentDraft.text;
+  const attachments = currentDraft.attachments;
+  const replyToId = currentDraft.replyToId;
   const [editMessageId, setEditMessageId] = useState<string | null>(null);
-  /** Recado que o próximo envio responde. O bot recebe o trecho citado junto. */
-  const [replyTo, setReplyTo] = useState<ThreadMessage | null>(null);
   const [caret, setCaret] = useState(0);
   const [mentionDismissed, setMentionDismissed] = useState(false);
   const [mentionIndex, setMentionIndex] = useState(0);
   const [panel, setPanel] = useState<Panel>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findIndex, setFindIndex] = useState(0);
   const [feedStatus, setFeedStatus] = useState<LiveFeedStatus>("connecting");
   const [workerAlive, setWorkerAlive] = useState<boolean | null>(null);
   const [routines, setRoutines] = useState<Routine[]>([]);
@@ -204,6 +232,7 @@ export function ShellPage() {
   const autoBooted = useRef<string | null>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
+  const findInputRef = useRef<HTMLInputElement>(null);
   /** Quando o último evento do stream chegou — o vigia da conversa olha para isto. */
   const lastThreadEventAt = useRef(0);
   const [followThread, setFollowThread] = useState(true);
@@ -212,8 +241,10 @@ export function ShellPage() {
   const [queued, setQueued] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
   const [dictating, setDictating] = useState(false);
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [composerMenu, setComposerMenu] = useState(false);
+  /** Arquivo pairando sobre o campo: a moldura acende enquanto ele não é solto. */
+  const [dragging, setDragging] = useState(false);
+  const dragDepth = useRef(0);
   const [teaching, setTeaching] = useState(false);
   const [teachNotes, setTeachNotes] = useState("");
   const [teachBusy, setTeachBusy] = useState(false);
@@ -225,6 +256,40 @@ export function ShellPage() {
   });
   const recorderRef = useRef<ReturnType<typeof createVoiceRecorder> | null>(null);
   const canRecord = voiceSupported();
+
+  /**
+   * Toda escrita no campo passa por aqui com a conversa dita por escrito. As funções abaixo
+   * fecham sobre o `chatKey` deste render de propósito: o áudio transcrito e o anexo que
+   * terminou de subir voltam para a conversa em que foram começados, mesmo que a pessoa já
+   * tenha trocado de bot no meio.
+   */
+  const editDraft = useCallback(
+    (key: string, change: (previous: ComposerDraft) => ComposerDraft) => {
+      setDrafts((all) => putDraft(all, key, change(draftAt(all, key))));
+    },
+    [],
+  );
+  const setDraft = (value: string | ((previous: string) => string)) => {
+    editDraft(chatKey, (previous) => ({
+      ...previous,
+      text: typeof value === "function" ? value(previous.text) : value,
+    }));
+  };
+  const setAttachments = (value: Attachment[] | ((previous: Attachment[]) => Attachment[])) => {
+    editDraft(chatKey, (previous) => ({
+      ...previous,
+      attachments: typeof value === "function" ? value(previous.attachments) : value,
+    }));
+  };
+  const setReplyToId = (value: string | null) => {
+    editDraft(chatKey, (previous) => ({ ...previous, replyToId: value }));
+  };
+
+  /** O texto sai do campo e vai para o disco; anexo e citação ficam só nesta sessão. */
+  useEffect(() => {
+    const timer = window.setTimeout(() => writeStoredDrafts(drafts), 400);
+    return () => window.clearTimeout(timer);
+  }, [drafts]);
 
   /** Enquanto grava, o contador anda: é ele que mostra que o microfone está aberto. */
   useEffect(() => {
@@ -778,6 +843,44 @@ export function ShellPage() {
   // One pass per thread instead of two O(n) scans per message per render.
   const versionIndex = useMemo(() => versionsByParent(threadMessages), [threadMessages]);
 
+  /**
+   * ⌘F: as ocorrências saem do fio que já está na memória, então a lista se refaz sozinha
+   * quando o bot escreve mais uma linha. `findAt` é o índice preso ao tamanho da lista —
+   * apagar uma letra da busca encurta a lista e o "3 de 3" não pode virar "4 de 2".
+   */
+  const findHits = useMemo(
+    () => (findOpen ? threadMatches(threadMessages, findQuery) : []),
+    [findOpen, threadMessages, findQuery],
+  );
+  const findAt = findHits.length ? Math.min(findIndex, findHits.length - 1) : 0;
+  const findCurrentId = findHits[findAt] ?? null;
+
+  function stepFind(delta: 1 | -1) {
+    if (!findHits.length) return;
+    setFindIndex(stepMatch(findAt, findHits.length, delta));
+  }
+
+  function closeFind() {
+    setFindOpen(false);
+    setFindQuery("");
+    setFindIndex(0);
+    composerRef.current?.focus();
+  }
+
+  useEffect(() => {
+    if (!findCurrentId) return;
+    const escaped =
+      typeof CSS !== "undefined" && typeof CSS.escape === "function"
+        ? CSS.escape(findCurrentId)
+        : findCurrentId;
+    const hit = threadRef.current?.querySelector(`[data-message-id="${escaped}"]`);
+    if (!hit) return;
+    // Ir para uma ocorrência é sair do fim do fio de propósito: o seguidor automático
+    // solta, senão a próxima linha do bot puxaria a tela de volta para baixo.
+    setFollowThread(false);
+    hit.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [findCurrentId]);
+
   function acceptMention(candidate: MentionCandidate) {
     const next =
       mention?.kind === "skill" || candidate.kind === "skill"
@@ -822,10 +925,10 @@ export function ShellPage() {
           text,
           clientNonce: newClientNonce(),
           mentionBotIds: mentioned.length ? mentioned.map((peer) => peer.id) : undefined,
-          replyToId: replyTo?.id,
+          replyToId: replyToId ?? undefined,
           attachments: attachments.length ? attachments.map((file) => file.id) : undefined,
         });
-        setReplyTo(null);
+        setReplyToId(null);
         setAttachments([]);
       }
     } catch (err) {
@@ -838,9 +941,9 @@ export function ShellPage() {
   }
 
   /** Trecho do recado citado, para desenhar a linha acima da bolha. */
-  function quotedTextFor(replyToId?: string): string | undefined {
-    if (!replyToId) return undefined;
-    const source = threadMessages.find((row) => row.id === replyToId);
+  function quotedTextFor(messageId?: string | null): string | undefined {
+    if (!messageId) return undefined;
+    const source = threadMessages.find((row) => row.id === messageId);
     if (!source) return undefined;
     const text = source.blocks
       .map((block) => ("text" in block && block.text ? block.text : ""))
@@ -1429,6 +1532,8 @@ export function ShellPage() {
   const userEmail = session.data?.user.email;
   const userImage = session.data?.user.image ?? null;
   const threadOpen = Boolean(active || activeGroup);
+  /** Anexo pertence a um bot: é ele que guarda o arquivo e o recebe no recado. */
+  const canAttach = Boolean(active);
   const lastUserText = useMemo(() => {
     for (let i = threadMessages.length - 1; i >= 0; i -= 1) {
       const message = threadMessages[i];
@@ -1439,10 +1544,17 @@ export function ShellPage() {
     return null;
   }, [threadMessages]);
 
+  // Conversa nova, campo novo: o cursor vai para o fim do rascunho guardado, a sugestão de
+  // menção do texto antigo some e a busca aberta não segue para um fio que não é o dela.
   useEffect(() => {
     setFollowThread(true);
     setQueued(null);
-  }, [active?.id, activeGroup?.id]);
+    setMentionDismissed(false);
+    setCaret(draftAt(draftsRef.current, chatKey).text.length);
+    setFindOpen(false);
+    setFindQuery("");
+    setFindIndex(0);
+  }, [chatKey]);
 
   useEffect(() => {
     if (!followThread) return;
@@ -1477,6 +1589,14 @@ export function ShellPage() {
         setPaletteOpen((open) => !open);
         return;
       }
+      // ⌘F também vale de dentro do campo, e no lugar do ⌘F do navegador: o dele só olha
+      // o que está desenhado, e numa conversa que rola isso deixa quase tudo de fora.
+      if (opensThreadSearch(event) && threadOpen) {
+        event.preventDefault();
+        setFindOpen(true);
+        requestAnimationFrame(() => findInputRef.current?.select());
+        return;
+      }
       const target = event.target;
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
         if (event.key !== "n" || !(event.metaKey || event.ctrlKey)) return;
@@ -1497,7 +1617,25 @@ export function ShellPage() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [bots, groups, active?.id, activeGroup?.id, navigate]);
+  }, [bots, groups, active?.id, activeGroup?.id, navigate, threadOpen]);
+
+  /**
+   * Errar o campo e soltar o arquivo no resto da janela trocava a página do Quibt pelo
+   * arquivo — a conversa saía da tela e o rascunho ia junto. Aqui o navegador é impedido de
+   * abrir o que foi solto; quem realmente anexa é o campo, logo abaixo.
+   */
+  useEffect(() => {
+    function swallow(event: DragEvent) {
+      if (!transferHasFiles(event.dataTransfer)) return;
+      event.preventDefault();
+    }
+    window.addEventListener("dragover", swallow);
+    window.addEventListener("drop", swallow);
+    return () => {
+      window.removeEventListener("dragover", swallow);
+      window.removeEventListener("drop", swallow);
+    };
+  }, []);
 
   function runPaletteAction(item: PaletteItem) {
     const action = item.action;
@@ -1710,6 +1848,56 @@ export function ShellPage() {
               : "Reconectando à conversa…"}
           </div>
         ) : null}
+        {findOpen ? (
+          <search className="qb-find">
+            <Icon name="search" size={14} />
+            <input
+              ref={findInputRef}
+              value={findQuery}
+              onChange={(event) => {
+                setFindQuery(event.target.value);
+                setFindIndex(0);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  closeFind();
+                  return;
+                }
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  stepFind(event.shiftKey ? -1 : 1);
+                }
+              }}
+              placeholder="Achar nesta conversa"
+              aria-label="Achar nesta conversa"
+            />
+            <span className="qb-find__count rk-mono" aria-live="polite">
+              {findQuery.trim() ? `${findHits.length ? findAt + 1 : 0}/${findHits.length}` : ""}
+            </span>
+            <button
+              type="button"
+              aria-label="Ocorrência anterior"
+              title="Anterior"
+              disabled={!findHits.length}
+              onClick={() => stepFind(-1)}
+            >
+              <Icon name="chevronUp" size={14} />
+            </button>
+            <button
+              type="button"
+              aria-label="Próxima ocorrência"
+              title="Próxima"
+              disabled={!findHits.length}
+              onClick={() => stepFind(1)}
+            >
+              <Icon name="chevronDown" size={14} />
+            </button>
+            <button type="button" aria-label="Fechar a busca" title="Fechar" onClick={closeFind}>
+              <Icon name="close" size={14} />
+            </button>
+          </search>
+        ) : null}
         <div
           ref={threadRef}
           className="qb-dash__thread rk-scroll"
@@ -1784,7 +1972,12 @@ export function ShellPage() {
                 snapshot?.run?.status === "waiting_takeover",
             );
             return (
-              <div key={message.id} data-run-id={message.runId ?? undefined}>
+              <div
+                key={message.id}
+                data-message-id={message.id}
+                data-run-id={message.runId ?? undefined}
+                className={findCurrentId === message.id ? "qb-find-hit" : undefined}
+              >
                 {stamps[message.id] ? (
                   <div className="flex items-center justify-center py-1 text-[15px] text-[var(--qb-muted-2)]">
                     <span>{stamps[message.id]}</span>
@@ -1843,7 +2036,7 @@ export function ShellPage() {
                   onReply={
                     active || activeGroup
                       ? () => {
-                          setReplyTo(message);
+                          setReplyToId(message.id);
                           requestAnimationFrame(() => composerRef.current?.focus());
                         }
                       : undefined
@@ -1929,17 +2122,59 @@ export function ShellPage() {
             Ir ao mais recente
           </button>
         ) : null}
-        <div className="qb-dash__composer relative">
-          {replyTo ? (
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: área de soltar arquivo não tem
+            papel ARIA próprio; o caminho de teclado continua sendo Anexar arquivos, no menu. */}
+        <div
+          className={`qb-dash__composer relative${dragging ? " is-dragging" : ""}`}
+          onDragEnter={(event) => {
+            // A moldura só acende onde soltar leva a algum lugar: anexo é do bot, e o grupo
+            // ainda não recebe arquivo. Acender na caixa de entrada seria uma promessa vazia.
+            if (!canAttach || !transferHasFiles(event.dataTransfer)) return;
+            event.preventDefault();
+            // Entrar num filho dispara leave no pai: contar as entradas impede que a moldura
+            // pisque a cada botão por baixo do cursor.
+            dragDepth.current += 1;
+            setDragging(true);
+          }}
+          onDragOver={(event) => {
+            if (!canAttach || !transferHasFiles(event.dataTransfer)) return;
+            // Sem segurar o dragover o navegador recusa o soltar e abre o arquivo por cima.
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "copy";
+          }}
+          onDragLeave={(event) => {
+            // A mesma condição da entrada, para as contas fecharem e a moldura não ficar acesa.
+            if (!canAttach || !transferHasFiles(event.dataTransfer)) return;
+            dragDepth.current = Math.max(0, dragDepth.current - 1);
+            if (dragDepth.current === 0) setDragging(false);
+          }}
+          onDrop={(event) => {
+            dragDepth.current = 0;
+            setDragging(false);
+            const files = filesFromTransfer(event.dataTransfer);
+            if (!files.length) return;
+            // Segurar o soltar mesmo sem poder anexar: o estrago de deixar passar é a página
+            // do Quibt virar o arquivo, e aí a conversa e o rascunho somem da tela.
+            event.preventDefault();
+            if (canAttach) void attachFiles(files);
+          }}
+        >
+          {dragging && active ? (
+            <div className="qb-composer-drop" aria-hidden>
+              <Icon name="paperclip" size={14} />
+              <span>Solte para anexar para {active.name}</span>
+            </div>
+          ) : null}
+          {replyToId ? (
             <div className="qb-composer-reply">
               <Icon name="reply" size={13} />
               <span className="min-w-0 flex-1 truncate">
-                {quotedTextFor(replyTo.id) ?? "Recado citado"}
+                {quotedTextFor(replyToId) ?? "Recado citado"}
               </span>
               <button
                 type="button"
                 aria-label="Cancelar resposta"
-                onClick={() => setReplyTo(null)}
+                onClick={() => setReplyToId(null)}
                 className="shrink-0 rounded-md p-1 hover:bg-[var(--qb-surface)]"
               >
                 <Icon name="close" size={13} />
@@ -2114,6 +2349,15 @@ export function ShellPage() {
               }}
               onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
               onKeyDown={onComposerKeyDown}
+              onPaste={(e) => {
+                // Print da tela colado é anexo, não texto: sem isto o navegador escrevia
+                // o nome do arquivo no meio da frase, ou nada.
+                if (!canAttach) return;
+                const files = filesFromTransfer(e.clipboardData);
+                if (!files.length) return;
+                e.preventDefault();
+                void attachFiles(files);
+              }}
               placeholder={
                 editMessageId
                   ? "Editar e ramificar"

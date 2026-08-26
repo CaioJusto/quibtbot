@@ -152,6 +152,7 @@ const ICON_PATHS = {
   chevronLeft: <path d="M15 6l-6 6 6 6" />,
   chevronRight: <path d="M9 6l6 6-6 6" />,
   chevronDown: <path d="M6 9l6 6 6-6" />,
+  chevronUp: <path d="M6 15l6-6 6 6" />,
   bot: (
     <>
       <rect x="5" y="8" width="14" height="11" rx="3" />

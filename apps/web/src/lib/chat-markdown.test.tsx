@@ -23,6 +23,25 @@ describe("ChatMarkdown", () => {
     expect(html).not.toContain("javascript:");
   });
 
+  it("põe a linguagem e o copiar em cima do bloco de código", () => {
+    const html = renderToStaticMarkup(
+      <ChatMarkdown>{'```ts\nconst bot = "Cubee";\n```'}</ChatMarkdown>,
+    );
+
+    expect(html).toContain("rk-code__bar");
+    expect(html).toContain("TypeScript");
+    expect(html).toContain('aria-label="Copiar o código"');
+    expect(html).toContain("<pre>");
+  });
+
+  it("bloco sem linguagem declarada continua sendo um bloco", () => {
+    const html = renderToStaticMarkup(<ChatMarkdown>{"```\nls -la\n```"}</ChatMarkdown>);
+
+    expect(html).toContain("rk-code__lang");
+    expect(html).toContain("texto");
+    expect(html).toContain("ls -la");
+  });
+
   it("renders incomplete streaming code fences as code", () => {
     const html = renderToStaticMarkup(
       <ChatMarkdown streaming>{"```ts\nconst live = true;"}</ChatMarkdown>,

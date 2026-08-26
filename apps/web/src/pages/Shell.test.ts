@@ -140,6 +140,47 @@ describe("dashboard copies the landing product demo", () => {
     expect(shell).toContain('aria-label={stopping ? "Parando agente" : "Parar agente"}');
   });
 
+  it("guarda um rascunho por conversa, e não um para o app inteiro", () => {
+    // O bug era um `useState` só: escrever para a Cubee, pular no grupo e achar a frase lá.
+    expect(shell).not.toContain('const [draft, setDraft] = useState("")');
+    expect(shell).not.toContain("useState<Attachment[]>([])");
+    expect(shell).toContain("const chatKey = conversationKey({ botId, groupId })");
+    expect(shell).toContain("const currentDraft = draftAt(drafts, chatKey)");
+    expect(shell).toContain("const draft = currentDraft.text");
+    expect(shell).toContain("const attachments = currentDraft.attachments");
+    expect(shell).toContain("const replyToId = currentDraft.replyToId");
+    // Toda escrita diz em qual conversa ela cai; enviar limpa só a entrada daquela.
+    expect(shell).toContain("editDraft(chatKey,");
+    expect(shell).toContain("writeStoredDrafts(drafts)");
+    expect(shell).toContain("readStoredDrafts()");
+  });
+
+  it("anexa o arquivo arrastado ou colado sem deixar o navegador abri-lo", () => {
+    expect(shell).toContain("onDragEnter=");
+    expect(shell).toContain("onDragOver=");
+    expect(shell).toContain("onDragLeave=");
+    expect(shell).toContain("onDrop=");
+    expect(shell).toContain("onPaste=");
+    expect(shell).toContain("filesFromTransfer(event.dataTransfer)");
+    expect(shell).toContain("filesFromTransfer(e.clipboardData)");
+    expect(shell).toContain('dragging ? " is-dragging" : ""');
+    // O guarda da janela inteira: soltar fora do campo não pode trocar a página pelo arquivo.
+    expect(shell).toContain('window.addEventListener("drop", swallow)');
+  });
+
+  it("acha na conversa aberta com ⌘F, sem rota nova", () => {
+    expect(shell).toContain("opensThreadSearch(event) && threadOpen");
+    expect(shell).toContain("threadMatches(threadMessages, findQuery)");
+    expect(shell).toContain("stepMatch(findAt, findHits.length, delta)");
+    expect(shell).toContain("data-message-id={message.id}");
+    expect(shell).toContain('hit.scrollIntoView({ block: "center", behavior: "smooth" })');
+    expect(shell).toContain('aria-label="Achar nesta conversa"');
+    expect(shell).toContain('aria-label="Próxima ocorrência"');
+    expect(shell).toContain("qb-find-hit");
+    // A busca é do lado de cá: o fio já está na memória, não há chamada nova ao servidor.
+    expect(shell).not.toContain("rpc.threads.search");
+  });
+
   it("clears inbox search after creating a group and lands on it", () => {
     expect(shell).toContain("async function createGroup");
     expect(shell).toContain('setQuery("")');

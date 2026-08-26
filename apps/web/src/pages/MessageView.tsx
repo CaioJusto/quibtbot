@@ -261,13 +261,39 @@ function ComputerHandoffCard({
   );
 }
 
+/** PDF não é um tipo que o `fileViewerKind` compartilhe com o celular: lá ele vai para a
+ * folha do sistema, aqui o próprio navegador já sabe desenhá-lo. */
+function isPdfFile(mimeType: string | undefined, name: string | undefined): boolean {
+  return (
+    (mimeType ?? "").toLowerCase() === "application/pdf" ||
+    (name ?? "").toLowerCase().endsWith(".pdf")
+  );
+}
+
 /**
- * O visualizador de arquivos do app: imagem em tela grande e texto legível abrem aqui
- * dentro, num overlay escuro, em vez de virarem uma aba nova ou um download. Vídeo e
- * áudio já tocam no fio; o resto continua baixando.
+ * O que abre dentro do app quando o cartão do arquivo é clicado: PDF, texto que caiba na
+ * tela, e mídia que o navegador não reconheceu pelo tipo (um `.mov` que chegou como
+ * `application/octet-stream` não vira player sozinho no fio, mas toca aqui).
+ */
+function opensInViewer(block: { mimeType: string; name: string; size: number }): boolean {
+  if (isPdfFile(block.mimeType, block.name)) return true;
+  const kind = fileViewerKind(block.mimeType, block.name);
+  if (kind === "video" || kind === "audio") return true;
+  return kind === "text" && block.size <= TEXT_VIEWER_MAX_BYTES;
+}
+
+/**
+ * O visualizador de arquivos do app: imagem, vídeo, áudio, PDF e texto legível abrem aqui
+ * dentro, num overlay escuro, em vez de virarem uma aba nova ou um download. Planilha e o
+ * resto continuam baixando — fingir que abrem seria pior do que dizer que não abrem.
+ *
+ * A tela escura é do visualizador, como num app de fotos: não é cromo do produto, é o fundo
+ * que tira o resto da tela do caminho. É a mesma escolha do celular.
  */
 function FileOverlay({ file, onClose }: { file: ViewerFile; onClose: () => void }) {
   const kind = fileViewerKind(file.mimeType, file.name);
+  // "other" ainda pode ser um PDF; o que não é nem isso não tem o que mostrar aqui.
+  const mode = kind === "other" ? (isPdfFile(file.mimeType, file.name) ? "pdf" : "none") : kind;
   const [text, setText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -280,7 +306,7 @@ function FileOverlay({ file, onClose }: { file: ViewerFile; onClose: () => void 
   }, [onClose]);
 
   useEffect(() => {
-    if (kind !== "text") return;
+    if (mode !== "text") return;
     let active = true;
     void fetch(fileUrl(file.artifactId), { credentials: "include" })
       .then((response) => {
@@ -296,7 +322,7 @@ function FileOverlay({ file, onClose }: { file: ViewerFile; onClose: () => void 
     return () => {
       active = false;
     };
-  }, [kind, file.artifactId]);
+  }, [mode, file.artifactId]);
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: somente um clique direto no fundo fecha; Esc também fecha.
@@ -329,12 +355,38 @@ function FileOverlay({ file, onClose }: { file: ViewerFile; onClose: () => void 
         </a>
       </div>
       <div className="flex min-h-0 flex-1 items-center justify-center p-4">
-        {kind === "image" ? (
+        {mode === "image" ? (
           <img
             src={fileUrl(file.artifactId)}
             alt={file.name}
             className="max-h-full max-w-full rounded-[var(--qb-r-md)] object-contain"
           />
+        ) : mode === "video" ? (
+          <video
+            src={fileUrl(file.artifactId)}
+            controls
+            autoPlay
+            className="max-h-full max-w-full rounded-[var(--qb-r-md)]"
+          >
+            {/* Anexo de tela ou de câmera não vem com trilha de legenda. */}
+            <track kind="captions" />
+          </video>
+        ) : mode === "audio" ? (
+          <audio src={fileUrl(file.artifactId)} controls autoPlay className="w-full max-w-[520px]">
+            <track kind="captions" />
+          </audio>
+        ) : mode === "pdf" ? (
+          // O leitor de PDF do próprio navegador, dentro do overlay: nada de biblioteca
+          // extra no pacote para desenhar o que ele já desenha.
+          <iframe
+            title={file.name}
+            src={fileUrl(file.artifactId)}
+            className="h-full w-full max-w-[980px] rounded-[var(--qb-r-md)] bg-white"
+          />
+        ) : mode === "none" ? (
+          <p className="text-[15px] text-white/70">
+            Este arquivo não abre aqui dentro — use o botão de baixar.
+          </p>
         ) : error ? (
           <p className="text-[15px] text-[#FF8A8E]">{error}</p>
         ) : text === null ? (
@@ -567,11 +619,11 @@ export function MessageView({
                       className="block max-h-[420px] w-auto rounded-[var(--qb-r-lg)] border border-[var(--qb-hairline)]"
                     />
                   </button>
-                ) : fileViewerKind(block.mimeType, block.name) === "text" &&
-                  block.size <= TEXT_VIEWER_MAX_BYTES ? (
-                  // Texto abre para ler aqui dentro; o download fica no overlay.
+                ) : opensInViewer(block) ? (
+                  // Abre para ler ou tocar aqui dentro; o download fica no overlay.
                   <button
                     type="button"
+                    aria-label={`Abrir ${block.name}`}
                     onClick={() =>
                       setViewer({
                         artifactId: block.artifactId,

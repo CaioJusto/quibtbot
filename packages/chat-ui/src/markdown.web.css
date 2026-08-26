@@ -1,3 +1,12 @@
+/*
+ * A resposta formatada, dentro da bolha.
+ *
+ * As cores saem dos tokens --qb-*: o produto é claro e a resposta do bot é conteúdo dentro
+ * dele, não uma janela escura colada por cima. Os valores fixos que estavam aqui vinham de
+ * um app de fundo preto — no Quibt eles davam título quase branco em cima de cinza claro e
+ * `código` preto sobre preto.
+ */
+
 .rk-chat-markdown {
   min-width: 0;
   overflow-wrap: anywhere;
@@ -29,7 +38,7 @@
 .rk-chat-markdown h5,
 .rk-chat-markdown h6 {
   margin: 0.9em 0 0.35em;
-  color: #f3f3f4;
+  color: var(--qb-ink-strong);
   font-weight: 650;
   line-height: 1.25;
 }
@@ -80,28 +89,95 @@
 }
 
 .rk-chat-markdown a {
-  color: #86b7ff;
+  color: var(--qb-accent);
   text-decoration: underline;
-  text-decoration-color: rgba(134, 183, 255, 0.55);
   text-underline-offset: 0.15em;
 }
 
 .rk-chat-markdown code {
-  border: 1px solid #34343a;
-  border-radius: 0.35em;
-  background: #101012;
+  border: 1px solid var(--qb-hairline);
+  border-radius: var(--qb-r-xs);
+  background: var(--qb-inset);
   padding: 0.08em 0.32em;
+  color: var(--qb-ink);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 0.88em;
+}
+
+/*
+ * Bloco de código: uma barra em cima com a linguagem e o copiar, e a caixa logo abaixo.
+ * As duas partes são uma peça só — a borda fecha em volta das duas, para o botão pertencer
+ * ao código de baixo e não ao parágrafo de cima.
+ */
+.rk-code {
+  overflow: hidden;
+  max-width: 100%;
+  margin: 0.65em 0;
+  border: 1px solid var(--qb-hairline);
+  border-radius: var(--qb-r-md);
+  background: var(--qb-surface-2);
+}
+
+.rk-code__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid var(--qb-hairline);
+  padding: 4px 6px 4px 10px;
+}
+
+.rk-code__lang {
+  color: var(--qb-muted);
+  font-size: var(--qb-t-xs);
+  letter-spacing: 0.01em;
+}
+
+.rk-code__copy {
+  border: 0;
+  border-radius: var(--qb-r-xs);
+  background: transparent;
+  padding: 3px 7px;
+  color: var(--qb-muted);
+  font: inherit;
+  font-size: var(--qb-t-xs);
+  cursor: pointer;
+}
+
+.rk-code__copy:hover,
+.rk-code__copy:focus-visible {
+  background: var(--qb-tile);
+  color: var(--qb-ink);
+}
+
+/* "Copiado" por um segundo, sem estado de React — ver o comentário no botão. */
+.rk-code__copy-done,
+.rk-code__copy[data-copied] .rk-code__copy-idle {
+  display: none;
+}
+
+.rk-code__copy[data-copied] .rk-code__copy-done {
+  display: inline;
+}
+
+.rk-code__copy[data-copied] {
+  color: var(--qb-ink);
+}
+
+.rk-code pre {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .rk-chat-markdown pre {
   max-width: 100%;
   overflow-x: auto;
-  border: 1px solid #2d2d32;
-  border-radius: 0.75em;
-  background: #0e0e10;
-  padding: 0.8em 0.9em;
+  border: 1px solid var(--qb-hairline);
+  border-radius: var(--qb-r-md);
+  background: var(--qb-surface-2);
+  padding: 0.7em 0.9em;
 }
 
 .rk-chat-markdown pre code {
@@ -113,9 +189,9 @@
 }
 
 .rk-chat-markdown blockquote {
-  border-left: 3px solid #55555c;
+  border-left: 3px solid var(--qb-tile);
   padding-left: 0.85em;
-  color: #aaaab0;
+  color: var(--qb-muted);
 }
 
 .rk-chat-markdown table {
@@ -128,21 +204,21 @@
 
 .rk-chat-markdown th,
 .rk-chat-markdown td {
-  border: 1px solid #34343a;
+  border: 1px solid var(--qb-hairline);
   padding: 0.4em 0.6em;
   text-align: left;
 }
 
 .rk-chat-markdown th {
-  background: #232327;
-  color: #f3f3f4;
+  background: var(--qb-tile);
+  color: var(--qb-ink);
   font-weight: 600;
 }
 
 .rk-chat-markdown hr {
   margin: 0.9em 0;
   border: 0;
-  border-top: 1px solid #34343a;
+  border-top: 1px solid var(--qb-hairline);
 }
 
 .rk-chat-markdown img {
@@ -150,12 +226,12 @@
   max-width: 100%;
   height: auto;
   margin: 0.65em 0;
-  border-radius: 0.65em;
+  border-radius: var(--qb-r-md);
 }
 
 .rk-chat-markdown input[type="checkbox"] {
   margin-right: 0.4em;
-  accent-color: #6ea8fe;
+  accent-color: var(--qb-accent);
 }
 
 .rk-chat-markdown-streaming {
@@ -170,7 +246,7 @@
   width: 0.16em;
   height: 1em;
   border-radius: 999px;
-  background: #85858a;
+  background: var(--qb-muted-2);
   animation: rkMarkdownCursor 1s steps(2, jump-none) infinite;
 }
 

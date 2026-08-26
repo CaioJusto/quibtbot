@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { shortcutFromKey, starterPrompts, visibleShortcutTargets } from "./desktop-shortcuts";
+import {
+  opensThreadSearch,
+  shortcutFromKey,
+  starterPrompts,
+  visibleShortcutTargets,
+} from "./desktop-shortcuts";
 
 describe("desktop shortcuts", () => {
   const bots = [
@@ -46,6 +51,13 @@ describe("desktop shortcuts", () => {
     expect(
       shortcutFromKey({ key: "[", metaKey: true, ctrlKey: false, shiftKey: true }, targets, "b1"),
     ).toEqual({ action: "cycle", target: { kind: "bot", id: "b3" } });
+  });
+
+  it("abre a busca da conversa com ⌘F e com Ctrl+F", () => {
+    expect(opensThreadSearch({ key: "f", metaKey: true, ctrlKey: false })).toBe(true);
+    expect(opensThreadSearch({ key: "F", metaKey: false, ctrlKey: true })).toBe(true);
+    expect(opensThreadSearch({ key: "f", metaKey: false, ctrlKey: false })).toBe(false);
+    expect(opensThreadSearch({ key: "k", metaKey: true, ctrlKey: false })).toBe(false);
   });
 
   it("keeps starter prompts personal", () => {
