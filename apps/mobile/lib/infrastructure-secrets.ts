@@ -15,6 +15,12 @@ export type InfrastructureCredentialMetadata = {
   lastUsedAt: string;
 };
 
+export type SshCredentialTarget = {
+  username: string;
+  hostname: string;
+  port: number;
+};
+
 export type LoadInfrastructureCredentialResult =
   | { state: "ok"; credential: InfrastructureCredential }
   | { state: "missing" }
@@ -47,6 +53,23 @@ export function normalizeInfrastructureHost(hostId: string): string {
   }
 
   return trimmed.replace(/\.$/, "");
+}
+
+/** Lê o identificador salvo como `usuario@host:porta` sem aceitar um alvo ambíguo. */
+export function parseSshCredentialHostId(hostId: string): SshCredentialTarget | null {
+  const trimmed = hostId.trim();
+  const separator = trimmed.indexOf("@");
+  const portSeparator = trimmed.lastIndexOf(":");
+  if (separator <= 0 || portSeparator <= separator + 1) return null;
+
+  const username = trimmed.slice(0, separator).trim();
+  const hostname = trimmed
+    .slice(separator + 1, portSeparator)
+    .trim()
+    .replace(/^\[|\]$/g, "");
+  const port = Number(trimmed.slice(portSeparator + 1));
+  if (!username || !hostname || !Number.isInteger(port) || port < 1 || port > 65_535) return null;
+  return { username, hostname, port };
 }
 
 function toHex(bytes: Uint8Array): string {
@@ -196,7 +219,8 @@ export async function loadInfrastructureCredential(
   try {
     raw = await SecureStore.getItemAsync(key, INFRASTRUCTURE_AUTH_OPTIONS);
   } catch {
-    await deleteCredentialEntry(hostId);
+    // Cancelar Face ID/biometria não significa que a credencial corrompeu. Apagar aqui
+    // transformava um simples "agora não" em perda definitiva da senha/chave da VPS.
     return { state: "reauth-required" };
   }
 

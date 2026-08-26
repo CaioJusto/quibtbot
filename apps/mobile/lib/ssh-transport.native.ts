@@ -1,6 +1,7 @@
 import { Platform } from "react-native";
 import {
   buildRemoteBootstrapShell,
+  buildRemoteUpdateShell,
   type EmbeddedReleaseManifest,
   resolveEmbeddedReleaseArtifacts,
   selectLinuxArtifact,
@@ -14,6 +15,7 @@ import {
   normalizeSha256Fingerprint,
   normalizeSshPort,
   parseInstallerOutput,
+  parseRemoteUpdateOutput,
   type SshInstallTransport,
   type SshTransportConfig,
   type SshTransportCredentials,
@@ -230,6 +232,44 @@ export function createSshInstallTransport(
         pairing: parsed.pairing?.code ? parsed.pairing : undefined,
         log: parsed.log,
       } satisfies InstallResult;
+    },
+    async runUpdate(onEvent) {
+      if (!clientKey || !credentials) {
+        throw new Error("SSH transport is not connected.");
+      }
+      const secrets = collectTransportSecrets(credentials);
+      const release = resolveEmbeddedReleaseArtifacts(options.release);
+
+      emitInstallerEvent(
+        onEvent,
+        {
+          step: "requirements",
+          status: "running",
+          message: `Connecting to ${options.hostname}`,
+        },
+        secrets,
+      );
+      emitInstallerEvent(
+        onEvent,
+        { step: "requirements", status: "succeeded", message: "SSH host verified" },
+        secrets,
+      );
+
+      const archResult = await bridge.execute(clientKey, "uname -m");
+      const artifact = selectLinuxArtifact(archResult);
+      if (!artifact) {
+        throw new Error(`Unsupported remote architecture: ${archResult.trim() || "unknown"}`);
+      }
+
+      emitInstallerEvent(
+        onEvent,
+        { step: "images", status: "running", message: "Downloading verified updater" },
+        secrets,
+      );
+      const output = await bridge.execute(clientKey, buildRemoteUpdateShell(release));
+      const parsed = parseRemoteUpdateOutput(output, secrets, onEvent);
+      if (!parsed.ok) throw new Error(parsed.error ?? "Remote update failed.");
+      return parsed;
     },
     async close() {
       if (clientKey) {

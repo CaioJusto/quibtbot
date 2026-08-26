@@ -48,6 +48,19 @@ describe("infrastructureCredentialStorageKey", () => {
   });
 });
 
+describe("parseSshCredentialHostId", () => {
+  it("recovers the exact SSH target stored by the installer", async () => {
+    const { parseSshCredentialHostId } = await import("./infrastructure-secrets.js");
+    expect(parseSshCredentialHostId("root@46.224.84.18:22")).toEqual({
+      username: "root",
+      hostname: "46.224.84.18",
+      port: 22,
+    });
+    expect(parseSshCredentialHostId("box.ascii.dev")).toBeNull();
+    expect(parseSshCredentialHostId("root@host:70000")).toBeNull();
+  });
+});
+
 describe("saveInfrastructureCredential", () => {
   it("stores secrets with requireAuthentication and updates metadata index without secrets", async () => {
     const { saveInfrastructureCredential } = await import("./infrastructure-secrets.js");
@@ -112,6 +125,22 @@ describe("listInfrastructureCredentialMetadata", () => {
 });
 
 describe("loadInfrastructureCredential", () => {
+  it("preserves the credential when the user cancels biometric authentication", async () => {
+    const hostId = "root@vps.example.com:22";
+    const key = storageKey(hostId);
+    getItemAsync.mockImplementation(async (storedKey: string) => {
+      if (storedKey === key) throw new Error("User canceled authentication");
+      if (storedKey === INDEX_KEY) return "[]";
+      return null;
+    });
+
+    const { loadInfrastructureCredential } = await import("./infrastructure-secrets.js");
+    await expect(loadInfrastructureCredential(hostId)).resolves.toEqual({
+      state: "reauth-required",
+    });
+    expect(deleteItemAsync).not.toHaveBeenCalled();
+  });
+
   it("returns stored credentials when SecureStore decrypts successfully", async () => {
     const key = storageKey("root@vps.example.com:22");
     getItemAsync.mockImplementation(async (storedKey: string) => {

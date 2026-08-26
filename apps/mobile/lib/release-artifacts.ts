@@ -77,9 +77,16 @@ export function selectLinuxArtifact(unameMachine: string): string | null {
   }
 }
 
-export function buildRemoteBootstrapShell(input: VerifiedReleaseArtifacts): string {
+function buildRemoteCliShell(
+  input: VerifiedReleaseArtifacts,
+  action: "install" | "update",
+): string {
   const digestX64 = input.digests["quibtbot-linux-x64"] ?? "";
   const digestArm64 = input.digests["quibtbot-linux-arm64"] ?? "";
+  const cliArgs =
+    action === "install"
+      ? "install --non-interactive --show-sensitive"
+      : "update --non-interactive";
   return `set -euo pipefail
 BASE="${input.baseUrl}"
 RELEASE="${input.release}"
@@ -99,8 +106,21 @@ if [ "$ACTUAL" != "$EXPECTED" ]; then echo "checksum mismatch for $ARTIFACT"; ex
 chmod +x "$tmpdir/quibtbot"
 VERSION=$("$tmpdir/quibtbot" --version 2>/dev/null | tr -d '\\r\\n')
 if [ "$VERSION" != "$RELEASE" ]; then echo "unexpected quibtbot version: $VERSION"; exit 1; fi
-"$tmpdir/quibtbot" install --non-interactive --show-sensitive
+"$tmpdir/quibtbot" ${cliArgs}
 `;
+}
+
+/** Instala uma VPS nova e devolve o pareamento sensível somente ao app que abriu o SSH. */
+export function buildRemoteBootstrapShell(input: VerifiedReleaseArtifacts): string {
+  return buildRemoteCliShell(input, "install");
+}
+
+/**
+ * Atualiza uma instalação existente pelo mesmo binário e digest verificados da release.
+ * O CLI cria backup e metadados de rollback antes de trocar as imagens.
+ */
+export function buildRemoteUpdateShell(input: VerifiedReleaseArtifacts): string {
+  return buildRemoteCliShell(input, "update");
 }
 
 export function releaseManifestFixture(

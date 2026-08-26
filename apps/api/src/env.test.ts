@@ -14,6 +14,11 @@ describe("loadEnv", () => {
     expect(env.wakeupDriver).toBe("graphile");
     expect(env.edition).toBe("oss");
     expect(env.availableMachines).toEqual(["docker"]);
+    expect(env.release).toBe("dev");
+  });
+
+  it("reports the deployed stack release instead of the API package version", () => {
+    expect(loadEnv({ ...base, QUIBT_STACK_VERSION: "0.2.13" }).release).toBe("0.2.13");
   });
 
   it("keeps explicit emulator settings for pnpm verify:fast", () => {

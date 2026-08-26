@@ -2,6 +2,7 @@ import type { InstallerEvent } from "@quibt/installer";
 import { describe, expect, it, vi } from "vitest";
 import { createServerBoxRequest } from "./box-api.js";
 import {
+  buildRemoteUpdateShell,
   INSTALL_RELEASE,
   LINUX_ARTIFACTS,
   releaseManifestFixture,
@@ -14,8 +15,10 @@ import {
   type InstallResult,
   normalizeSha256Fingerprint,
   parseInstallerOutput,
+  parseRemoteUpdateOutput,
   type RemoteInstallTransport,
   runVerifiedRemoteInstall,
+  runVerifiedRemoteUpdate,
   type SshTransportCredentials,
   sanitizeInstallerEvent,
 } from "./remote-installer.js";
@@ -92,6 +95,48 @@ describe("parseInstallerOutput", () => {
     expect(parsed.log).not.toContain("Expires:");
     expect(parsed.log).not.toContain("<svg");
     expect(parsed.log).toContain("[health] succeeded: ready");
+  });
+});
+
+describe("remote server update", () => {
+  it("downloads the verified release binary and invokes update without pairing output", () => {
+    const command = buildRemoteUpdateShell(resolveEmbeddedReleaseArtifacts());
+    expect(command).toContain('if [ "$ACTUAL" != "$EXPECTED" ]');
+    expect(command).toContain('"$tmpdir/quibtbot" update --non-interactive');
+    expect(command).not.toContain("--show-sensitive");
+  });
+
+  it("extracts the release and backup while redacting the credential", () => {
+    const parsed = parseRemoteUpdateOutput(
+      '[database] succeeded: backup hunter2\n{\n  "release": "0.2.13",\n  "previousRelease": "0.2.8",\n  "backupPath": "/var/lib/quibt/backups/ok"\n}\n',
+      ["hunter2"],
+    );
+    expect(parsed).toMatchObject({
+      ok: true,
+      release: "0.2.13",
+      previousRelease: "0.2.8",
+      backupPath: "/var/lib/quibt/backups/ok",
+    });
+    expect(parsed.log).not.toContain("hunter2");
+  });
+
+  it("uses the stored credential only after fingerprint verification", async () => {
+    const loadCredential = vi.fn(async () => passwordCreds);
+    const transport = createMockSshTransport({
+      release: releaseManifestFixture(),
+      installOutput:
+        '[health] succeeded: API ready\n{\n  "release": "0.2.13",\n  "previousRelease": "0.2.8",\n  "backupPath": "/var/lib/quibt/backups/ok"\n}\n',
+    });
+    const identity = await transport.inspectIdentity();
+    transport.attachCredential(loadCredential);
+
+    const result = await runVerifiedRemoteUpdate(transport, {
+      expectedFingerprint: identity.fingerprint,
+      onEvent: () => undefined,
+    });
+
+    expect(loadCredential).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ ok: true, release: "0.2.13", previousRelease: "0.2.8" });
   });
 });
 

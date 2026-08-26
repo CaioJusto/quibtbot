@@ -19,6 +19,7 @@ export function createSshInstallTransport(
     attachCredential: () => undefined,
     connect: unsupported,
     runInstall: unsupported,
+    runUpdate: unsupported,
     close: async () => undefined,
   };
 }

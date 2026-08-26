@@ -14,6 +14,8 @@ import {
 
 export interface AppEnv {
   nodeEnv: string;
+  /** Release do stack (ex.: 0.2.13), distinta da versão interna do pacote API. */
+  release: string;
   databaseUrl: string;
   authSecret: string;
   authUrl: string;
@@ -68,6 +70,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
   }
   const env: AppEnv = {
     nodeEnv,
+    release: source.QUIBT_STACK_VERSION?.trim() || source.npm_package_version?.trim() || "dev",
     databaseUrl: required(source, "DATABASE_URL"),
     authSecret,
     authUrl: source.BETTER_AUTH_URL ?? source.WEB_ORIGIN ?? "http://127.0.0.1:5173",

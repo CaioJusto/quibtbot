@@ -27,6 +27,7 @@ import {
   formatInfrastructureAuthType,
   type InfrastructureCredentialMetadata,
   listInfrastructureCredentialMetadata,
+  parseSshCredentialHostId,
 } from "../lib/infrastructure-secrets";
 import { currentModelSummary } from "../lib/model-source";
 import { AppSymbol, type AppSymbolName, showNativeSheet } from "../lib/native";
@@ -131,11 +132,26 @@ export default function Account() {
     });
   }
 
-  function confirmForgetCredential(row: InfrastructureCredentialMetadata) {
+  function manageInfrastructureCredential(row: InfrastructureCredentialMetadata) {
+    const sshTarget = parseSshCredentialHostId(row.hostId);
     showNativeSheet({
-      title: "Esquecer credencial",
-      message: `Remove ${row.label} deste aparelho. Você precisará informar de novo na próxima instalação remota.`,
+      title: row.label,
+      message: sshTarget
+        ? "Atualize esta VPS com backup, verificação da impressão SSH e Face ID."
+        : "Esta credencial fica protegida pela biometria deste aparelho.",
       actions: [
+        ...(sshTarget
+          ? [
+              {
+                label: "Atualizar servidor",
+                onPress: () =>
+                  router.push({
+                    pathname: "/setup-ssh",
+                    params: { action: "update", hostId: row.hostId },
+                  }),
+              },
+            ]
+          : []),
         {
           label: "Esquecer",
           destructive: true,
@@ -310,8 +326,8 @@ export default function Account() {
                   icon="lock.fill"
                   title={row.label}
                   detail={`${formatInfrastructureAuthType(row.authType)} · usado em ${formatLastUsed(row.lastUsedAt)}`}
-                  actionLabel="Esquecer"
-                  onPress={() => confirmForgetCredential(row)}
+                  actionLabel="Gerenciar"
+                  onPress={() => manageInfrastructureCredential(row)}
                   last={index === infraCredentials.length - 1}
                 />
               ))}

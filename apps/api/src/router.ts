@@ -150,6 +150,8 @@ export interface RouterDeps {
     defaultModel: string;
     openRouterKey?: string;
     screenProxySecret: string;
+    /** Identidade operacional vinda de QUIBT_STACK_VERSION no Compose. */
+    release?: string;
     edition?: "oss" | "cloud";
     billingEnabled?: boolean;
     sandboxProvider?: string;
@@ -276,7 +278,7 @@ export function createRouter(deps: RouterDeps) {
       const worker = await workerPresence.read();
       return {
         ok: true as const,
-        version: "0.1.0",
+        version: deps.env.release ?? "dev",
         edition: gate.edition,
         billingEnabled: gate.billingEnabled,
         sandbox: machine.machine ?? deps.env.sandboxProvider ?? "docker",

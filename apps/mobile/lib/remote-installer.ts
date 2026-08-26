@@ -3,6 +3,7 @@ import type { InstallerEvent, InstallerEventStatus, InstallStep } from "@quibt/i
 import { redactInstallerText } from "@quibt/installer/redact";
 import {
   buildRemoteBootstrapShell,
+  buildRemoteUpdateShell,
   type EmbeddedReleaseManifest,
   releaseManifestFixture,
   resolveEmbeddedReleaseArtifacts,
@@ -31,6 +32,15 @@ export interface InstallResult {
   boxId?: string;
 }
 
+export interface RemoteUpdateResult {
+  ok: boolean;
+  release?: string;
+  previousRelease?: string;
+  backupPath?: string;
+  error?: string;
+  log?: string;
+}
+
 export interface RemoteInstallTransport {
   inspectIdentity(): Promise<{ algorithm: string; fingerprint: string }>;
   attachCredential?(loader: () => Promise<SshTransportCredentials>): void;
@@ -41,6 +51,7 @@ export interface RemoteInstallTransport {
 
 export type SshInstallTransport = RemoteInstallTransport & {
   attachCredential(loader: () => Promise<SshTransportCredentials>): void;
+  runUpdate(onEvent: (event: InstallerEvent) => void): Promise<RemoteUpdateResult>;
 };
 
 export type SshTransportCredentials =
@@ -254,6 +265,64 @@ export function parseInstallerOutput(
   };
 }
 
+/**
+ * O `quibtbot update` imprime os mesmos eventos do install e termina com um resumo JSON.
+ * A saída passa pela mesma redação antes de chegar à tela.
+ */
+export function parseRemoteUpdateOutput(
+  combined: string,
+  secrets: string[],
+  onEvent?: (event: InstallerEvent) => void,
+): RemoteUpdateResult {
+  const sanitized = redactInstallerText(combined, secrets);
+  for (const line of sanitized.split("\n")) {
+    const match = line.match(INSTALLER_LINE);
+    if (match?.[1] && match[2] && match[3]) {
+      emitSanitized(
+        onEvent,
+        {
+          step: match[1] as InstallStep,
+          status: match[2] as InstallerEventStatus,
+          message: match[3],
+        },
+        secrets,
+      );
+    }
+  }
+
+  const candidates = sanitized.match(/\{[\s\S]*?\}/g) ?? [];
+  let summary: { release?: unknown; previousRelease?: unknown; backupPath?: unknown } = {};
+  for (const candidate of candidates.reverse()) {
+    try {
+      const parsed = JSON.parse(candidate) as typeof summary;
+      if (typeof parsed.release === "string") {
+        summary = parsed;
+        break;
+      }
+    } catch {
+      // Logs podem conter chaves que não são JSON; só o resumo final nos interessa.
+    }
+  }
+
+  if (typeof summary.release !== "string") {
+    return {
+      ok: false,
+      error: "A VPS terminou sem confirmar a release atualizada.",
+      log: boundLogText(sanitized.trim()),
+    };
+  }
+
+  return {
+    ok: true,
+    release: summary.release,
+    ...(typeof summary.previousRelease === "string"
+      ? { previousRelease: summary.previousRelease }
+      : {}),
+    ...(typeof summary.backupPath === "string" ? { backupPath: summary.backupPath } : {}),
+    log: boundLogText(sanitized.trim()),
+  };
+}
+
 export async function runVerifiedRemoteInstall(
   transport: RemoteInstallTransport,
   options: VerifiedRemoteInstallOptions,
@@ -272,6 +341,31 @@ export async function runVerifiedRemoteInstall(
     await transport.close().catch(() => undefined);
     const message = redactInstallerText(
       error instanceof Error ? error.message : "Remote install failed",
+      [],
+    );
+    emitSanitized(options.onEvent, { step: "requirements", status: "failed", message }, []);
+    return { ok: false, error: message, log: "" };
+  }
+}
+
+export async function runVerifiedRemoteUpdate(
+  transport: SshInstallTransport,
+  options: VerifiedRemoteInstallOptions,
+): Promise<RemoteUpdateResult> {
+  const expected = options.expectedFingerprint.trim();
+  if (!expected) {
+    return { ok: false, error: "Expected SSH host fingerprint is required." };
+  }
+
+  try {
+    await transport.connect(expected);
+    const result = await transport.runUpdate((event) => emitSanitized(options.onEvent, event, []));
+    await transport.close().catch(() => undefined);
+    return result;
+  } catch (error) {
+    await transport.close().catch(() => undefined);
+    const message = redactInstallerText(
+      error instanceof Error ? error.message : "Remote update failed",
       [],
     );
     emitSanitized(options.onEvent, { step: "requirements", status: "failed", message }, []);
@@ -360,6 +454,21 @@ export function createMockSshTransport(input: {
         pairing: parsed.pairing?.code ? parsed.pairing : undefined,
         log: parsed.log,
       };
+    },
+    async runUpdate(onEvent) {
+      if (!connected || !credentials) throw new Error("SSH transport is not connected.");
+      const release = resolveEmbeddedReleaseArtifacts(input.release);
+      const secrets = collectTransportSecrets(credentials);
+      const command = buildRemoteUpdateShell(release);
+      if (!command.includes('if [ "$ACTUAL" != "$EXPECTED" ]')) {
+        throw new Error("Update bootstrap script missing digest verification.");
+      }
+      return parseRemoteUpdateOutput(
+        input.installOutput ??
+          '[health] succeeded: API ready\n{\n  "release": "0.2.13",\n  "previousRelease": "0.2.12",\n  "backupPath": "/var/lib/quibt/backups/pre-update"\n}\n',
+        secrets,
+        onEvent,
+      );
     },
     async close() {
       connected = false;

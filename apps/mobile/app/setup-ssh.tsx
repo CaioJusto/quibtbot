@@ -30,31 +30,37 @@ import {
 } from "../lib/design-system";
 import {
   loadInfrastructureCredential,
+  parseSshCredentialHostId,
   saveInfrastructureCredential,
 } from "../lib/infrastructure-secrets";
-import { runVerifiedRemoteInstall, type SshInstallTransport } from "../lib/remote-installer";
+import {
+  runVerifiedRemoteInstall,
+  runVerifiedRemoteUpdate,
+  type SshInstallTransport,
+} from "../lib/remote-installer";
 import { sshSetupErrorMessage } from "../lib/ssh-setup-errors";
 import { createSshInstallTransport, sshTransportSupported } from "../lib/ssh-transport";
 
 type SetupMode = "ssh" | "box";
+type SetupOperation = "install" | "update";
 type SetupStage = "form" | "inspect" | "confirm-fingerprint" | "installing" | "done" | "error";
 
 function hostId(hostname: string, port: string, username: string) {
   return `${username.trim()}@${hostname.trim()}:${port.trim() || "22"}`;
 }
 
-function stageLabel(stage: SetupStage): string {
+function stageLabel(stage: SetupStage, operation: SetupOperation): string {
   switch (stage) {
     case "form":
-      return "Dados do servidor";
+      return operation === "update" ? "Atualizar servidor" : "Dados do servidor";
     case "inspect":
       return "Lendo impressão digital";
     case "confirm-fingerprint":
       return "Confirme a impressão digital";
     case "installing":
-      return "Instalando Quibt";
+      return operation === "update" ? "Atualizando Quibt" : "Instalando Quibt";
     case "done":
-      return "Pronto para conectar";
+      return operation === "update" ? "Servidor atualizado" : "Pronto para conectar";
     case "error":
       return "Algo deu errado";
   }
@@ -63,13 +69,16 @@ function stageLabel(stage: SetupStage): string {
 export default function SetupSshScreen() {
   const router = useRouter();
   const topInset = useHeaderContentInset();
-  const params = useLocalSearchParams<{ mode?: string }>();
+  const params = useLocalSearchParams<{ mode?: string; action?: string; hostId?: string }>();
   const mode: SetupMode = params.mode === "box" ? "box" : "ssh";
+  const savedTarget =
+    params.action === "update" ? parseSshCredentialHostId(params.hostId ?? "") : null;
+  const operation: SetupOperation = savedTarget ? "update" : "install";
 
   const [stage, setStage] = useState<SetupStage>("form");
-  const [host, setHost] = useState("");
-  const [port, setPort] = useState("22");
-  const [username, setUsername] = useState("root");
+  const [host, setHost] = useState(savedTarget?.hostname ?? "");
+  const [port, setPort] = useState(String(savedTarget?.port ?? 22));
+  const [username, setUsername] = useState(savedTarget?.username ?? "root");
   const [authMode, setAuthMode] = useState<"password" | "privateKey">("password");
   const [password, setPassword] = useState("");
   const [privateKey, setPrivateKey] = useState("");
@@ -83,6 +92,9 @@ export default function SetupSshScreen() {
   const [error, setError] = useState<string | null>(null);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [resultCode, setResultCode] = useState<string | null>(null);
+  const [updatedRelease, setUpdatedRelease] = useState<string | null>(null);
+  const [previousRelease, setPreviousRelease] = useState<string | null>(null);
+  const [backupPath, setBackupPath] = useState<string | null>(null);
   const [claiming, setClaiming] = useState(false);
   const [claimError, setClaimError] = useState<string | null>(null);
 
@@ -201,6 +213,37 @@ export default function SetupSshScreen() {
           username: username.trim(),
         });
 
+      if (operation === "update") {
+        const storedHostId = params.hostId ?? credentialHostId;
+        transport.attachCredential(async () => {
+          const stored = await loadInfrastructureCredential(storedHostId);
+          if (stored.state !== "ok" || stored.credential.type === "boxApiKey") {
+            throw new Error(
+              "A credencial salva não está mais disponível. Informe a senha ou chave novamente.",
+            );
+          }
+          if (stored.credential.type === "password") {
+            return { type: "password", password: stored.credential.password };
+          }
+          return {
+            type: "privateKey",
+            privateKey: stored.credential.privateKey,
+            ...(stored.credential.passphrase ? { passphrase: stored.credential.passphrase } : {}),
+          };
+        });
+
+        const result = await runVerifiedRemoteUpdate(transport, {
+          expectedFingerprint: fingerprint,
+          onEvent: (event) => setEvents((current) => [...current, event]),
+        });
+        if (!result.ok) throw new Error(result.error ?? "Atualização SSH falhou.");
+        setUpdatedRelease(result.release ?? null);
+        setPreviousRelease(result.previousRelease ?? null);
+        setBackupPath(result.backupPath ?? null);
+        setStage("done");
+        return;
+      }
+
       transport.attachCredential(async () => {
         if (authMode === "password") {
           if (!password.trim()) throw new Error("Informe a senha SSH.");
@@ -257,6 +300,9 @@ export default function SetupSshScreen() {
     setEvents([]);
     setResultUrl(null);
     setResultCode(null);
+    setUpdatedRelease(null);
+    setPreviousRelease(null);
+    setBackupPath(null);
   }
 
   return (
@@ -264,14 +310,20 @@ export default function SetupSshScreen() {
       <StatusBar style="auto" />
       <ScreenHeader
         onBack={() => router.back()}
-        title={mode === "box" ? "Instalar no Box" : "Instalar na VPS"}
+        title={
+          operation === "update"
+            ? "Atualizar servidor"
+            : mode === "box"
+              ? "Instalar no Box"
+              : "Instalar na VPS"
+        }
       />
       <ScrollView
         contentContainerStyle={[styles.content, { paddingTop: topInset }]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.stage}>{stageLabel(stage)}</Text>
+        <Text style={styles.stage}>{stageLabel(stage, operation)}</Text>
 
         {stage === "form" ? (
           <View style={styles.card}>
@@ -290,6 +342,17 @@ export default function SetupSshScreen() {
                 />
                 <Text style={styles.hint}>
                   A chave fica no SecureStore deste aparelho. Ela não é enviada para a API Quibt.
+                </Text>
+              </>
+            ) : operation === "update" ? (
+              <>
+                <Text style={styles.label}>Servidor salvo</Text>
+                <Text selectable style={styles.mono}>
+                  {credentialHostId}
+                </Text>
+                <Text style={styles.hint}>
+                  Primeiro conferimos a impressão digital SSH. Depois o Face ID libera a credencial
+                  somente para criar o backup e atualizar esta VPS.
                 </Text>
               </>
             ) : (
@@ -374,10 +437,12 @@ export default function SetupSshScreen() {
               </>
             )}
 
-            <View style={styles.toggleRow}>
-              <Text style={styles.toggleLabel}>Salvar credencial neste aparelho</Text>
-              <Switch value={saveCredential} onValueChange={setSaveCredential} />
-            </View>
+            {operation === "install" ? (
+              <View style={styles.toggleRow}>
+                <Text style={styles.toggleLabel}>Salvar credencial neste aparelho</Text>
+                <Switch value={saveCredential} onValueChange={setSaveCredential} />
+              </View>
+            ) : null}
 
             <PrimaryButton
               label={mode === "box" ? "Instalar no Box" : "Ler impressão digital"}
@@ -393,8 +458,8 @@ export default function SetupSshScreen() {
         {stage === "confirm-fingerprint" ? (
           <View style={styles.card}>
             <Text style={styles.hint}>
-              Confira a impressão digital SHA256 no console do provedor antes de continuar. A senha
-              ou chave só são usadas depois desta confirmação.
+              Confira a impressão digital SHA256 antes de continuar. A senha ou chave só são usadas
+              depois desta confirmação.
             </Text>
             <Text style={styles.label}>Algoritmo</Text>
             <Text style={styles.mono}>{inspectedAlgorithm}</Text>
@@ -413,7 +478,7 @@ export default function SetupSshScreen() {
               style={[AUTH_FIELD_TEXT, styles.monoInput]}
             />
             <PrimaryButton
-              label="Verificar e instalar"
+              label={operation === "update" ? "Verificar e atualizar" : "Verificar e instalar"}
               onPress={() => {
                 softHaptic();
                 void startInstall(expectedFingerprint);
@@ -430,7 +495,9 @@ export default function SetupSshScreen() {
             <Text style={styles.hint}>
               {stage === "inspect"
                 ? "Conectando sem credenciais para ler a impressão digital do host..."
-                : "Instalando o servidor Quibt. Isso pode levar alguns minutos."}
+                : operation === "update"
+                  ? "Criando backup e atualizando o servidor. Não feche o app."
+                  : "Instalando o servidor Quibt. Isso pode levar alguns minutos."}
             </Text>
           </View>
         ) : null}
@@ -448,27 +515,47 @@ export default function SetupSshScreen() {
 
         {stage === "done" ? (
           <View style={styles.card}>
-            <Text style={styles.success}>Quibt instalado.</Text>
-            <Text style={styles.hint}>
-              {resultUrl && resultCode
-                ? `Ele responde em ${resultUrl}. Falta só criar a sua conta de dona da instalação — o app já leva o código.`
-                : "Agora conecte este celular à instalação nova."}
+            <Text style={styles.success}>
+              {operation === "update" ? "Servidor atualizado." : "Quibt instalado."}
             </Text>
-            {resultUrl && resultCode ? (
-              <PrimaryButton
-                label={claiming ? "Ligando…" : "Criar minha conta"}
-                onPress={() => void claimAndSignUp()}
-              />
+            {operation === "update" ? (
+              <>
+                <Text style={styles.hint}>
+                  {previousRelease && updatedRelease
+                    ? `${previousRelease} → ${updatedRelease}. A API voltou pronta e o backup foi preservado.`
+                    : "A API voltou pronta e o backup foi preservado."}
+                </Text>
+                {backupPath ? (
+                  <Text selectable style={styles.mono}>
+                    Backup: {backupPath}
+                  </Text>
+                ) : null}
+                <PrimaryButton label="Voltar à conta" onPress={() => router.back()} />
+              </>
             ) : (
-              <PrimaryButton label="Conectar no celular" onPress={() => router.push("/scan")} />
+              <>
+                <Text style={styles.hint}>
+                  {resultUrl && resultCode
+                    ? `Ele responde em ${resultUrl}. Falta só criar a sua conta de dona da instalação — o app já leva o código.`
+                    : "Agora conecte este celular à instalação nova."}
+                </Text>
+                {resultUrl && resultCode ? (
+                  <PrimaryButton
+                    label={claiming ? "Ligando…" : "Criar minha conta"}
+                    onPress={() => void claimAndSignUp()}
+                  />
+                ) : (
+                  <PrimaryButton label="Conectar no celular" onPress={() => router.push("/scan")} />
+                )}
+                {claimError ? <Text style={styles.error}>{claimError}</Text> : null}
+                {resultUrl ? (
+                  <Text style={styles.hint} selectable>
+                    URL: {resultUrl}
+                    {resultCode ? ` · Código: ${resultCode}` : ""}
+                  </Text>
+                ) : null}
+              </>
             )}
-            {claimError ? <Text style={styles.error}>{claimError}</Text> : null}
-            {resultUrl ? (
-              <Text style={styles.hint} selectable>
-                URL: {resultUrl}
-                {resultCode ? ` · Código: ${resultCode}` : ""}
-              </Text>
-            ) : null}
           </View>
         ) : null}
 

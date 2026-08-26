@@ -384,6 +384,7 @@ export async function createApp(overrides: CreateAppOverrides = {}): Promise<App
         .catch(() => undefined);
     },
     env: {
+      release: env.release,
       defaultProvider: env.defaultProvider,
       defaultModel: env.defaultModel,
       openRouterKey: env.openRouterKey,
