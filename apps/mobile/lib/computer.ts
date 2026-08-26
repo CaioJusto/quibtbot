@@ -10,6 +10,7 @@ export {
   type PointerDelta,
   TRACKPAD_CLICK_SLOP_PX,
   trackpadReleaseAction,
+  withControlLease,
 } from "@quibt/core";
 
 export function computerPollMs(hasControl: boolean) {

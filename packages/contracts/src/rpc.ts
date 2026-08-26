@@ -42,6 +42,17 @@ import { Id } from "./ids.js";
 
 const botId = z.object({ botId: Id });
 
+/**
+ * A resposta de `computer.input` e `computer.heartbeat`. Devolver o prazo novo é o que faz o
+ * "controle até HH:mm" andar na tela: sem isso o rótulo ficava parado no horário do takeover
+ * e sumia quando aquele minuto passava, mesmo com o lease já renovado. `null` quando esta
+ * batida não renovou nada.
+ */
+const ControlTouchSchema = z.object({
+  ok: z.literal(true),
+  controlLeaseExpiresAt: z.string().nullable().optional(),
+});
+
 export const appContract = {
   health: oc.output(
     z.object({
@@ -291,7 +302,7 @@ export const appContract = {
           leaseId: Id.optional(),
         }),
       )
-      .output(z.object({ ok: z.literal(true) })),
+      .output(ControlTouchSchema),
     files: oc.input(z.object({ botId: Id, path: z.string().default("/") })).output(
       z.array(
         z.object({
@@ -316,7 +327,21 @@ export const appContract = {
         capturedAt: z.string().nullable(),
       }),
     ),
-    heartbeat: oc.input(botId).output(z.object({ ok: z.literal(true) })),
+    heartbeat: oc
+      .input(
+        z.object({
+          botId: Id,
+          /**
+           * A pessoa está na frente da tela do bot agora: aba à vista, janela em foco e o
+           * teclado dentro do quadro (no celular, o app em primeiro plano nessa tela). O
+           * que se digita dentro do noVNC não passa por `computer.input` — vai direto pelo
+           * WebSocket —, então esta é a única prova de uso que o servidor recebe desse
+           * caminho. Sem ela a batida só acorda o container.
+           */
+          atScreen: z.boolean().optional(),
+        }),
+      )
+      .output(ControlTouchSchema),
     /**
      * Ensinar uma tarefa: `teachStart` marca o ponto de partida dentro do computador e
      * `teachCapture` colhe o que aconteceu desde então — páginas, comandos e arquivos.

@@ -279,6 +279,11 @@ describe("mobile computer screen", () => {
     expect(src).toContain("computer/release");
     expect(src).toContain("computer/heartbeat");
     expect(src).toContain('if (!botId || !hasControl || computer?.state !== "running") return');
+    // Celular no bolso não renova o controle: a batida só sai com o app na frente, e o
+    // prazo que ela devolve é o que mantém o "até HH:mm" andando.
+    expect(src).toContain('if (AppState.currentState === "background") return;');
+    expect(src).toContain("atScreen: true");
+    expect(src).toContain("withControlLease(current, answer?.controlLeaseExpiresAt)");
     expect(src).toContain("screenUrl: null");
     expect(src).toContain("setScreenUrl(result.screenUrl)");
     expect(src).toContain("needsScreenUrlRpc");

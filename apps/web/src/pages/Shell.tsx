@@ -26,6 +26,7 @@ import {
   threadEventNeedsSnapshotRefresh,
   trackpadKeyInput,
   trackpadReleaseAction,
+  withControlLease,
 } from "@quibt/core";
 import { multiAgentBursts } from "@quibt/ui-tokens";
 import { BotAvatar, Button, Switch } from "@quibt/ui-web";
@@ -997,10 +998,40 @@ export function ShellPage() {
   useEffect(() => {
     if ((panel !== "computer" && !computerOpen) || !active || computer?.state !== "running") return;
     if (computer?.controlHolder !== "user") return;
-    const ping = () => void rpc.computer.heartbeat({ botId: active.id }).catch(() => undefined);
+    const botId = active.id;
+    // Aba escondida não é gente na frente do computador: o navegador segue rodando o timer
+    // (mais devagar) e a batida dizia "ainda estou aqui" de uma tela que ninguém olha.
+    // Junto com a regra do servidor — só tecla ou clique renova —, quem sai para o almoço
+    // devolve o computador ao bot no prazo, como a doc promete.
+    const ping = () => {
+      if (document.visibilityState !== "visible") return;
+      // O que a pessoa digita dentro do noVNC não passa pela nossa API: vai direto pelo
+      // WebSocket do quadro. Então o prazo do controle só anda enquanto o teclado está
+      // mesmo lá dentro — é a prova que o servidor não tem como colher sozinho.
+      const atScreen =
+        document.hasFocus() &&
+        screenFrame.current !== null &&
+        document.activeElement === screenFrame.current;
+      void rpc.computer
+        .heartbeat({ botId, atScreen })
+        .then((answer) => {
+          // O prazo novo, quando houve, mantém o "controle até HH:mm" andando.
+          setComputer((current) =>
+            current?.botId === botId
+              ? withControlLease(current, answer.controlLeaseExpiresAt)
+              : current,
+          );
+        })
+        .catch(() => undefined);
+    };
     ping();
     const timer = window.setInterval(ping, 60_000);
-    return () => window.clearInterval(timer);
+    const onVisible = () => ping();
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [panel, computerOpen, active?.id, computer?.state]);
 
   async function openComputer() {
