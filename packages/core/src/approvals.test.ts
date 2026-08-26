@@ -80,6 +80,11 @@ describe("autoDecision", () => {
     expect(autoDecision({ autoApprove: true }, "remember", "fact")).toMatch(/safe/);
     expect(autoDecision({ autoApprove: true }, "save_skill", "Weekly health")).toMatch(/safe/);
     expect(autoDecision({ autoApprove: true }, "create_routine", "Daily standup")).toMatch(/safe/);
+    expect(
+      autoDecision({ autoApprove: false }, "open_url", "https://example.com", {
+        unattended: true,
+      }),
+    ).toMatch(/safe/);
     // O computador é do bot (container, VPS, sandbox): um `ls` ou um `xdg-open` não
     // precisa de card quando o bot está com auto-aprovar ligado (o padrão).
     expect(autoDecision({ autoApprove: true }, "shell", "ls")).toMatch(/auto-approved shell/);

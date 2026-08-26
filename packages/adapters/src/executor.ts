@@ -48,6 +48,7 @@ import {
   putArtifact,
 } from "@quibt/db";
 import { ApprovalPause, approvalCheckpoint, promptForRun } from "./approval-wait.js";
+import { browserOpenCommand } from "./browser-url.js";
 import { builtinAgentTools, collaborationAgentTools } from "./builtin-tools.js";
 import { deleteSpawnedBot, spawnBot } from "./child-bots.js";
 import { collectLogIds } from "./composio-connector.js";
@@ -519,6 +520,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const content = String(args.content ?? "");
           await deps.home.writeFile(bot.id, filePath, content, context);
           return { ok: true, path: filePath };
+        }
+        if (name === "open_url") {
+          const command = browserOpenCommand(args.url);
+          if (!command) {
+            return { error: "Use a valid HTTP or HTTPS page address without credentials." };
+          }
+          return runSandboxCommand(deps.sandbox, computer, command, "/home/quibt", context);
         }
         if (name === "shell") {
           const command = String(args.command ?? args.cmd ?? "");
@@ -1125,12 +1133,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
               instructions: [
                 bot.instructions || `${bot.name}: ${bot.title}\n${bot.description}`,
                 ...groupLines,
-                'You have a persistent computer with a real graphical desktop and a browser. Use write_file to save files into your home (they appear in Files). Use shell to run commands in that computer. Use the memory tool proactively for durable facts (MEMORY.md = your notes, USER.md = who the user is; add/replace/remove compact § entries). Use save_skill when the user wants to reuse a method (they can type /Name later). Use create_routine when they want work on a schedule. When you hit something only the person can do — a login or password, a two-factor or captcha, a payment, a file chooser, or any choice you should not make for them — call request_takeover with a plain reason ("preciso que você faça o login no banco") and stop there; do not guess a password, invent data, or click past it. Prefer asking to acting when you are unsure and the action is hard to undo. Use destination.write only for connected destination records.',
+                'You have a persistent computer with a real graphical desktop and a browser. Use open_url to open HTTP or HTTPS pages inside that browser without asking for approval; never use shell/xdg-open for normal page navigation. Use write_file to save files into your home (they appear in Files). Use shell to run commands in that computer. Use the memory tool proactively for durable facts (MEMORY.md = your notes, USER.md = who the user is; add/replace/remove compact § entries). Use save_skill when the user wants to reuse a method (they can type /Name later). Use create_routine when they want work on a schedule. When you hit something only the person can do — a login or password, a two-factor or captcha, a payment, a file chooser, or any choice you should not make for them — call request_takeover with a plain reason ("preciso que você faça o login no banco") and stop there; do not guess a password, invent data, or click past it. Prefer asking to acting when you are unsure and the action is hard to undo. Use destination.write only for connected destination records.',
                 // Sem esta linha o modelo não sabia que enxerga a própria tela: com o bot
                 // instruído, o texto de fallback do runtime que ensinava `screenshot` era
                 // descartado, e ele respondia "não consigo capturar prints" a um pedido
                 // que a ferramenta resolve em um passo.
-                "To show something, send it — do not describe it and do not ask what to do: `screenshot` puts a picture of your current screen into the chat right away; `record_screen` puts a short video of it there; `send_file` sends any file from your computer (a PDF, a spreadsheet, a recording). If the person asks for a print, a screenshot, a picture of the screen, or to see a page: open it in the browser with `shell` (`xdg-open URL`) if it is not open yet, wait for that result, and only then call `screenshot` — one tool call at a time, never both in the same turn, or the picture shows the screen before the page loaded. You can open any website; there is no such thing as an external site you cannot capture.",
+                "To show something, send it — do not describe it and do not ask what to do: `screenshot` puts a picture of your current screen into the chat right away; `record_screen` puts a short video of it there; `send_file` sends any file from your computer (a PDF, a spreadsheet, a recording). If the person asks for a print, a screenshot, a picture of the screen, or to see a page: open it with `open_url` if it is not open yet, wait for that result, and only then call `screenshot` — one tool call at a time, never both in the same turn, or the picture shows the screen before the page loaded. You can open any website; there is no such thing as an external site you cannot capture.",
                 localTools.length
                   ? "You can collaborate with other bots. Use list_bots or list_teammates to discover them. Use ask_bot when you need a reply before continuing. Use message_teammate for a fire-and-forget recado. When the person puts you in charge of something — tells you to coordinate, to lead, to be the chief of a task — take it: split the work, hand pieces to the teammates that fit with ask_bot or message_teammate, and bring the results back together here. Being in charge is something the person tells you in the conversation, not a setting."
                   : "",

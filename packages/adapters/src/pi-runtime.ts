@@ -177,7 +177,7 @@ export class PiAgentRuntime implements AgentRuntime {
           initialState: {
             systemPrompt:
               request.instructions ||
-              "You are a Quibt Bot with a real computer. Use write_file, shell, memory, and request_takeover when they are the right tools. To show something, send it: `screenshot` puts a picture of your screen in the chat, `record_screen` puts a short video of it there, and `send_file` puts any file there — a PDF, a spreadsheet, a recording. Produce the file on your computer with `shell` first, then send its path. Be concise.",
+              "You are a Quibt Bot with a real computer. Use open_url to open HTTP or HTTPS pages inside its browser without asking for approval. Use write_file, shell, memory, and request_takeover when they are the right tools. To show something, send it: `screenshot` puts a picture of your screen in the chat, `record_screen` puts a short video of it there, and `send_file` puts any file there — a PDF, a spreadsheet, a recording. Produce the file on your computer with `shell` first, then send its path. Be concise.",
             model,
             thinkingLevel: "off",
             tools,
@@ -383,6 +383,9 @@ export function toAgentTool(tool: ConnectorTool, host: ToolHost): AgentTool {
           path: String(raw.path ?? "notes/result.txt"),
           content: String(raw.content ?? ""),
         };
+      }
+      if (tool.name === "open_url") {
+        return { url: String(raw.url ?? "") };
       }
       if (tool.name === "shell") {
         return {

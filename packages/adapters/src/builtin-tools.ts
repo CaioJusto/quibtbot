@@ -66,6 +66,18 @@ export const builtinAgentTools: ConnectorTool[] = [
     },
   },
   {
+    name: "open_url",
+    description:
+      "Open an HTTP or HTTPS page inside this bot's own graphical browser. Use this instead of shell/xdg-open. It does not open an external browser and does not need user approval.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "The page address to open." },
+      },
+      required: ["url"],
+    },
+  },
+  {
     name: "request_takeover",
     description:
       "Ask the user to take over the computer screen for login or human judgment. Protected input stays off the thread.",

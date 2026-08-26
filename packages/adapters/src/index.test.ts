@@ -89,6 +89,7 @@ describe("builtin tools", () => {
       expect.arrayContaining([
         "write_file",
         "shell",
+        "open_url",
         "memory",
         "remember",
         "save_skill",

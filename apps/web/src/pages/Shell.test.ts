@@ -37,6 +37,14 @@ describe("dashboard copies the landing product demo", () => {
     );
   });
 
+  it("opens a takeover request from the conversation inside the Quibt overlay", () => {
+    expect(shell).toContain('snapshot?.run?.status === "waiting_takeover"');
+    expect(shell).toContain("onTakeOverComputer=");
+    expect(shell).toContain("!activeGroup && active ? () => void takeOverComputer() : undefined");
+    expect(shell).toContain('panel === "computer" || computerOpen || takeoverRequested');
+    expect(shell).not.toContain("window.open(screenUrl");
+  });
+
   it("does not keep a screen URL or heartbeat after the lease is gone", () => {
     expect(shell).not.toContain("Assuma o controle para ver a tela");
     expect(shell).toContain('if (computer?.controlHolder !== "user") return;');

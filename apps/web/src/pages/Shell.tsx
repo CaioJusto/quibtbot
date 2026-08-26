@@ -1146,6 +1146,7 @@ export function ShellPage() {
   // Bumped once per reconnect attempt so the pin below knows the session died.
   const [screenDrop, setScreenDrop] = useState(0);
   const [screenLost, setScreenLost] = useState(false);
+  const takeoverRequested = snapshot?.run?.status === "waiting_takeover";
   const screenVisible = (panel === "computer" || computerOpen) && computer?.state === "running";
   // `controlHolder` é o campo do banco: vale "user" para a workspace inteira enquanto
   // alguém tiver o lease. A URL da tela só vem para quem o tem — é ela que diz "é meu".
@@ -1276,7 +1277,9 @@ export function ShellPage() {
       state: computer?.state,
       controlHolder: computer?.controlHolder,
       screenUrl,
-      shown: panel === "computer" || computerOpen,
+      // Como na referência, o próprio card da conversa mostra um retrato vivo antes de
+      // a pessoa assumir. O stream interativo continua restrito ao overlay e ao lease.
+      shown: panel === "computer" || computerOpen || takeoverRequested,
       hidden: documentHidden,
       streaming: pinnedScreenUrl !== null,
       screenLost,
@@ -1775,6 +1778,11 @@ export function ShellPage() {
             const author = activeGroup
               ? groupAuthor(message, activeGroup.members)
               : peerAuthor(message, active?.id, bots);
+            const computerHandoffActive = Boolean(
+              !activeGroup &&
+                snapshot?.run?.id === message.runId &&
+                snapshot?.run?.status === "waiting_takeover",
+            );
             return (
               <div key={message.id} data-run-id={message.runId ?? undefined}>
                 {stamps[message.id] ? (
@@ -1823,6 +1831,14 @@ export function ShellPage() {
                             snapshot.run.id === message.runId &&
                             snapshot.run.status === "waiting_input",
                         )
+                  }
+                  computerHandoffActive={computerHandoffActive}
+                  computerPreview={computerHandoffActive ? previewShown?.image : null}
+                  computerPreviewLabel={previewLabel}
+                  computerBusy={booting}
+                  onOpenComputer={!activeGroup && active ? () => void openComputer() : undefined}
+                  onTakeOverComputer={
+                    !activeGroup && active ? () => void takeOverComputer() : undefined
                   }
                   onReply={
                     active || activeGroup

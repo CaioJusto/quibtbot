@@ -20,6 +20,12 @@ describe("agent system prompt", () => {
     expect(executor).toContain("there is no such thing as an external site you cannot capture");
   });
 
+  it("opens ordinary pages inside the bot browser without an approval card", () => {
+    expect(executor).toContain("Use open_url to open HTTP or HTTPS pages inside that browser");
+    expect(executor).toContain("open it with `open_url`");
+    expect(executor).not.toContain("`xdg-open URL`");
+  });
+
   it("puts a direct request ahead of getting-to-know-you questions", () => {
     expect(executor).toContain("A direct request always comes first");
     expect(executor).toContain("skip any getting-to-know-you questions");

@@ -126,6 +126,53 @@ describe("MessageView", () => {
     expect(html).toContain("git status");
   });
 
+  it("renders an active computer handoff with preview and an internal takeover action", () => {
+    const html = renderToStaticMarkup(
+      <MessageView
+        message={message({
+          role: "bot",
+          runId: "run_1",
+          blocks: [
+            {
+              kind: "computer",
+              state: "Ready",
+              text: "Preciso que você conclua o login.",
+            },
+          ],
+        })}
+        computerHandoffActive
+        computerPreview="data:image/png;base64,cHJldmlldw=="
+        computerPreviewLabel="ao vivo · agora"
+        onOpenComputer={() => undefined}
+        onTakeOverComputer={() => undefined}
+        onAnswer={() => undefined}
+      />,
+    );
+
+    expect(html).toContain("Precisa de você");
+    expect(html).toContain("Prévia da tela do computador");
+    expect(html).toContain("Assumir controle");
+    expect(html).toContain("Abrir dentro do Quibt");
+    expect(html).not.toContain("href=");
+    expect(html).not.toContain("target=");
+  });
+
+  it("keeps a settled computer card opening the internal viewer", () => {
+    const html = renderToStaticMarkup(
+      <MessageView
+        message={message({
+          role: "bot",
+          blocks: [{ kind: "computer", state: "Concluído", text: "Login concluído." }],
+        })}
+        onOpenComputer={() => undefined}
+        onAnswer={() => undefined}
+      />,
+    );
+
+    expect(html).toContain("Abrir computador");
+    expect(html).not.toContain("Assumir controle");
+  });
+
   it("summarizes a multi-agent burst in Portuguese", () => {
     const html = renderToStaticMarkup(
       <BurstSummary

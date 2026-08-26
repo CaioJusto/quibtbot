@@ -2,7 +2,7 @@ import { ChatMarkdown } from "@quibt/chat-ui/web";
 import type { ThreadMessage } from "@quibt/contracts";
 import { fileViewerKind, TEXT_VIEWER_MAX_BYTES } from "@quibt/core";
 import { BotAvatar } from "@quibt/ui-web";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useId, useState } from "react";
 import { Icon } from "../components/desktop-ui";
 import type { MessageAuthor } from "../lib/thread-authors";
 import { isTurnStartMarker } from "../lib/turn-start";
@@ -161,6 +161,106 @@ function Reactions({
 
 type ViewerFile = { artifactId: string; name: string; mimeType?: string; size?: number };
 
+function ComputerHandoffCard({
+  state,
+  text,
+  active,
+  preview,
+  previewLabel,
+  busy,
+  onOpen,
+  onTakeOver,
+}: {
+  state: string;
+  text: string;
+  active: boolean;
+  preview?: string | null;
+  previewLabel?: string | null;
+  busy?: boolean;
+  onOpen?: () => void;
+  onTakeOver?: () => void;
+}) {
+  const action = active ? onTakeOver : onOpen;
+  const actionLabel = active ? "Assumir controle" : "Abrir computador";
+  const titleId = useId();
+  const descriptionId = useId();
+
+  return (
+    <article
+      aria-labelledby={titleId}
+      aria-describedby={descriptionId}
+      className="w-[min(420px,100%)] overflow-hidden rounded-[var(--qb-r-lg)] border border-[var(--qb-hairline)] bg-[var(--qb-surface-2)]"
+    >
+      <div className="flex items-center justify-between gap-3 px-[18px] pt-4 pb-3">
+        <span id={titleId} className="text-[16px] font-semibold text-[var(--qb-ink)]">
+          Computador
+        </span>
+        <span
+          className={`rounded-full px-3 py-1 text-[13px] font-medium ${
+            active
+              ? "bg-[rgba(255,159,10,.15)] text-[#C56D00]"
+              : "bg-[rgba(52,199,89,.16)] text-[#268A44]"
+          }`}
+          role="status"
+        >
+          {active ? "Precisa de você" : state}
+        </span>
+      </div>
+
+      {active ? (
+        <button
+          type="button"
+          aria-label="Assumir controle e abrir o computador dentro do Quibt"
+          className="group relative mx-[18px] block aspect-video w-[calc(100%_-_36px)] overflow-hidden rounded-[var(--qb-r-md)] bg-[var(--qb-rail)] text-[var(--qb-canvas)]"
+          disabled={busy || !action}
+          onClick={action}
+        >
+          {preview ? (
+            <img
+              src={preview}
+              alt="Prévia da tela do computador"
+              className="h-full w-full object-contain"
+            />
+          ) : (
+            <span className="flex h-full flex-col items-center justify-center gap-2 text-[14px] text-[var(--qb-muted)]">
+              <Icon name="monitor" size={28} />
+              Preparando a prévia…
+            </span>
+          )}
+          <span className="absolute inset-0 flex items-center justify-center bg-[rgba(4,4,5,.24)] opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+            <span className="flex items-center gap-2 rounded-full bg-[rgba(4,4,5,.82)] px-4 py-2 text-[14px] font-medium text-white">
+              <Icon name="expand" size={14} />
+              Abrir dentro do Quibt
+            </span>
+          </span>
+          {preview && previewLabel ? (
+            <span className="absolute top-2 right-2 rounded-full bg-[rgba(4,4,5,.72)] px-2.5 py-1 text-[11px] font-medium text-white">
+              {previewLabel}
+            </span>
+          ) : null}
+        </button>
+      ) : null}
+
+      <div className="px-[18px] py-4">
+        <div id={descriptionId} className="text-[15px] leading-[1.45] text-[var(--qb-ink)]">
+          <ChatMarkdown>{text}</ChatMarkdown>
+        </div>
+        {action ? (
+          <button
+            type="button"
+            className="mt-3.5 flex min-h-11 items-center gap-2 rounded-full bg-[var(--qb-ink-strong)] px-4 py-2.5 text-[15px] font-medium text-[var(--qb-canvas)] disabled:cursor-wait disabled:opacity-60"
+            disabled={busy}
+            onClick={action}
+          >
+            <Icon name={active ? "monitor" : "expand"} size={15} />
+            {busy ? "Abrindo…" : actionLabel}
+          </button>
+        ) : null}
+      </div>
+    </article>
+  );
+}
+
 /**
  * O visualizador de arquivos do app: imagem em tela grande e texto legível abrem aqui
  * dentro, num overlay escuro, em vez de virarem uma aba nova ou um download. Vídeo e
@@ -266,6 +366,12 @@ export function MessageView({
   versionIndex,
   versionCount,
   canEdit,
+  computerHandoffActive,
+  computerPreview,
+  computerPreviewLabel,
+  computerBusy,
+  onOpenComputer,
+  onTakeOverComputer,
 }: {
   message: ThreadMessage;
   author?: MessageAuthor | null;
@@ -288,6 +394,16 @@ export function MessageView({
   versionIndex?: number;
   versionCount?: number;
   canEdit?: boolean;
+  /** Este card pertence ao run que aguarda a pessoa assumir a tela. */
+  computerHandoffActive?: boolean;
+  /** Retrato seguro e não interativo enquanto a pessoa ainda não tomou o lease. */
+  computerPreview?: string | null;
+  computerPreviewLabel?: string | null;
+  computerBusy?: boolean;
+  /** Abre o viewer interno sem sair do Quibt. */
+  onOpenComputer?: () => void;
+  /** Toma o lease e abre o viewer interno; nunca navega para uma aba externa. */
+  onTakeOverComputer?: () => void;
 }) {
   const [viewer, setViewer] = useState<ViewerFile | null>(null);
   return (
@@ -627,20 +743,17 @@ export function MessageView({
         }
         if (block.kind === "computer") {
           return (
-            <div
+            <ComputerHandoffCard
               key={i}
-              className="w-[340px] rounded-[var(--qb-r-lg)] border border-[var(--qb-hairline)] bg-[var(--qb-surface-2)] px-[18px] py-4"
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-[16px] font-semibold text-[var(--qb-ink)]">Computador</span>
-                <span className="rounded-full bg-[rgba(52,199,89,.16)] px-3 py-1 text-[15px] text-[#34C759]">
-                  {block.state}
-                </span>
-              </div>
-              <div className="my-2.5 text-[15px] leading-[1.4] text-[var(--qb-ink)]">
-                <ChatMarkdown>{block.text}</ChatMarkdown>
-              </div>
-            </div>
+              state={block.state}
+              text={block.text}
+              active={Boolean(computerHandoffActive)}
+              preview={computerPreview}
+              previewLabel={computerPreviewLabel}
+              busy={computerBusy}
+              onOpen={onOpenComputer}
+              onTakeOver={onTakeOverComputer}
+            />
           );
         }
         if (block.kind === "subagent") {
