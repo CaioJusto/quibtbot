@@ -27,6 +27,8 @@ export {
 } from "./compose.js";
 export { assessComposeServices, REQUIRED_COMPOSE_SERVICES } from "./compose-services.js";
 export {
+  type DesktopInstallPolicy,
+  type DockerFailureReason,
   type DockerInvocation,
   dockerArgv,
   type EnsureDockerResult,
@@ -47,6 +49,9 @@ export {
   parseEnvFile,
 } from "./environment.js";
 export {
+  DOCKER_DESKTOP_GONE_MESSAGE,
+  type DockerFailureContext,
+  type DockerFailurePhase,
   explainDockerFailure,
   explainInstallLock,
   explainUpdateRequired,
@@ -54,13 +59,20 @@ export {
 export {
   checkDiskSpace,
   DOWNLOAD_NOTICE,
+  downloadNotice,
+  formatElapsed,
   formatGigabytes,
+  missingImagesLocally,
+  NOTHING_TO_DOWNLOAD_NOTICE,
   PULL_ATTEMPTS,
+  PULL_HEARTBEAT_INTERVAL_MS,
   PULL_INACTIVITY_TIMEOUT_MS,
   PullLayerTracker,
   type PullProgress,
   progressMessage,
+  quietProgressMessage,
   REQUIRED_FREE_BYTES,
+  requiredFreeBytesFor,
   shortImageName,
 } from "./image-pull.js";
 export {
@@ -103,6 +115,7 @@ export {
 export { COMPOSE_MANIFEST_NAME, resolveComposeFile } from "./paths.js";
 export { diagnoseDataDirectory, diagnoseEnvFilePermissions } from "./permissions.js";
 export { processExists } from "./process-exists.js";
+export { type PullStepDeps, type PullStepOutcome, pullComposeImages } from "./pull-step.js";
 export { redactInstallerText } from "./redact.js";
 export {
   embeddedRelease,

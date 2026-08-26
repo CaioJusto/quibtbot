@@ -26,7 +26,7 @@ export interface MacDockerInstallDeps {
 
 export type MacDockerInstallResult =
   | { ok: true; invocation: DockerInvocation }
-  | { ok: false; message: string };
+  | { ok: false; message: string; reason?: "desktop-missing" };
 
 export function dockerNonInteractiveMessage(): string {
   return "O Docker Desktop não está instalado e este modo (--non-interactive) não pode pedir a senha do Mac. Instale o Docker Desktop (https://docs.docker.com/desktop/setup/install/mac-install/) ou rode 'quibtbot install' num terminal para o Quibt instalar sozinho.";
@@ -108,7 +108,7 @@ export async function installDockerDesktopOnMac(
   // Daqui em diante há um prompt de senha do macOS no caminho. Sem ninguém na frente
   // da tela ele ficaria pendurado para sempre; melhor falar o que falta e sair.
   if (deps.nonInteractive) {
-    return { ok: false, message: dockerNonInteractiveMessage() };
+    return { ok: false, message: dockerNonInteractiveMessage(), reason: "desktop-missing" };
   }
 
   const url = dockerDesktopMacDownloadUrl(deps.arch);

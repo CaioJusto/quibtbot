@@ -6,20 +6,18 @@ import {
   writeAtomicFile,
   writeBackupBundle,
 } from "./backup.js";
-import {
-  appServicesUpInvocation,
-  composeInvocation,
-  INSTALL_RELEASE,
-  postgresUpInvocation,
-} from "./compose.js";
+import { appServicesUpInvocation, INSTALL_RELEASE, postgresUpInvocation } from "./compose.js";
 import type { DockerInvocation } from "./docker-invocation.js";
 import { runDockerCommand } from "./docker-invocation.js";
 import { ensureDocker } from "./docker-requirements.js";
 import { parseEnvFile } from "./environment.js";
+import type { StatfsLike } from "./image-pull.js";
 import { acquireInstallLock, releaseInstallLock } from "./install-lock.js";
 import { migrateInvocation, migrationFailureMessage } from "./migrate.js";
 import type { Clock, InstallerEvent, ProcessRunner } from "./orchestrator.js";
 import { apiReadyUrl, waitForReady } from "./orchestrator-helpers.js";
+import { PUBLIC_HOST_ENV } from "./public-access.js";
+import { pullComposeImages } from "./pull-step.js";
 import { redactInstallerText } from "./redact.js";
 import { resolvePreviousRelease, resolveUpdateTarget } from "./release-allowlist.js";
 import {
@@ -55,6 +53,8 @@ export interface UpdateDeps {
   fetch: typeof fetch;
   clock: Clock;
   docker?: DockerInvocation;
+  /** Só os testes trocam: mede o espaço livre antes do download. */
+  statfs?: StatfsLike;
   onEvent?: (event: InstallerEvent) => void;
 }
 
@@ -236,18 +236,41 @@ export async function runUpdate(deps: UpdateDeps): Promise<UpdateResult> {
       detail: { backupPath, imageCount: images.length },
     });
 
-    emit({ step: "images", status: "running", message: `Pulling release ${targetRelease}` });
+    emit({
+      step: "images",
+      status: "running",
+      message: `Baixando as imagens do Quibt Bot ${targetRelease}…`,
+    });
     writeAtomicFile(envFile, updateEnvRelease(envSnapshotBody, targetRelease), 0o600);
 
-    const pull = await runDockerCommand(
-      deps.run,
+    // O mesmo download do install: progresso por camada, paciência com conexão lenta,
+    // três tentativas e aviso de disco. O `update` é para onde as mensagens do install
+    // mandam quem já tem uma versão antiga; não pode ser o caminho pior.
+    const pull = await pullComposeImages({
+      run: deps.run,
       docker,
-      composeInvocation("packaged", deps.composeFile, envFile, "pull"),
-    );
-    if (pull.code !== 0) {
-      throw new Error(redactInstallerText(pull.stderr || "image pull failed", secrets));
+      clock: deps.clock,
+      dataDir: deps.dataDir,
+      composeFile: deps.composeFile,
+      envFile,
+      composeMode: "packaged",
+      publicAccess: Boolean(envValues[PUBLIC_HOST_ENV]),
+      statfs: deps.statfs,
+      onProgress: (progress, message) =>
+        emit({ step: "images", status: "running", message, progress }),
+      onNotice: (message) => emit({ step: "images", status: "running", message }),
+    });
+    if (!pull.ok) {
+      // A frase é para gente; o stderr cru (já sem segredos) fica nos detalhes do evento.
+      emit({
+        step: "images",
+        status: "failed",
+        message: pull.message,
+        detail: pull.detail ? { stderr: pull.detail } : undefined,
+      });
+      throw new Error(redactInstallerText(pull.message, secrets));
     }
-    emit({ step: "images", status: "succeeded", message: "Images pulled" });
+    emit({ step: "images", status: "succeeded", message: "Imagens prontas" });
 
     emit({ step: "services", status: "running", message: "Ensuring postgres is up" });
     const postgresUp = await runDockerCommand(

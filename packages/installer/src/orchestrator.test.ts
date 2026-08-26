@@ -723,6 +723,8 @@ describe("download das imagens com progresso", () => {
     const progress = events.filter((event) => event.progress).map((event) => event.progress);
     expect(progress[0]).toEqual({
       image: COMPOSE_IMAGES[0],
+      // O rótulo já vem curto: a referência crua tem 80 caracteres e quebra a barra.
+      label: "postgres:16@e17e86066e5e",
       index: 1,
       count: 4,
       layersDone: 0,
@@ -730,6 +732,7 @@ describe("download das imagens com progresso", () => {
     });
     expect(progress).toContainEqual({
       image: "ghcr.io/quibt/quibt-stack:0.2.11",
+      label: "quibt-stack:0.2.11",
       index: 4,
       count: 4,
       layersDone: 1,
@@ -781,15 +784,83 @@ describe("download das imagens com progresso", () => {
     expect(result.ok).toBe(false);
     expect(pullOptions).toHaveLength(3);
     for (const options of pullOptions) {
-      expect(options.inactivityTimeoutMs).toBe(180_000);
+      expect(options.inactivityTimeoutMs).toBe(900_000);
       expect(options.timeoutMs).toBe(60 * 60_000);
     }
-    expect(result.error).toContain("ficou 3 minutos sem progresso");
+    expect(result.error).toContain("ficou 15 minutos sem progresso");
     expect(result.error).toContain("falhou 3 vezes");
     const failed = events.find((event) => event.status === "failed");
     expect(failed?.step).toBe("images");
     expect(failed?.detail).toEqual({ stderr: "process produced no output for 180 s" });
     expect(loadInstallState(dataDir)?.completed).toEqual(["requirements", "environment"]);
+  });
+
+  it("na retomada baixa só o que falta e não cobra os 10 GB de novo", async () => {
+    // A rede caiu na última imagem: as outras três já ocupam a maior parte dos 10 GB, e
+    // exigir os 10 GB de novo trancava quem a mensagem anterior mandou tentar outra vez.
+    const dataDir = mkdtempSync(path.join(tmpdir(), "quibt-pull-resume-"));
+    ensureInstallEnvironment(dataDir, PUBLIC_URL);
+    writeStateBeforeImages(dataDir);
+    const pulled: string[] = [];
+    const run: ProcessRunner = {
+      async run(command, args, options) {
+        const joined = [command, ...args].join(" ");
+        if (joined.includes("image inspect")) {
+          const reference = args.at(-1) as string;
+          return reference.includes("quibt-stack")
+            ? { code: 1, stdout: "", stderr: "Error: No such image" }
+            : { code: 0, stdout: "sha256:local\n", stderr: "" };
+        }
+        if (command === "docker" && args[0] === "info") {
+          return { code: 0, stdout: "/var/lib/docker\n", stderr: "" };
+        }
+        if (joined.includes(" config --images")) {
+          return { code: 0, stdout: `${COMPOSE_IMAGES.join("\n")}\n`, stderr: "" };
+        }
+        if (command === "docker" && args[0] === "pull") {
+          pulled.push(args[1] as string);
+          options?.onOutput?.("aaaaaaaaaaaa: Pulling fs layer", "stdout");
+          options?.onOutput?.("aaaaaaaaaaaa: Pull complete", "stdout");
+          return { code: 0, stdout: "", stderr: "" };
+        }
+        if (joined.includes("quibt-migrate")) return { code: 0, stdout: "migrate ok", stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    };
+    const events: InstallerEvent[] = [];
+    const result = await runInstall({
+      dataDir,
+      publicUrl: PUBLIC_URL,
+      composeFile: COMPOSE_FILE,
+      composeMode: "packaged",
+      run,
+      fetch: (async (input: string, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/ready")) return new Response("{}", { status: 200 });
+        if (url.endsWith("/rpc/health") && init?.method === "POST") {
+          return new Response(JSON.stringify({ json: { ok: true, needsFirstOwner: false } }), {
+            status: 200,
+          });
+        }
+        return new Response("not found", { status: 404 });
+      }) as typeof fetch,
+      clock: clockNow,
+      platform: "linux",
+      // 3,1 GB livres: passa para uma imagem, reprovaria nos 10 GB do começo.
+      statfs: async () => ({ bsize: 4096, bavail: 750_000 }),
+      onEvent: (event) => events.push(event),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(pulled).toEqual(["ghcr.io/quibt/quibt-stack:0.2.11"]);
+    const messages = events.map((event) => event.message);
+    expect(messages).toContainEqual(
+      "Falta 1 imagem de 4 (cerca de 0,4 GB). O resto já está no disco.",
+    );
+    expect(messages).not.toContainEqual(expect.stringContaining("Vou baixar cerca de 1,7 GB"));
+    // Uma só imagem para baixar: o "imagem N de M" conta o que falta, não o que já veio.
+    const progress = events.filter((event) => event.progress).map((event) => event.progress);
+    expect(progress.every((entry) => entry?.count === 1)).toBe(true);
   });
 
   it("sem 10 GB livres falha antes de baixar, dizendo quanto falta e onde", async () => {
@@ -868,6 +939,10 @@ describe("já instalado = ligar", () => {
         if (command === "docker" && args[0] === "info") {
           return { code: 0, stdout: "Server Version: 27.0.0", stderr: "" };
         }
+        // As imagens continuam no disco desde a instalação.
+        if (joined.includes("image inspect")) {
+          return { code: 0, stdout: "sha256:local\n", stderr: "" };
+        }
         if (joined.includes("docker compose")) {
           composeCalls.push(`${joined} [timeout ${options?.timeoutMs}]`);
           return { code: 0, stdout: "", stderr: "" };
@@ -930,6 +1005,9 @@ describe("já instalado = ligar", () => {
       run: {
         async run(command, args) {
           const joined = [command, ...args].join(" ");
+          if (joined.includes("image inspect")) {
+            return { code: 0, stdout: "sha256:local\n", stderr: "" };
+          }
           if (joined.includes("docker compose")) composeCalls.push(joined);
           return { code: 0, stdout: "", stderr: "" };
         },
@@ -961,6 +1039,9 @@ describe("já instalado = ligar", () => {
         if (command === "/usr/bin/open") {
           opened = true;
           return { code: 0, stdout: "", stderr: "" };
+        }
+        if (command === DOCKER_CLI && joined.includes("image inspect")) {
+          return { code: 0, stdout: "sha256:local\n", stderr: "" };
         }
         if (command === DOCKER_CLI && opened) return { code: 0, stdout: "", stderr: "" };
         return { code: 1, stdout: "", stderr: "Cannot connect to the Docker daemon" };
@@ -1003,6 +1084,9 @@ describe("já instalado = ligar", () => {
       run: {
         async run(command, args) {
           const joined = [command, ...args].join(" ");
+          if (joined.includes("image inspect")) {
+            return { code: 0, stdout: "sha256:local\n", stderr: "" };
+          }
           if (joined.includes(" up ")) {
             return {
               code: 1,
@@ -1027,6 +1111,144 @@ describe("já instalado = ligar", () => {
       status: "failed",
       detail: { stderr: expect.stringContaining("port is already allocated") },
     });
+  });
+
+  it("com as imagens apagadas baixa de novo, com progresso, antes de ligar", async () => {
+    // "Clean / Purge data" no Docker Desktop ou `docker system prune -a`: o estado
+    // continua completo, mas o `up --wait` teria de baixar 1,7 GB calado.
+    const dataDir = mkdtempSync(path.join(tmpdir(), "quibt-start-no-images-"));
+    ensureInstallEnvironment(dataDir, PUBLIC_URL);
+    completeState(dataDir);
+    const order: string[] = [];
+    const pulled: string[] = [];
+    const run: ProcessRunner = {
+      async run(command, args, options) {
+        const joined = [command, ...args].join(" ");
+        if (joined.includes("image inspect")) {
+          return { code: 1, stdout: "", stderr: "Error: No such image" };
+        }
+        if (command === "docker" && args[0] === "info") {
+          return { code: 0, stdout: "/var/lib/docker\n", stderr: "" };
+        }
+        if (joined.includes(" config --images")) {
+          return { code: 0, stdout: `${COMPOSE_IMAGES.join("\n")}\n`, stderr: "" };
+        }
+        if (command === "docker" && args[0] === "pull") {
+          order.push("pull");
+          pulled.push(args[1] as string);
+          options?.onOutput?.("aaaaaaaaaaaa: Pulling fs layer", "stdout");
+          options?.onOutput?.("aaaaaaaaaaaa: Pull complete", "stdout");
+          return { code: 0, stdout: "", stderr: "" };
+        }
+        if (joined.includes(" up ")) {
+          order.push("up");
+          return { code: 0, stdout: "", stderr: "" };
+        }
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    };
+    const events: InstallerEvent[] = [];
+    const result = await runInstall({
+      dataDir,
+      publicUrl: PUBLIC_URL,
+      composeFile: COMPOSE_FILE,
+      composeMode: "packaged",
+      run,
+      fetch: (async (input: string) =>
+        String(input).endsWith("/ready")
+          ? new Response("{}", { status: 200 })
+          : new Response("not found", { status: 404 })) as typeof fetch,
+      clock: clockNow,
+      platform: "linux",
+      statfs: plentyOfDisk,
+      onEvent: (event) => events.push(event),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.alreadyInstalled).toBe(true);
+    expect(pulled).toEqual(COMPOSE_IMAGES);
+    // Baixar primeiro, ligar depois: o `up --wait` não vira um download mudo.
+    expect(order.at(0)).toBe("pull");
+    expect(order.at(-1)).toBe("up");
+    expect(events.some((event) => event.step === "images" && event.progress)).toBe(true);
+    expect(events.map((event) => event.message)).toContainEqual(
+      expect.stringContaining("Vou baixar cerca de 1,7 GB"),
+    );
+  });
+
+  it("no Mac sem o Docker Desktop não baixa nada nem pede a senha", async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), "quibt-start-no-docker-"));
+    ensureInstallEnvironment(dataDir, PUBLIC_URL);
+    completeState(dataDir);
+    const commands: string[] = [];
+    const run: ProcessRunner = {
+      async run(command, args) {
+        commands.push([command, ...args].join(" "));
+        // O Docker.app foi para o Lixo: nada responde.
+        return { code: 1, stdout: "", stderr: "command not found" };
+      },
+    };
+    const events: InstallerEvent[] = [];
+    const result = await runInstall({
+      dataDir,
+      publicUrl: PUBLIC_URL,
+      composeFile: COMPOSE_FILE,
+      composeMode: "packaged",
+      run,
+      fetch: (async () => new Response("not found", { status: 404 })) as typeof fetch,
+      clock: clockNow,
+      platform: "darwin",
+      onEvent: (event) => events.push(event),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.dockerMissing).toBe(true);
+    expect(result.error).toBe(
+      "O Docker Desktop não está mais instalado neste computador. Rode a instalação de novo para o Quibt baixar o Docker.",
+    );
+    // Religar nunca baixa o Docker.dmg nem abre o prompt de administrador.
+    for (const forbidden of ["/usr/bin/curl", "/usr/bin/osascript", "/usr/bin/hdiutil"]) {
+      expect(commands.some((entry) => entry.startsWith(forbidden))).toBe(false);
+    }
+    expect(commands.some((entry) => entry.includes(" up "))).toBe(false);
+    expect(events.at(-1)).toMatchObject({ step: "requirements", status: "failed" });
+  });
+
+  it("uma pasta de dados fora do File sharing não vira culpa do ghcr.io", async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), "quibt-start-mount-"));
+    ensureInstallEnvironment(dataDir, PUBLIC_URL);
+    completeState(dataDir);
+    const result = await runInstall({
+      dataDir,
+      publicUrl: PUBLIC_URL,
+      composeFile: COMPOSE_FILE,
+      composeMode: "packaged",
+      run: {
+        async run(command, args) {
+          const joined = [command, ...args].join(" ");
+          if (joined.includes("image inspect")) {
+            return { code: 0, stdout: "sha256:local\n", stderr: "" };
+          }
+          if (joined.includes(" up ")) {
+            return {
+              code: 1,
+              stdout: "",
+              stderr: `Error response from daemon: Mounts denied: The path ${dataDir} is not shared from the host and is not known to Docker.`,
+            };
+          }
+          return { code: 0, stdout: "", stderr: "" };
+        },
+      },
+      fetch: (async () => new Response("{}", { status: 200 })) as typeof fetch,
+      clock: clockNow,
+      platform: "darwin",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain(`O Docker não conseguiu acessar a pasta de dados ${dataDir}`);
+    expect(result.error).toContain("Settings → Resources → File sharing");
+    expect(result.error).not.toContain("ghcr.io");
+    expect(result.errorDetail).toContain("Mounts denied");
   });
 });
 

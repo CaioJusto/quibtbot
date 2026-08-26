@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { PG_CUSTOM_DUMP_MAGIC } from "./backup.js";
 import { ensureInstallEnvironment } from "./environment.js";
 import { readInstallLock } from "./install-lock.js";
-import type { ProcessRunner } from "./orchestrator.js";
+import type { InstallerEvent, ProcessRunner } from "./orchestrator.js";
 import { initialInstallState, saveInstallState } from "./state-persist.js";
 import { runUpdate } from "./update.js";
 
@@ -95,6 +95,8 @@ describe("runUpdate", () => {
     const result = await runUpdate({
       dataDir,
       composeFile: COMPOSE_FILE,
+      // A suíte não pode depender do disco livre de quem a roda.
+      statfs: async () => ({ bsize: 4096, bavail: 25_000_000 }),
       targetRelease: "0.2.11",
       run: makeRunner("success"),
       fetch: async (url) => {
@@ -130,6 +132,8 @@ describe("runUpdate", () => {
     const result = await runUpdate({
       dataDir,
       composeFile: COMPOSE_FILE,
+      // A suíte não pode depender do disco livre de quem a roda.
+      statfs: async () => ({ bsize: 4096, bavail: 25_000_000 }),
       run: makeRunner("bad-backup"),
       fetch: async () => new Response("down", { status: 503 }),
       clock: { now: () => new Date(), sleep: async () => undefined },
@@ -148,6 +152,8 @@ describe("runUpdate", () => {
     const result = await runUpdate({
       dataDir,
       composeFile: COMPOSE_FILE,
+      // A suíte não pode depender do disco livre de quem a roda.
+      statfs: async () => ({ bsize: 4096, bavail: 25_000_000 }),
       targetRelease: "0.2.11",
       run: makeRunner("up-fail"),
       fetch: async (url) => {
@@ -173,6 +179,8 @@ describe("runUpdate", () => {
     const result = await runUpdate({
       dataDir,
       composeFile: COMPOSE_FILE,
+      // A suíte não pode depender do disco livre de quem a roda.
+      statfs: async () => ({ bsize: 4096, bavail: 25_000_000 }),
       targetRelease: "0.2.11",
       run: makeRunner("migrate-fail"),
       fetch: async (url) => {
@@ -190,6 +198,90 @@ describe("runUpdate", () => {
     expect(result.error).toMatch(/quibt-migrate is missing/i);
   });
 
+  it("baixa as imagens do jeito do install: progresso, paciência e três tentativas", async () => {
+    // O install manda quem tem versão antiga rodar `quibtbot update`; lá o download não
+    // pode ser o `compose pull` mudo de cinco minutos que a instalação já não usa.
+    const dataDir = mkdtempSync(path.join(tmpdir(), "quibt-update-pull-"));
+    seedInstalledState(dataDir);
+    const dump = validCustomDump();
+    const targetImages = [
+      "postgres:16@sha256:e17e86066e5ef83e0952a9347f5c792b7ece00972e2aa787a6986f471b3dd3d5",
+      "ghcr.io/quibt/quibt-stack:0.2.12",
+    ];
+    const pulled: string[] = [];
+    const pullOptions: Array<{ inactivityTimeoutMs?: number; timeoutMs?: number }> = [];
+    let composePulls = 0;
+    let stackAttempts = 0;
+    const run: ProcessRunner = {
+      async run(command, args, options) {
+        const joined = [command, ...args].join(" ");
+        if (joined.includes("pg_dump")) {
+          return { code: 0, stdout: dump.toString("latin1"), stderr: "", stdoutBytes: dump };
+        }
+        if (joined.includes("image inspect")) {
+          const reference = args.at(-1) ?? "";
+          // Só a release instalada está no disco; a nova ainda não.
+          return reference.endsWith(":0.2.11")
+            ? { code: 0, stdout: `${imageInspectResponse(reference)}\n`, stderr: "" }
+            : { code: 1, stdout: "", stderr: "Error: No such image" };
+        }
+        if (command === "docker" && args[0] === "info") {
+          return { code: 0, stdout: "/var/lib/docker\n", stderr: "" };
+        }
+        if (joined.includes(" config --images")) {
+          return { code: 0, stdout: `${targetImages.join("\n")}\n`, stderr: "" };
+        }
+        if (command === "docker" && args[0] === "pull") {
+          const reference = args[1] as string;
+          pullOptions.push(options ?? {});
+          if (reference.includes("quibt-stack")) {
+            stackAttempts += 1;
+            if (stackAttempts === 1) {
+              return { code: 1, stdout: "", stderr: "dial tcp: i/o timeout" };
+            }
+          }
+          pulled.push(reference);
+          options?.onOutput?.("aaaaaaaaaaaa: Pulling fs layer", "stdout");
+          options?.onOutput?.("aaaaaaaaaaaa: Pull complete", "stdout");
+          return { code: 0, stdout: "", stderr: "" };
+        }
+        if (joined.includes(" compose") && joined.includes(" pull")) composePulls += 1;
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    };
+    const events: InstallerEvent[] = [];
+    const result = await runUpdate({
+      dataDir,
+      composeFile: COMPOSE_FILE,
+      statfs: async () => ({ bsize: 4096, bavail: 25_000_000 }),
+      targetRelease: "0.2.11",
+      run,
+      fetch: async (url) =>
+        String(url).endsWith("/ready")
+          ? new Response(JSON.stringify({ ok: true }), { status: 200 })
+          : new Response("down", { status: 503 }),
+      clock: { now: () => new Date("2026-08-17T01:00:00.000Z"), sleep: async () => undefined },
+      onEvent: (event) => events.push(event),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(pulled).toEqual(targetImages);
+    expect(composePulls).toBe(0);
+    expect(stackAttempts).toBe(2);
+    for (const options of pullOptions) {
+      expect(options.inactivityTimeoutMs).toBe(900_000);
+      expect(options.timeoutMs).toBe(60 * 60_000);
+    }
+    const images = events.filter((event) => event.step === "images");
+    expect(images.some((event) => event.progress?.label === "quibt-stack:0.2.12")).toBe(true);
+    expect(images.map((event) => event.message)).toContainEqual(
+      expect.stringContaining("Vou baixar cerca de 1,7 GB"),
+    );
+    expect(images.map((event) => event.message)).toContainEqual(
+      expect.stringContaining("Tentando de novo em 5 s"),
+    );
+  });
+
   it("reports manual recovery when rollback health fails", async () => {
     const dataDir = mkdtempSync(path.join(tmpdir(), "quibt-update-health-"));
     seedInstalledState(dataDir);
@@ -197,6 +289,8 @@ describe("runUpdate", () => {
     const result = await runUpdate({
       dataDir,
       composeFile: COMPOSE_FILE,
+      // A suíte não pode depender do disco livre de quem a roda.
+      statfs: async () => ({ bsize: 4096, bavail: 25_000_000 }),
       targetRelease: "0.2.11",
       run: makeRunner("health-fail"),
       fetch: async () => new Response("down", { status: 503 }),

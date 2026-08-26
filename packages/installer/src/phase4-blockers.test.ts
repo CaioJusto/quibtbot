@@ -42,6 +42,8 @@ describe("lock release on pre-orchestration throw", () => {
     const result = await runUpdate({
       dataDir,
       composeFile: COMPOSE_FILE,
+      // A suíte não pode depender do disco livre de quem a roda.
+      statfs: async () => ({ bsize: 4096, bavail: 25_000_000 }),
       run: {
         async run() {
           return { code: 0, stdout: "", stderr: "" };

@@ -77,9 +77,19 @@ async function hasPasswordlessSudo(run: ProcessRunner): Promise<boolean> {
   return probe.code === 0;
 }
 
+/**
+ * Quanto o instalador pode fazer pelo Docker Desktop no Mac: instalar (o install
+ * comum), só abrir um que já está lá ("start-only", usado ao religar um stack já
+ * instalado: nunca baixa nada nem pede a senha) ou nada.
+ */
+export type DesktopInstallPolicy = boolean | "start-only";
+
+/** Por que falhou, quando dá para saber: o app volta para o modo instalação. */
+export type DockerFailureReason = "desktop-missing";
+
 export type EnsureDockerResult =
   | { ok: true; invocation: DockerInvocation }
-  | { ok: false; message: string };
+  | { ok: false; message: string; reason?: DockerFailureReason };
 
 export function composeMissingMessage(platform: NodeJS.Platform): string {
   if (platform === "darwin" || platform === "win32") {
@@ -144,7 +154,7 @@ export interface EnsureDockerDeps {
   username?: string;
   clock?: Pick<Clock, "sleep">;
   onProgress?: (message: string) => void;
-  allowDesktopInstall?: boolean;
+  allowDesktopInstall?: DesktopInstallPolicy;
   /**
    * Ninguém na frente da tela: abrir um Docker Desktop já instalado ainda vale, mas
    * baixar e instalar (que pede a senha do Mac num prompt) não.
@@ -164,9 +174,16 @@ async function ensureDockerEngine(deps: EnsureDockerDeps): Promise<EnsureDockerR
   if (resolved) return { ok: true, invocation: resolved };
 
   if (platform === "darwin") {
-    return deps.allowDesktopInstall
-      ? installDockerDesktopOnMac(deps)
-      : { ok: false, message: dockerDesktopMessage(platform) };
+    if (!deps.allowDesktopInstall) return { ok: false, message: dockerDesktopMessage(platform) };
+    const startOnly = deps.allowDesktopInstall === "start-only";
+    return installDockerDesktopOnMac({
+      run: deps.run,
+      arch: deps.arch,
+      username: deps.username,
+      clock: deps.clock,
+      onProgress: deps.onProgress,
+      nonInteractive: deps.nonInteractive || startOnly,
+    });
   }
 
   if (platform === "win32") {

@@ -46,5 +46,22 @@ describe("desktop setup navigation", () => {
     expect(setupHtml).toContain("if (event.progress) renderPullProgress(event.progress)");
     expect(setupHtml).toContain("(index - 1 + fraction) / count");
     expect(setupHtml).toContain("camadas");
+    // O rótulo curto vem pronto do instalador: a referência crua tem 64 caracteres de
+    // digest e quebra a linha.
+    expect(setupHtml).toContain("const { image, label, index, count, layersDone, layersTotal }");
+    expect(setupHtml).toContain("label ||");
+  });
+
+  it("religando sozinho, não arranca a tela de quem foi para outro servidor", () => {
+    // O Voltar some enquanto liga, e o resultado só navega se a tela local continua na
+    // frente — senão o formulário do servidor remoto sumiria no meio da digitação.
+    expect(setupHtml).toContain("if (backLocal) backLocal.hidden = true;");
+    expect(setupHtml).toContain("if (backLocal) backLocal.hidden = false;");
+    expect(setupHtml).toContain('if (!localView.classList.contains("hidden")) {');
+  });
+
+  it("sem o Docker instalado, volta ao modo instalação com botão e termos", () => {
+    expect(setupHtml).toContain("if (result.needsInstall)");
+    expect(setupHtml).toContain("setStartingMode(false);");
   });
 });

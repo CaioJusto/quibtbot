@@ -1101,6 +1101,7 @@
         });
 
       const startButton = document.getElementById("start");
+      const backLocal = document.getElementById("back-local");
       const openAfterInstall = document.getElementById("open-after-install");
       const startingBox = document.getElementById("starting");
       const startingStep = document.getElementById("starting-step");
@@ -1113,10 +1114,13 @@
       // Barra do download: (imagens prontas + fração da atual) / total.
       function renderPullProgress(progress) {
         if (!pullProgress || !progress) return;
-        const { image, index, count, layersDone, layersTotal } = progress;
+        const { image, label, index, count, layersDone, layersTotal } = progress;
         const fraction = layersTotal > 0 ? layersDone / layersTotal : 0;
         const overall = count > 0 ? (index - 1 + fraction) / count : 0;
-        const name = String(image).slice(String(image).lastIndexOf("/") + 1);
+        // O rótulo vem curto do instalador; a referência crua traz 64 caracteres de
+        // digest e estoura a linha.
+        const name =
+          label || String(image).slice(String(image).lastIndexOf("/") + 1);
         pullProgress.hidden = false;
         if (pullProgressLabel)
           pullProgressLabel.textContent =
@@ -1164,6 +1168,9 @@
           // Também no "Tentar de novo": o spinner volta e o botão some enquanto liga.
           if (startingBox) startingBox.hidden = false;
           if (startButton) startButton.hidden = true;
+          // Sair para "Conectar a outro servidor" no meio disto terminaria com o stack
+          // local arrancando a tela do usuário: o Voltar só reaparece no fim.
+          if (backLocal) backLocal.hidden = true;
         }
         resetStepStyles();
         hidePullProgress();
@@ -1205,9 +1212,20 @@
             if (startButton) startButton.hidden = true;
             if (openAfterInstall) openAfterInstall.hidden = false;
           } else if (result.ok && desktop.reloadApp) {
-            await desktop.reloadApp();
+            // O usuário pode ter ido para "Conectar a outro servidor" enquanto isto
+            // subia; trocar a página descartaria o que ele está digitando.
+            if (!localView.classList.contains("hidden")) {
+              await desktop.reloadApp();
+            } else {
+              say(status, "Quibt Bot no ar.", true);
+            }
           } else if (!result.ok && auto) {
             // Falhou ao religar: mostra o erro real, os detalhes e o botão de tentar de novo.
+            if (result.needsInstall) {
+              // O Docker sumiu do computador: isto virou uma instalação, com os termos
+              // do Docker Desktop de volta à vista.
+              setStartingMode(false);
+            }
             if (startingBox) startingBox.hidden = true;
             log.hidden = false;
             if (startButton) startButton.hidden = false;
@@ -1226,6 +1244,7 @@
         } finally {
           busy = false;
           if (startButton) startButton.disabled = false;
+          if (backLocal) backLocal.hidden = false;
         }
       }
 

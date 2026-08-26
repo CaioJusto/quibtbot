@@ -38,6 +38,48 @@ describe("explainDockerFailure", () => {
     expect(explainDockerFailure("Error response from daemon: unauthorized")).toContain("ghcr.io");
   });
 
+  it("no `up`, 'denied' é a pasta de dados — não o registro de imagens", () => {
+    const denied = explainDockerFailure(
+      "Error response from daemon: Mounts denied: The path /Users/ana/Library/Application Support/Quibt is not shared from the host and is not known to Docker.",
+      { phase: "up" },
+    );
+    expect(denied).toContain(
+      "O Docker não conseguiu acessar a pasta de dados /Users/ana/Library/Application Support/Quibt",
+    );
+    expect(denied).toContain("Settings → Resources → File sharing");
+    expect(denied).not.toContain("ghcr.io");
+
+    // No Linux o volume só diz "permission denied"; a pasta vem de quem chamou.
+    expect(
+      explainDockerFailure("error while creating mount source path: permission denied", {
+        phase: "up",
+        dataDir: "/home/ana/.local/share/quibt",
+      }),
+    ).toContain("a pasta de dados /home/ana/.local/share/quibt");
+
+    // O socket é outro problema, e a rede não é culpa do `up`.
+    expect(
+      explainDockerFailure(
+        "Got permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock",
+        { phase: "up" },
+      ),
+    ).toBeNull();
+    expect(
+      explainDockerFailure("dial tcp 10.0.0.1:5432: connect: connection refused", { phase: "up" }),
+    ).toBeNull();
+  });
+
+  it("no download, só o que o registro diz mesmo vira 'ghcr.io recusou'", () => {
+    expect(
+      explainDockerFailure("Error response from daemon: pull access denied for ghcr.io/quibt/x", {
+        phase: "pull",
+      }),
+    ).toContain("ghcr.io");
+    expect(explainDockerFailure("manifest unknown", { phase: "pull" })).toContain("ghcr.io");
+    // "denied" solto (um bind mount) não é o registro recusando nada.
+    expect(explainDockerFailure("Mounts denied: something", { phase: "pull" })).toBeNull();
+  });
+
   it("o que não reconhece fica para os detalhes técnicos", () => {
     expect(explainDockerFailure("")).toBeNull();
     expect(explainDockerFailure("something odd happened")).toBeNull();
