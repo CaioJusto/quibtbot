@@ -77,7 +77,9 @@ describe("dashboard copies the landing product demo", () => {
     expect(shell.match(/Outra pessoa está no controle/g)?.length).toBeGreaterThanOrEqual(3);
     expect(shell).toMatch(/shouldPollPreview\(\{[^}]*screenLost,/s);
     // Sem o lease não há stream para ter caído: o aviso "a tela caiu" é zerado.
-    expect(shell).toMatch(/if \(holdsControl\) return;\s+screenRetries\.current = 0;\s+setScreenLost\(false\);/);
+    expect(shell).toMatch(
+      /if \(holdsControl\) return;\s+screenRetries\.current = 0;\s+setScreenLost\(false\);/,
+    );
   });
 
   it("keeps the monitor toggle on the side panel, not a jump to fullscreen", () => {

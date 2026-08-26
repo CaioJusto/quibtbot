@@ -89,8 +89,9 @@ function runStore(rows: RunRow[]) {
     },
     attempt: {
       // Conta como o Prisma conta: só os attempts que casam com o filtro pedido.
-      count: vi.fn(async ({ where }: { where: { status?: string } }) =>
-        attempts.rows.filter((row) => !where.status || row.status === where.status).length,
+      count: vi.fn(
+        async ({ where }: { where: { status?: string } }) =>
+          attempts.rows.filter((row) => !where.status || row.status === where.status).length,
       ),
       updateMany: vi.fn(async ({ where }: { where: Where }) => {
         attempts.updated.push(where);

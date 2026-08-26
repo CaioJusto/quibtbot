@@ -556,14 +556,12 @@ describe("modelo local (ollama / openai-compatible)", () => {
   }
 
   it("desiste de um Ollama mudo em vez de deixar o bot em Trabalhando… para sempre", async () => {
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockImplementation(
-        (_url, init) =>
-          new Promise((_resolve, reject) => {
-            init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
-          }),
-      );
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+        }),
+    );
     try {
       const events = await collectLocal(new PiAgentRuntime({ idleTimeoutMs: 30 }));
       expect(events).toContainEqual({
@@ -601,10 +599,7 @@ describe("modelo local (ollama / openai-compatible)", () => {
     );
     try {
       const events = await collectLocal(new PiAgentRuntime({}));
-      expect(events).toEqual([
-        { type: "text", text: "olá do Ollama" },
-        { type: "done" },
-      ]);
+      expect(events).toEqual([{ type: "text", text: "olá do Ollama" }, { type: "done" }]);
       expect(fetchSpy.mock.calls[0]?.[0]).toBe("http://127.0.0.1:11434/v1/chat/completions");
     } finally {
       fetchSpy.mockRestore();

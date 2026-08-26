@@ -156,9 +156,9 @@ describe("runLooksStranded", () => {
     expect(
       runLooksStranded({ status: "queued", updatedAt: ago(QUEUED_RUN_PATIENCE_MS + 1) }, now),
     ).toBe(true);
-    expect(runLooksStranded({ status: "queued", updatedAt: ago(QUEUED_RUN_PATIENCE_MS) }, now)).toBe(
-      false,
-    );
+    expect(
+      runLooksStranded({ status: "queued", updatedAt: ago(QUEUED_RUN_PATIENCE_MS) }, now),
+    ).toBe(false);
     expect(
       runLooksStranded(
         { status: "running", updatedAt: now, leaseExpiresAt: ago(WORKER_GONE_MS + 1) },
@@ -166,7 +166,10 @@ describe("runLooksStranded", () => {
       ),
     ).toBe(true);
     expect(
-      runLooksStranded({ status: "leased", updatedAt: now, leaseExpiresAt: ago(WORKER_GONE_MS) }, now),
+      runLooksStranded(
+        { status: "leased", updatedAt: now, leaseExpiresAt: ago(WORKER_GONE_MS) },
+        now,
+      ),
     ).toBe(false);
     expect(runLooksStranded({ status: "running", updatedAt: ago(3_600_000) }, now)).toBe(false);
     expect(
