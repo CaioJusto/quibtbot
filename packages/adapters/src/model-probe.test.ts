@@ -74,8 +74,62 @@ describe("probeModelCredential — OpenRouter", () => {
       offline,
     );
     expect(result.ok).toBe(false);
-    expect(result.message).toContain("ENOTFOUND");
     expect(result.message).toContain("Verifique a internet");
+  });
+
+  it("diz em português o que a rede fez, sem o código cru do Node", async () => {
+    const traduzidos: Array<[string, string]> = [
+      ["ENOTFOUND", "não achei o endereço"],
+      ["EAI_AGAIN", "não achei o endereço"],
+      ["ECONNREFUSED", "conexão recusada"],
+      ["ECONNRESET", "a conexão caiu"],
+      ["ETIMEDOUT", "a conexão caiu"],
+    ];
+    for (const [code, palavras] of traduzidos) {
+      const { fetchImpl } = fakeFetch(() => {
+        throw refused(code);
+      });
+      const result = await probeModelCredential(
+        { provider: "openrouter", apiKey: "sk-or-v1-x" },
+        { fetchImpl },
+      );
+      expect(result.message).toContain(palavras);
+      expect(result.message).not.toContain(code);
+    }
+    // Um código que não está na lista some da frase em vez de virar ruído.
+    const { fetchImpl } = fakeFetch(() => {
+      throw refused("EMFILE");
+    });
+    const unknown = await probeModelCredential(
+      { provider: "openrouter", apiKey: "sk-or-v1-x" },
+      { fetchImpl },
+    );
+    expect(unknown.message).toBe(
+      "Não consegui falar com a OpenRouter. Verifique a internet e tente de novo.",
+    );
+  });
+
+  it("desiste sozinha: passa um AbortSignal e o estouro vira 'demorou demais'", async () => {
+    const { fetchImpl, calls } = fakeFetch(() => new Response("{}", { status: 200 }));
+    await probeModelCredential({ provider: "openrouter", apiKey: "sk-or-v1-x" }, { fetchImpl });
+    expect(calls[0]?.init?.signal).toBeInstanceOf(AbortSignal);
+
+    // Um servidor que aceita a conexão e nunca responde: só o signal termina a espera.
+    const hanging = fakeFetch(
+      (_url, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+        }),
+    );
+    const result = await probeModelCredential(
+      { provider: "openrouter", apiKey: "sk-or-v1-x" },
+      { fetchImpl: hanging.fetchImpl, timeoutMs: 10 },
+    );
+    expect(result).toEqual({
+      ok: false,
+      message:
+        "Não consegui falar com a OpenRouter (demorou demais). Verifique a internet e tente de novo.",
+    });
   });
 
   it("nomeia o tempo esgotado em vez de 'TimeoutError'", async () => {
@@ -127,10 +181,49 @@ describe("probeModelCredential — modelos locais", () => {
     expect(result).toEqual({
       ok: true,
       probed: true,
+      base: "http://127.0.0.1:11434",
       message: "Servidor confirmado em http://127.0.0.1:11434.",
     });
     expect(calls[0]?.url).toBe("http://127.0.0.1:11434/api/tags");
     expect(calls[0]?.init?.headers).toBeUndefined();
+  });
+
+  it("aceita a URL com /v1 que o runtime usa e devolve a raiz como forma canônica", async () => {
+    // `http://host:11434/v1` é a única forma que o `chat/completions` do Ollama atende, e
+    // era recusada: a sonda batia em /v1/api/tags. As duas formas viram a mesma raiz.
+    for (const colada of ["http://127.0.0.1:11434/v1", "http://127.0.0.1:11434/v1/"]) {
+      const { fetchImpl, calls } = fakeFetch(() => new Response('{"models":[]}', { status: 200 }));
+      const result = await probeModelCredential(
+        { provider: "ollama", apiKey: colada },
+        { fetchImpl },
+      );
+      expect(result).toMatchObject({ ok: true, base: "http://127.0.0.1:11434" });
+      expect(calls[0]?.url).toBe("http://127.0.0.1:11434/api/tags");
+    }
+  });
+
+  it("não vira sonda de porta: não segue redirect, não devolve o status e olha o corpo", async () => {
+    const outroServico = fakeFetch(() => new Response('{"cluster_name":"elasticsearch"}'));
+    const result = await probeModelCredential(
+      { provider: "ollama", apiKey: "http://10.0.0.5:9200" },
+      outroServico,
+    );
+    expect(result).toEqual({
+      ok: false,
+      message:
+        "Algo respondeu em http://10.0.0.5:9200, mas não parece o Ollama. Confira a URL e tente de novo.",
+    });
+    expect(outroServico.calls[0]?.init?.redirect).toBe("manual");
+
+    for (const status of [301, 404, 500]) {
+      const { fetchImpl } = fakeFetch(() => new Response("", { status }));
+      const desviado = await probeModelCredential(
+        { provider: "ollama", apiKey: "http://10.0.0.5:9200" },
+        { fetchImpl },
+      );
+      expect(desviado.ok).toBe(false);
+      expect(desviado.message).not.toContain(String(status));
+    }
   });
 
   it("diz para abrir o Ollama quando a porta recusa ou demora", async () => {
@@ -155,7 +248,9 @@ describe("probeModelCredential — modelos locais", () => {
   });
 
   it("bate em {url}/models do servidor OpenAI-compatible", async () => {
-    const { fetchImpl, calls } = fakeFetch(() => new Response("{}", { status: 200 }));
+    const { fetchImpl, calls } = fakeFetch(
+      () => new Response(JSON.stringify({ data: [] }), { status: 200 }),
+    );
     const result = await probeModelCredential(
       { provider: "openai-compatible", apiKey: "http://127.0.0.1:1234/v1" },
       { fetchImpl },

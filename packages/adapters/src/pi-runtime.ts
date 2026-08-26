@@ -8,6 +8,7 @@ import type {
   AgentRuntimeEvent,
   ConnectorTool,
 } from "@quibt/adapter-kit";
+import { MODEL_CONNECT_HINT } from "@quibt/core";
 import { ApprovalPause } from "./approval-wait.js";
 import { builtinAgentTools, DELEGATION_TOOL_NAMES } from "./builtin-tools.js";
 import {
@@ -750,25 +751,30 @@ function assistantText(message: unknown): string {
     .join("");
 }
 
-/** O que o usuário lê no chat quando o run falha: português, e dizendo o que fazer. */
+/**
+ * O que o usuário lê no chat quando o run falha: português, e dizendo o que fazer. As
+ * três mensagens de modelo terminam no mesmo `MODEL_CONNECT_HINT` de `@quibt/core`:
+ * mandavam para "Conta → Modelos e tokens", que é só um título dentro da aba — o menu
+ * tem "Modelo", e o composer tem o botão "Conectar modelo".
+ */
 export function userFacingError(message: string) {
   const clean = sanitizeError(message);
   const missingProvider = /Provider is not configured:\s*(\S+)/i.exec(clean);
   if (missingProvider) {
-    return `Ainda não tenho um modelo conectado (${missingProvider[1]}). Abra Conta → Modelos e tokens, entre na sua assinatura ou cole a chave, e me chame de novo.`;
+    return `Ainda não tenho um modelo conectado (${missingProvider[1]}). Depois é só me chamar de novo. ${MODEL_CONNECT_HINT}`;
   }
   if (
     /personal-team-blocked:spending-limit/i.test(clean) ||
     /You have run out of credits or need a Grok subscription/i.test(clean)
   ) {
-    return "A xAI recusou este pedido porque a conta conectada está sem créditos ou sem uma assinatura Grok válida. Abra Conta → Modelos e tokens para conectar outra assinatura ou chave, ou libere a cota no Grok, e me chame de novo.";
+    return `A xAI recusou este pedido porque a conta conectada está sem créditos ou sem uma assinatura Grok válida. Conecte outra assinatura ou chave, ou libere a cota no Grok, e me chame de novo. ${MODEL_CONNECT_HINT}`;
   }
   // Parte do catálogo do Codex só atende quem paga por chave de API. Dizer isso em
   // inglês e sem saída deixava a pessoa parada.
   const refusedModel =
     /The '([^']+)' model is not supported when using .* with a (\w+) account/i.exec(clean);
   if (refusedModel) {
-    return `A sua assinatura ${refusedModel[2]} não libera o modelo ${refusedModel[1]}. Abra Conta → Modelos e tokens e escolha outro — o GPT-5.6 Terra funciona com assinatura.`;
+    return `A sua assinatura ${refusedModel[2]} não libera o modelo ${refusedModel[1]}. Escolha outro — o GPT-5.6 Terra funciona com assinatura. ${MODEL_CONNECT_HINT}`;
   }
   return `Não consegui concluir: ${clean}`;
 }
@@ -892,10 +898,19 @@ function createQueue(): EventQueue {
   };
 }
 
-function localBaseUrl(provider: string, apiKey: string): string {
-  if (/^https?:\/\//.test(apiKey)) return apiKey.replace(/\/$/, "");
-  if (provider === "ollama") return "http://127.0.0.1:11434/v1";
-  return "http://127.0.0.1:1234/v1";
+/**
+ * A URL em que o runtime fala com o servidor local. A sonda de `models.connect` confirma
+ * a raiz do Ollama (`/api/tags`) e é a raiz que o cofre guarda; `chat/completions` o
+ * Ollama só serve sob `/v1`, então o sufixo entra aqui — nunca duplicado. LM Studio e
+ * afins já vêm com `/v1` na URL.
+ */
+export function localBaseUrl(provider: string, apiKey: string): string {
+  const trimmed = apiKey.trim().replace(/\/+$/, "");
+  if (!/^https?:\/\//i.test(trimmed)) {
+    return provider === "ollama" ? "http://127.0.0.1:11434/v1" : "http://127.0.0.1:1234/v1";
+  }
+  if (provider === "ollama" && !/\/v1$/i.test(trimmed)) return `${trimmed}/v1`;
+  return trimmed;
 }
 
 /**

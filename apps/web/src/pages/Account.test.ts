@@ -58,7 +58,8 @@ describe("changing the AI provider from Conta", () => {
   });
 
   it("confirma a chave que o servidor conferiu e aponta onde ela nasce", () => {
-    expect(src).toContain("Chave confirmada ✓");
+    // A frase vem do core: "confirmada" só quando o servidor sondou o provedor.
+    expect(src).toContain("connectedModelNotice({ verified: credential.verified");
     expect(src).toContain('href="https://openrouter.ai/keys"');
     expect(src).toContain("Você paga por uso na sua conta OpenRouter");
   });

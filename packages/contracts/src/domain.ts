@@ -332,6 +332,15 @@ export const ModelCredentialSchema = z.object({
   isDefault: z.boolean(),
 });
 
+/**
+ * O que `models.connect` devolve. `verified` diz se o servidor consultou o provedor
+ * antes de gravar: só OpenRouter, xAI, Ollama e OpenAI-compatible são sondados, e a
+ * tela só pode escrever "confirmada ✓" quando isto é true.
+ */
+export const ModelConnectResultSchema = ModelCredentialSchema.extend({
+  verified: z.boolean(),
+});
+
 export const ComputerCatalogItemSchema = z.object({
   kind: z.string(),
   family: z.string(),

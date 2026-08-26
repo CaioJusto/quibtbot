@@ -114,13 +114,14 @@ describe("etapa do modelo", () => {
   });
 
   it("mostra a recusa do provedor junto do campo e confirma a chave boa", () => {
-    expect(src).toContain('setKeyStatus({ kind: "ok" })');
-    expect(src).toContain("Chave confirmada ✓");
+    expect(src).toContain('setKeyStatus({ kind: "ok", verified })');
+    // A frase vem do core: "confirmada" só quando o servidor sondou o provedor.
+    expect(src).toContain("connectedModelNotice({");
     expect(src).toContain('kind: "error",');
     expect(src).toContain("Não foi possível confirmar a chave");
     // A recusa não vira o erro genérico do rodapé nem avança a etapa.
     expect(src).toContain(
-      "setKeyStatus(null);\n          try {\n            await rpc.models.connect({",
+      "setKeyStatus(null);\n          let verified = false;\n          try {\n            const credential = await rpc.models.connect({",
     );
   });
 });

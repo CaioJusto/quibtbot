@@ -23,6 +23,7 @@ import {
   MemoryContentInput,
   MemoryDocumentSchema,
   MeSchema,
+  ModelConnectResultSchema,
   ModelCredentialSchema,
   ModelInputText,
   RoutineSchema,
@@ -127,7 +128,7 @@ export const appContract = {
           modelId: z.string().optional(),
         }),
       )
-      .output(ModelCredentialSchema),
+      .output(ModelConnectResultSchema),
     beginOAuth: oc
       .input(
         z.object({

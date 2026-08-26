@@ -200,7 +200,7 @@ describe("provider errors", () => {
         'OpenAI API error (402): 402 "You have run out of credits or need a Grok subscription. Add credits at https://grok.com/?_s=usage or upgrade at https://grok.com/supergrok."',
       ),
     ).toBe(
-      "A xAI recusou este pedido porque a conta conectada está sem créditos ou sem uma assinatura Grok válida. Abra Conta → Modelos e tokens para conectar outra assinatura ou chave, ou libere a cota no Grok, e me chame de novo.",
+      "A xAI recusou este pedido porque a conta conectada está sem créditos ou sem uma assinatura Grok válida. Conecte outra assinatura ou chave, ou libere a cota no Grok, e me chame de novo. Toque em Conectar modelo, ou vá em Conta → Modelo.",
     );
   });
 });

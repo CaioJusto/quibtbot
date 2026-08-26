@@ -71,7 +71,8 @@ describe("mobile model source section", () => {
     expect(subscription).toBeGreaterThan(-1);
     expect(subscription).toBeLessThan(key);
     expect(key).toBeLessThan(local);
-    expect(section).toContain("Chave confirmada ✓");
+    // A frase vem do core: "confirmada" só quando o servidor sondou o provedor.
+    expect(section).toContain("connectedModelNotice({");
   });
 
   it("shows the device code and opens the verification link natively", () => {

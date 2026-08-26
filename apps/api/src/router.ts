@@ -396,6 +396,11 @@ export function createRouter(deps: RouterDeps) {
         // A chave é conferida no provedor antes de ser gravada: colada errada, ela
         // passava pelo onboarding e só falhava na primeira mensagem, com "401" cru.
         // O emulador dos testes não fala com provedor nenhum, então não há o que sondar.
+        // O que vai ao cofre é o texto limpo — e, num modelo local, a URL na forma que a
+        // sonda aprovou: gravar o que a pessoa colou com um espaço na frente fazia o run
+        // cair no 127.0.0.1 padrão em vez do endereço dela.
+        let plaintext = input.apiKey.trim();
+        let verified = false;
         if (deps.env.agentRuntime !== "scripted") {
           const probe = await probeModelCredential(
             { provider: input.provider, apiKey: input.apiKey },
@@ -407,12 +412,15 @@ export function createRouter(deps: RouterDeps) {
               data: { code: "MODEL_CREDENTIAL_REJECTED", provider: input.provider },
             });
           }
+          verified = probe.probed;
+          if (probe.base) plaintext = probe.base;
         }
         return persistModelCredential(deps, context.actor, {
           provider: input.provider,
-          plaintext: input.apiKey,
+          plaintext,
           label: input.label,
           modelId: input.modelId,
+          verified,
         });
       }),
       beginOAuth: authed.models.beginOAuth.handler(async ({ context, input }) => {
@@ -431,6 +439,7 @@ export function createRouter(deps: RouterDeps) {
         });
         if (result.status !== "connected") return result;
         const credential = await persistModelCredential(deps, context.actor, {
+          verified: true,
           provider: result.provider,
           plaintext: serializeModelSecret({
             kind: "oauth",
@@ -2559,6 +2568,8 @@ async function persistModelCredential(
     plaintext: string;
     label?: string;
     modelId?: string;
+    /** O servidor falou com o provedor e a credencial passou? A tela só diz "confirmada" se sim. */
+    verified?: boolean;
   },
 ) {
   const stored = await deps.secrets.put(input.plaintext, {
@@ -2607,6 +2618,7 @@ async function persistModelCredential(
     label: cred.label,
     hasKey: true,
     isDefault: true,
+    verified: input.verified ?? false,
   };
 }
 
