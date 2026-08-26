@@ -46,6 +46,7 @@ import { WorkerDownNotice, workerAliveRefresher } from "../components/WorkerDown
 import { applyGroupThreadEvent, applyThreadEvent } from "../lib/apply-thread-event";
 import { type Attachment, attachmentTooBig, uploadAttachment } from "../lib/attachments";
 import { authClient } from "../lib/auth";
+import { bootStatusLine, bootSteps } from "../lib/boot-steps";
 import { buildPaletteItems, opensPalette, type PaletteItem } from "../lib/command-palette";
 import {
   type ComposerDraft,
@@ -3023,9 +3024,44 @@ export function ShellPage() {
           <div className="max-w-[420px] text-center text-[14px] leading-[1.5] text-[var(--qb-muted)]">
             Uma máquina compartilhada por você e pelos bots — cada um tem a tela dele nela.
           </div>
-          <div className="h-[5px] w-[min(420px,70%)] overflow-hidden rounded-full bg-[var(--qb-ink-strong)]">
-            <div className="h-full w-2/3 rounded-full bg-[var(--qb-surface-2)]" />
-          </div>
+          {/*
+            Passos com nome, não barra: o servidor não manda progresso, então uma barra em
+            dois terços seria um número inventado. Cada linha vira "feito" porque o estado
+            do computador mudou, nunca porque o relógio andou.
+          */}
+          <ol className="flex w-[min(340px,80%)] list-none flex-col gap-2.5 p-0">
+            {bootSteps({
+              state: computer?.state,
+              screenAvailable: computer?.screenAvailable,
+              screenUrl,
+            }).map((step) => (
+              <li
+                key={step.id}
+                className={`flex items-center gap-3 text-[14px] leading-[1.4] ${
+                  step.state === "waiting"
+                    ? "text-[var(--qb-muted-2)]"
+                    : step.state === "done"
+                      ? "text-[var(--qb-muted)]"
+                      : "text-[var(--qb-surface-2)]"
+                }`}
+              >
+                <span
+                  aria-hidden="true"
+                  className="grid h-5 w-5 shrink-0 place-items-center rounded-full border border-[var(--qb-ink-strong)]"
+                >
+                  {step.state === "done" ? (
+                    <Icon name="check" size={12} />
+                  ) : step.state === "doing" ? (
+                    <span className="qb-boot-dot h-[7px] w-[7px] rounded-full bg-[var(--qb-surface-2)]" />
+                  ) : step.state === "failed" ? (
+                    <Icon name="x" size={11} />
+                  ) : null}
+                </span>
+                <span>{step.label}</span>
+                {step.state === "doing" ? <span className="sr-only">em andamento</span> : null}
+              </li>
+            ))}
+          </ol>
         </div>
       ) : computerOpen && active ? (
         <div className="absolute inset-0 z-30 flex flex-col bg-[var(--qb-rail)]">
@@ -3255,7 +3291,13 @@ export function ShellPage() {
                               : computer?.state === "running"
                                 ? `Buscando a tela de ${active.name}…`
                                 : booting || computer?.state === "booting"
-                                  ? "Ligando o computador…"
+                                  ? // O passo com nome, e não um "Ligando…" que ficava igual
+                                    // do primeiro segundo até a tela abrir.
+                                    bootStatusLine({
+                                      state: computer?.state,
+                                      screenAvailable: computer?.screenAvailable,
+                                      screenUrl,
+                                    })
                                   : "O computador está parado."}
                   </p>
                   {screenLost ? (
