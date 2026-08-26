@@ -4,6 +4,35 @@ export const DELEGATION_TOOL_NAMES = new Set(["run_subagent", "spawn_bot", "dele
 
 export const builtinAgentTools: ConnectorTool[] = [
   {
+    name: "computer",
+    description:
+      "Control this bot's graphical computer and receive a fresh visual observation. Perform exactly one action per call, inspect the returned screenshot, then decide the next action. Available actions: screenshot, click, type, key, scroll, and wait.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: {
+          type: "string",
+          enum: ["screenshot", "click", "type", "key", "scroll", "wait"],
+        },
+        x: { type: "number", description: "Screen x coordinate for click." },
+        y: { type: "number", description: "Screen y coordinate for click." },
+        button: { type: "string", enum: ["left", "right"] },
+        text: { type: "string", description: "Text to type." },
+        key: { type: "string", description: "Key name, for example Return or Escape." },
+        modifiers: {
+          type: "array",
+          items: { type: "string", enum: ["ctrl", "alt", "shift", "super"] },
+        },
+        direction: { type: "string", enum: ["up", "down"] },
+        milliseconds: {
+          type: "number",
+          description: "Wait duration in milliseconds. Default 1000, at most 10000.",
+        },
+      },
+      required: ["action"],
+    },
+  },
+  {
     name: "screenshot",
     description:
       "Take a picture of this bot's screen and send it into the chat. Use it whenever the person asks to see the screen.",

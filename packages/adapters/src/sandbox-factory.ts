@@ -120,6 +120,8 @@ export interface RoutingSandboxProvider extends SandboxProvider {
   invalidate(): void;
   /** The provider id a *new* computer would boot into right now. */
   bootKind(): Promise<string>;
+  /** Capabilities of the provider that owns an already-provisioned computer. */
+  describeFor(computer: ComputerRef): ReturnType<SandboxProvider["describe"]>;
   keepAlive(computer: ComputerRef, context?: AdapterContext): Promise<void>;
   presence(computer: ComputerRef, context: AdapterContext): Promise<ComputerPresence>;
   start(computer: ComputerRef, context: AdapterContext): Promise<ComputerRef>;
@@ -226,6 +228,7 @@ export function createRoutingSandboxProvider(deps: SandboxRouterDeps): RoutingSa
     },
     bootKind,
     describe: () => fallback.describe(),
+    describeFor: (computer) => forRef(computer).describe(),
     async provision(request, context) {
       const kind = await bootKind();
       const options = await resolvedOptions();

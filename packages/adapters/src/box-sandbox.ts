@@ -101,6 +101,8 @@ export class BoxSandboxProvider implements SandboxProvider {
       adapterVersion: "0.1.0",
       capabilities: {
         graphical: true,
+        // Box v1 exposes a human noVNC URL but no agent input-injection API.
+        agentInput: false,
         pty: true,
         snapshots: true,
         takeover: true,
