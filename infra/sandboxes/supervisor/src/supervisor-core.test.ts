@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { MAX_WORKSPACE_SESSIONS } from "./computer-spec.js";
 import {
   allocateDisplay,
+  allocateStableDisplay,
+  applyStoppedContainerPolicy,
   assertExecArgv,
   COMPUTER_REVIVE_DOCKER_DOWN_MESSAGE,
   computerStoppedError,
@@ -16,6 +18,7 @@ import {
   execEnvEntries,
   explainContainerExit,
   explainReviveFailure,
+  forgetWorkspaceMemory,
   HOME_MODE_REPAIR_COMMAND,
   HOME_REPAIR_COMMAND,
   HOME_WRITABLE_PROBE,
@@ -33,9 +36,14 @@ import {
   parseSessionProbe,
   parseSessionStart,
   publicError,
+  type ReviveDocker,
+  recordSessionDisplayCommand,
   resolveDockerEndpoint,
   retryableOnce,
+  reviveStoppedContainer,
+  SESSION_DISPLAY_RECORD_DIR,
   SESSION_PROBE_COMMAND,
+  SESSION_RECORDED_PROBE_COMMAND,
   SupervisorError,
   sandboxTimeoutCommand,
   sessionRuntimeDir,
@@ -43,6 +51,7 @@ import {
   shouldRemoveSharedContainer,
   splitSentinelSessions,
   WORKSPACE_SESSION_SENTINEL,
+  type WorkspaceMemory,
   withGroupWritableUmask,
   withWorkspaceSessionLock,
 } from "./supervisor-core.js";
@@ -679,5 +688,253 @@ describe("hardenDesktopRoot", () => {
     const root = path.join(dir, "desktops");
     symlinkSync(dir, root);
     await expect(hardenDesktopRoot(root)).rejects.toThrow(/link/);
+  });
+});
+
+describe("display estável por bot depois de religar", () => {
+  it("depois do reboot cada bot volta ao display que está gravado no disco dele", () => {
+    // Reboot: o container voltou pelo `unless-stopped`, nenhum Xvfb vivo, memória vazia.
+    // O disco ainda lembra quem tinha o quê — e é isso que decide, não quem acorda antes.
+    const recorded = new Map([
+      ["bot-a", 1],
+      ["bot-b", 2],
+    ]);
+    const used = new Map<string, number>();
+
+    const forB = allocateStableDisplay(used, "bot-b", { recorded });
+    expect(forB).toBe(2);
+    used.set("bot-b", forB);
+    // Sem isto, B levava o display 1 e o `chmod 700` de /quibt-desktops/bot-b falhava com
+    // o uid do bot A: nenhum dos dois voltava a ter tela.
+    expect(allocateStableDisplay(used, "bot-a", { recorded })).toBe(1);
+  });
+
+  it("um bot novo não ocupa o display reservado de quem está fora do ar", () => {
+    const recorded = new Map([["bot-a", 1]]);
+    expect(allocateStableDisplay(new Map(), "bot-novo", { recorded })).toBe(2);
+  });
+
+  it("o preferido do banco vale mais que o gravado, e cede a quem está vivo", () => {
+    const recorded = new Map([["bot-b", 3]]);
+    expect(allocateStableDisplay(new Map(), "bot-b", { preferred: 5, recorded })).toBe(5);
+    // Display 5 ocupado por um bot vivo: preferência não rouba, só pede.
+    const used = new Map([["bot-a", 5]]);
+    expect(allocateStableDisplay(used, "bot-b", { preferred: 5, recorded })).toBe(3);
+  });
+
+  it("sessão viva manda: o mapa em memória vence disco e preferência", () => {
+    const used = new Map([["bot-b", 7]]);
+    expect(
+      allocateStableDisplay(used, "bot-b", { preferred: 2, recorded: new Map([["bot-b", 4]]) }),
+    ).toBe(7);
+  });
+
+  it("o pedido explícito do provision continua firme, com 409 quando está ocupado", () => {
+    const used = new Map([["bot-a", 2]]);
+    expect(allocateStableDisplay(used, "bot-b", { requested: 4 })).toBe(4);
+    expect(() => allocateStableDisplay(used, "bot-b", { requested: 2 })).toThrow(SupervisorError);
+  });
+
+  it("com todos os displays reservados por sessões mortas, ainda entrega um", () => {
+    const recorded = new Map(
+      Array.from({ length: MAX_WORKSPACE_SESSIONS }, (_, i) => [`morto-${i}`, i + 1] as const),
+    );
+    expect(allocateStableDisplay(new Map(), "bot-novo", { recorded })).toBe(1);
+  });
+
+  it("a lembrança mora fora da pasta 700 do bot, senão ninguém a lê", () => {
+    // `CapDrop: ALL`: dentro do container nem o root atravessa modo de arquivo, então
+    // `/quibt-desktops/<bot>/display` é ilegível para todo mundo menos o dono da sessão.
+    expect(SESSION_DISPLAY_RECORD_DIR).toBe("/quibt-desktops/.displays");
+    const script = SESSION_RECORDED_PROBE_COMMAND[2] ?? "";
+    expect(SESSION_RECORDED_PROBE_COMMAND[0]).toBe("bash");
+    expect(script).toContain(SESSION_DISPLAY_RECORD_DIR);
+    // Ao contrário do probe de sessões vivas, este não olha `session.pid`.
+    expect(script).not.toContain("session.pid");
+    // O ponto no nome esconde a pasta do glob `*/` que procura sessões vivas.
+    expect(SESSION_PROBE_COMMAND[2] ?? "").toContain("/quibt-desktops/*/");
+    expect(parseSessionProbe("bot-a 1\nbot-b 2\n")).toEqual(
+      new Map([
+        ["bot-a", 1],
+        ["bot-b", 2],
+      ]),
+    );
+  });
+
+  it("grava o display sem deixar o id do bot virar shell", () => {
+    const command = recordSessionDisplayCommand("bot-b", 2);
+    expect(command.slice(-2)).toEqual(["bot-b", "2"]);
+    // Interpolado como argumento posicional, nunca dentro do texto do script.
+    expect(command[2]).not.toContain("bot-b");
+    expect(command[2]).toContain(`dir="${SESSION_DISPLAY_RECORD_DIR}"`);
+    expect(command[2]).toContain('"$dir/$1"');
+    // Um bot que deixasse um link no lugar faria o root escrever do outro lado dele.
+    expect(command[2]).toContain('test ! -L "$dir"');
+    expect(() => recordSessionDisplayCommand("bot b; rm -rf /", 2)).toThrow(SupervisorError);
+    expect(() => recordSessionDisplayCommand("bot-b", 0)).toThrow(SupervisorError);
+  });
+});
+
+describe("religar um container parado", () => {
+  function memory(): WorkspaceMemory {
+    return {
+      sessions: new Map([["ws-1:bot-a", { containerId: "c1", workspaceId: "ws-1" }]]),
+      workspaceBoxes: new Map([["ws-1", { containerId: "c1", displays: new Map([["bot-a", 1]]) }]]),
+    };
+  }
+
+  function fakeDocker(options: { startFails?: unknown } = {}) {
+    const state = { running: false, verified: 0 };
+    const info = (running: boolean) => ({ State: { Running: running, Status: "exited" } });
+    const start = vi.fn(async () => {
+      if (options.startFails) throw options.startFails;
+      // O `start` de verdade demora; sem o await o teste não veria a corrida.
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      state.running = true;
+      return info(true);
+    });
+    const docker: ReviveDocker<{ State: { Running: boolean; Status?: string } }> = {
+      id: "container-workspace",
+      inspect: async () => info(state.running),
+      start,
+      verify: async () => {
+        state.verified += 1;
+      },
+    };
+    return { docker, start, state };
+  }
+
+  it("dois revives ao mesmo tempo dão um único start", async () => {
+    const { docker, start } = fakeDocker();
+    const mem = memory();
+
+    const [first, second] = await Promise.all([
+      reviveStoppedContainer(docker, "ws-race", mem),
+      reviveStoppedContainer(docker, "ws-race", mem),
+    ]);
+
+    expect(start).toHaveBeenCalledTimes(1);
+    expect([first?.revived, second?.revived].filter(Boolean)).toHaveLength(1);
+    expect(first?.info.State.Running).toBe(true);
+    expect(second?.info.State.Running).toBe(true);
+  });
+
+  it("religar esquece a memória daquela caixa e reconfere o container", async () => {
+    const { docker, state } = fakeDocker();
+    const mem = memory();
+
+    const result = await reviveStoppedContainer(docker, "ws-1", mem);
+
+    expect(result.revived).toBe(true);
+    // Displays e telas guardados morreram com o container: mantê-los devolvia depois a
+    // URL de um Xvfb que já não existe.
+    expect(mem.workspaceBoxes.size).toBe(0);
+    expect(mem.sessions.size).toBe(0);
+    // `/run` é tmpfs: as conferências do provision valem de novo.
+    expect(state.verified).toBe(1);
+  });
+
+  it("com o Docker fora, o start vira 503 'abra o Docker', não um ECONNREFUSED cru", async () => {
+    const { docker } = fakeDocker({
+      startFails: Object.assign(new Error("connect"), { code: "ECONNREFUSED" }),
+    });
+
+    const failure = await reviveStoppedContainer(docker, "ws-2", memory()).catch(
+      (error: unknown) => error,
+    );
+
+    expect(failure).toBeInstanceOf(SupervisorError);
+    expect((failure as SupervisorError).status).toBe(503);
+    expect((failure as SupervisorError).code).toBe("docker-down");
+    expect((failure as Error).message).toBe(COMPUTER_REVIVE_DOCKER_DOWN_MESSAGE);
+  });
+
+  it("um container que já subiu não é religado de novo", async () => {
+    const { docker, start, state } = fakeDocker();
+    state.running = true;
+    const mem = memory();
+
+    const result = await reviveStoppedContainer(docker, "ws-1", mem);
+
+    expect(result.revived).toBe(false);
+    expect(start).not.toHaveBeenCalled();
+    // Nada morreu, nada é esquecido.
+    expect(mem.sessions.size).toBe(1);
+  });
+});
+
+describe("política de container parado", () => {
+  const memory = (): WorkspaceMemory => ({
+    sessions: new Map([["ws-1:bot-a", { containerId: "c1", workspaceId: "ws-1" }]]),
+    workspaceBoxes: new Map([["ws-1", { containerId: "c1", displays: new Map() }]]),
+  });
+  const stopped = { State: { Running: false, Status: "exited" } };
+  const docker = (start: () => Promise<typeof stopped>): ReviveDocker<typeof stopped> => ({
+    id: "c1",
+    inspect: async () => stopped,
+    start,
+    verify: async () => undefined,
+  });
+
+  it("`allow` devolve o container como está, sem ligar nada", async () => {
+    const start = vi.fn(async () => stopped);
+    const mem = memory();
+
+    const decided = await applyStoppedContainerPolicy("allow", docker(start), stopped, "ws-1", mem);
+
+    expect(start).not.toHaveBeenCalled();
+    expect(decided).toMatchObject({ halted: true, revived: false });
+    // Quem só quer parar ou apagar não deve continuar com a memória de antes de parar.
+    expect(mem.sessions.size).toBe(0);
+  });
+
+  it("`reject` recusa com 409 e o código que o adapter lê", async () => {
+    const failure = await applyStoppedContainerPolicy(
+      "reject",
+      docker(async () => stopped),
+      stopped,
+      "ws-1",
+      memory(),
+    ).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(SupervisorError);
+    expect((failure as SupervisorError).status).toBe(409);
+    expect((failure as SupervisorError).code).toBe("computer-stopped");
+  });
+
+  it("`revive` liga e segue", async () => {
+    const running = { State: { Running: true, Status: "running" } };
+    const start = vi.fn(async () => running);
+    const decided = await applyStoppedContainerPolicy(
+      "revive",
+      docker(start) as ReviveDocker<typeof stopped>,
+      stopped,
+      "ws-1",
+      memory(),
+    );
+
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(decided).toMatchObject({ halted: false, revived: true });
+  });
+});
+
+describe("forgetWorkspaceMemory", () => {
+  it("apaga as sessões do workspace e as do container, e nada mais", () => {
+    const mem: WorkspaceMemory = {
+      sessions: new Map([
+        ["ws-1:bot-a", { containerId: "c1", workspaceId: "ws-1" }],
+        ["ws-2:bot-b", { containerId: "c1", workspaceId: "ws-2" }],
+        ["ws-3:bot-c", { containerId: "c9", workspaceId: "ws-3" }],
+      ]),
+      workspaceBoxes: new Map([
+        ["ws-1", { containerId: "c1", displays: new Map() }],
+        ["ws-3", { containerId: "c9", displays: new Map() }],
+      ]),
+    };
+
+    forgetWorkspaceMemory(mem, "ws-1", "c1");
+
+    expect([...mem.sessions.keys()]).toEqual(["ws-3:bot-c"]);
+    expect([...mem.workspaceBoxes.keys()]).toEqual(["ws-3"]);
   });
 });

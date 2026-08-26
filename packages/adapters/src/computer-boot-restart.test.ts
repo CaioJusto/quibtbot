@@ -3,6 +3,7 @@ import type {
   ComputerRef,
   ProcessEvent,
   SandboxProvider,
+  ScreenSession,
 } from "@quibt/adapter-kit";
 import type { PrismaClient } from "@quibt/db";
 import { describe, expect, it, vi } from "vitest";
@@ -23,6 +24,9 @@ const NEW_SCREEN = "http://127.0.0.1:32901/embed.html?password=new";
 
 type StartOutcome = "ok" | "route-missing" | "docker-down" | "other-id";
 
+/** O que o supervisor responde quando pedem a tela depois de religar. */
+type ScreenOutcome = "ok" | "no-screen";
+
 /**
  * Um container de workspace `Exited` — o Mac reiniciou antes de o container ter política
  * de reinício, ou alguém deu `docker stop` — com a linha do banco ainda "running". O
@@ -31,7 +35,7 @@ type StartOutcome = "ok" | "route-missing" | "docker-down" | "other-id";
  * `computer.upsert` é o primeiro passo do caminho normal de boot: chegar nele prova que o
  * atalho "já está ligado" foi abandonado e o computador seria provisionado de novo.
  */
-function harness(start: StartOutcome = "ok") {
+function harness(start: StartOutcome = "ok", screen: ScreenOutcome = "ok") {
   const container = { id: "container-workspace", running: false };
   const session = {
     botId: "bot-b",
@@ -74,11 +78,24 @@ function harness(start: StartOutcome = "ok") {
       const id = start === "other-id" ? "container-recreated" : ref.id;
       return { ...ref, id, providerRef: id };
     }),
-    connectScreen: vi.fn(async () => ({
-      url: container.running ? NEW_SCREEN : null,
-      mimeType: "text/html",
-      close: async () => undefined,
-    })),
+    connectScreen: vi.fn(async (): Promise<ScreenSession> => {
+      if (screen === "no-screen") {
+        // A sessão gráfica não subiu no container que acabou de voltar: `/quibt-desktops`
+        // é de outro uid, o Xvfb morreu, o `prepareSessionDirs` falhou. O supervisor diz
+        // o motivo; o que ele não faz é devolver um endereço.
+        return {
+          url: null,
+          mimeType: "text/html",
+          reason: "O computador saiu com código 1: framebuffer failed",
+          close: async () => undefined,
+        };
+      }
+      return {
+        url: container.running ? NEW_SCREEN : null,
+        mimeType: "text/html",
+        close: async () => undefined,
+      };
+    }),
     async *execute(): AsyncIterable<ProcessEvent> {
       if (!container.running) {
         yield { type: "stderr", data: "computer request failed" };
@@ -188,6 +205,34 @@ describe("container Exited após um reboot", () => {
     expect(publicComputerBootMessage(failure)).toMatch(/estava desligado.*abra o Docker/);
     expect(session.state).toBe("running");
     expect(prisma.computer.upsert).not.toHaveBeenCalled();
+  });
+
+  it("religou mas a tela não abriu: falha com o motivo, nunca com a URL de antes", async () => {
+    // Depois do restart o `/run` é tmpfs: a senha do VNC e a porta publicada do noVNC são
+    // outras, então OLD_SCREEN está garantidamente morta. Repeti-la dava "ligado" com uma
+    // tela preta e ninguém tentava de novo.
+    const { deps, session, container } = harness("ok", "no-screen");
+
+    const failure = await bootComputer(deps, "bot-b", context).catch((error: unknown) => error);
+
+    expect(container.running).toBe(true);
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toContain("framebuffer failed");
+    expect(publicComputerBootMessage(failure)).toContain("O computador");
+    expect(session.screenUrl).not.toBe(OLD_SCREEN);
+    expect(session.screenUrl).toBeNull();
+  });
+
+  it("sem religar, uma tela que não responde ainda deixa a de antes de pé", async () => {
+    // Este boot não religou nada: o container já estava ligado e a URL guardada continua
+    // valendo. Falhar aqui tiraria a tela de quem está com ela aberta.
+    const { deps, session, container } = harness("ok", "no-screen");
+    container.running = true;
+
+    const ref = await bootComputer(deps, "bot-b", context);
+
+    expect(ref.screenUrl).toBe(OLD_SCREEN);
+    expect(session.screenUrl).toBe(OLD_SCREEN);
   });
 
   it("container voltou com outro id: esquece a linha velha e reprovisiona", async () => {

@@ -18,6 +18,7 @@ import {
   type EncryptedSecretStore,
   ensureDesktopScreenUrl,
   isComputerAlreadyStoppedError,
+  isComputerUnreachableError,
   lessonCaptureCommand,
   lessonStartCommand,
   listPiCatalog,
@@ -1134,7 +1135,19 @@ export function createRouter(deps: RouterDeps) {
           // banco entregava um endereço que já não existe, e o usuário via preto. Se o
           // provedor não souber responder, seguimos confiando na linha, como antes.
           const stillThere = deps.sandbox.exists
-            ? await deps.sandbox.exists(computerRefFromSession(desktop), ctx).catch(() => true)
+            ? await deps.sandbox
+                .exists(computerRefFromSession(desktop), ctx)
+                .catch((error: unknown) => {
+                  // O supervisor não atendeu (Docker fechado: nas topologias do produto
+                  // ele roda dentro do Docker). Confiar na linha aqui devolvia "ligado"
+                  // com a tela morta; o que a pessoa precisa ler é para abrir o Docker.
+                  if (isComputerUnreachableError(error)) {
+                    throw new ORPCError("INTERNAL_SERVER_ERROR", {
+                      message: publicComputerBootMessage(error),
+                    });
+                  }
+                  return true;
+                })
             : true;
           if (stillThere) {
             scheduleComputerSleep(deps.wakeup, bot.id);

@@ -59,6 +59,12 @@ export interface ScreenRequest {
 export interface ScreenSession {
   url: string | null;
   mimeType: string;
+  /**
+   * Por que não há URL, quando o provedor sabe dizer. Depois de religar um computador a
+   * tela é obrigatória: quem pediu precisa poder mostrar o motivo em vez de repetir o
+   * endereço de antes do reboot, cuja porta e senha já não existem.
+   */
+  reason?: string;
   close(): Promise<void>;
 }
 
