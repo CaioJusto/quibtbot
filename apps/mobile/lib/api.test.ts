@@ -641,6 +641,23 @@ describe("askText", () => {
       "`xdg-open https://g1.globo.com`",
     );
   });
+
+  it("encurta uma narração técnica legada sem alterar o card real", async () => {
+    const { blockText, friendlyLegacyApprovalNarration } = await import("./api");
+    const legacy =
+      '[pediu aprovação para shell: xdg-open "https://g1.globo.com/" >/dev/null 2>&1 &\nsleep 8\necho "done" — sem resposta]';
+    expect(friendlyLegacyApprovalNarration(legacy)).toBe(
+      "A abertura da página anterior não foi concluída.",
+    );
+    expect(
+      blockText({
+        id: "legacy",
+        role: "bot",
+        blocks: [{ kind: "text", text: legacy }],
+      }),
+    ).toBe("A abertura da página anterior não foi concluída.");
+    expect(friendlyLegacyApprovalNarration("Uma resposta normal")).toBe("Uma resposta normal");
+  });
 });
 
 describe("mergeThreadSnapshot", () => {

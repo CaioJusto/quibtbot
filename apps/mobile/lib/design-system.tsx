@@ -285,7 +285,17 @@ export function ScreenHeader({
 }) {
   const insets = useSafeAreaInsets();
   return (
-    <View style={[styles.header, { paddingTop: headerTopOffset(insets.top, modal) }]}>
+    <View
+      pointerEvents="box-none"
+      style={[styles.header, { paddingTop: headerTopOffset(insets.top, modal) }]}
+    >
+      {/*
+        A lista continua rolando por baixo do cabeçalho flutuante. Sem esta base, uma
+        mensagem longa aparecia nos vãos entre voltar, título e computador — exatamente
+        sobre a hora e os controles. O vidro continua só nos botões; a base pertence à
+        página e termina junto deles.
+      */}
+      <View pointerEvents="none" style={styles.headerBackdrop} />
       <GlassIconButton symbol="chevron.left" label="Voltar" onPress={onBack} />
       {title ? (
         <GlassSurface clear style={styles.headerPill}>
@@ -417,7 +427,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: 8,
-    pointerEvents: "box-none",
+  },
+  headerBackdrop: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: COLORS.background,
   },
   headerPill: {
     minHeight: METRICS.topControl,

@@ -613,10 +613,41 @@ export function blockText(message: MobileMessage) {
           : `Criou o bot **${block.name ?? ""}**${block.title ? ` — ${block.title}` : ""}. Ele aparece na sua lista.`;
       }
       if (block.kind === "ask") return askText(block);
-      return block.text ?? block.state ?? "";
+      const text = block.text ?? block.state ?? "";
+      return message.role === "bot" ? friendlyLegacyApprovalNarration(text) : text;
     })
     .filter(Boolean)
     .join("\n");
+}
+
+/**
+ * Versões antigas podiam devolver ao modelo a anotação interna de um pedido de permissão;
+ * alguns provedores a repetiam literalmente como resposta. Ela não é um card acionável e
+ * expor shell, redirecionamentos e timers cria um balão enorme no celular. Mantemos o fato
+ * importante — a ação aconteceu, foi recusada ou não rodou — em linguagem de conversa.
+ * Cards `ask` verdadeiros continuam passando por `askText`, com detalhe e botões.
+ */
+export function friendlyLegacyApprovalNarration(text: string): string {
+  const match = text.trim().match(/^\[pediu aprovação para ([\s\S]+?)\s+—\s+(.+?)\]$/i);
+  if (!match) return text;
+
+  const operation = match[1] ?? "";
+  const outcome = (match[2] ?? "").toLocaleLowerCase("pt-BR");
+  const openingPage = /\b(?:xdg-open|open_url)\b|https?:\/\//i.test(operation);
+  if (/sem resposta/.test(outcome)) {
+    return openingPage
+      ? "A abertura da página anterior não foi concluída."
+      : "Uma ação anterior ficou sem aprovação e não foi executada.";
+  }
+  if (/recusad/.test(outcome)) {
+    return openingPage
+      ? "A abertura da página anterior foi cancelada."
+      : "A ação anterior foi recusada e não foi executada.";
+  }
+  if (/permitid/.test(outcome)) {
+    return openingPage ? "A página anterior foi aberta." : "A ação anterior foi autorizada.";
+  }
+  return text;
 }
 
 /**
