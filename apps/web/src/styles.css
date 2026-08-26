@@ -1148,6 +1148,15 @@ body,
   font-size: var(--qb-t-sm);
 }
 
+/* Segundo selo, abaixo do "ao vivo": o retrato ficou, mas o poll está falhando. */
+.qb-live-badge--sub {
+  top: 32px;
+}
+
+.qb-live-badge--overlay.qb-live-badge--sub {
+  top: 46px;
+}
+
 .qb-live-badge__dot {
   width: 7px;
   height: 7px;
@@ -3404,6 +3413,12 @@ select.qb-account-field {
   font-size: var(--qb-t-md);
   font-weight: 600;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+
+/* Só aviso, sem clique: outra pessoa da workspace está com o controle. */
+.qb-screen-claim.is-static {
+  cursor: default;
+  pointer-events: none;
 }
 
 .qb-screen-claim:hover .qb-screen-claim__pill,

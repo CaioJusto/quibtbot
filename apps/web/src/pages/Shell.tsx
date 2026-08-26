@@ -59,10 +59,13 @@ import {
 } from "../lib/mentions";
 import { versionsByParent, versionsOf } from "../lib/message-versions";
 import {
+  createPreviewPoller,
+  holdsComputerControl,
+  othersHoldControl,
   type PreviewFrame,
   previewAgeLabel,
   previewAgeMs,
-  previewPollDelayMs,
+  previewIsStale,
   shouldPollPreview,
 } from "../lib/preview-poll";
 import { rpc } from "../lib/rpc";
@@ -1113,6 +1116,17 @@ export function ShellPage() {
   const [screenDrop, setScreenDrop] = useState(0);
   const [screenLost, setScreenLost] = useState(false);
   const screenVisible = (panel === "computer" || computerOpen) && computer?.state === "running";
+  // `controlHolder` é o campo do banco: vale "user" para a workspace inteira enquanto
+  // alguém tiver o lease. A URL da tela só vem para quem o tem — é ela que diz "é meu".
+  const holdsControl = holdsComputerControl({
+    controlHolder: computer?.controlHolder,
+    screenUrl,
+  });
+  const othersControl = othersHoldControl({
+    controlHolder: computer?.controlHolder,
+    screenUrl,
+    state: computer?.state,
+  });
   const attachScreenFrame = useCallback((node: HTMLIFrameElement | null) => {
     screenFrame.current = node;
     screenFrameMountedAt.current = node ? Date.now() : null;
@@ -1195,14 +1209,24 @@ export function ShellPage() {
     }
   }, [screenVisible, embeddedScreenUrl, active?.id, screenDrop, screenLost, pinnedScreenUrl]);
 
+  // Sem o lease não há stream para ter caído: "a tela caiu" é coisa do iframe, e o iframe
+  // só existe com o controle. Liberar (ou perder) o controle limpa o aviso — senão ele
+  // tapava o retrato que o poll começa a buscar, e ainda pagava um screenshot por tick.
+  useEffect(() => {
+    if (holdsControl) return;
+    screenRetries.current = 0;
+    setScreenLost(false);
+  }, [holdsControl]);
+
   /**
    * Sem o controle não há stream (a capacidade do noVNC é interativa, só vai para quem
    * tem a posse), mas há a tela: um retrato a cada 3 s, o TTL do cache da API, mostrado
    * no lugar da ilustração de mesa enquanto o bot trabalha. Quem pede "abre o site e
    * manda print" vê o site abrindo, em vez de um desenho parado que parece travamento.
-   * O poll para com o painel fechado, a aba escondida, o controle na mão do usuário (o
-   * iframe assume) ou o computador desligado; uma falha volta à ilustração e tenta de
-   * novo com espera crescente.
+   * O poll para com o painel fechado, a aba escondida, o controle na mão desta pessoa (o
+   * iframe assume) ou o computador desligado. Uma falha não apaga nada: o último retrato
+   * fica, envelhecendo no selo, com "sem prévia · tentando de novo" por cima, e só some
+   * depois de um minuto sem retrato novo; o poll tenta de novo com espera crescente.
    */
   const [preview, setPreview] = useState<PreviewFrame | null>(null);
   const [previewFailed, setPreviewFailed] = useState(false);
@@ -1220,9 +1244,11 @@ export function ShellPage() {
     shouldPollPreview({
       state: computer?.state,
       controlHolder: computer?.controlHolder,
+      screenUrl,
       shown: panel === "computer" || computerOpen,
       hidden: documentHidden,
       streaming: pinnedScreenUrl !== null,
+      screenLost,
     });
   const previewBotId = active?.id ?? null;
   useEffect(() => {
@@ -1231,39 +1257,17 @@ export function ShellPage() {
       setPreviewFailed(false);
       return;
     }
-    let alive = true;
-    let failures = 0;
-    let timer: number | null = null;
-    const tick = async () => {
-      try {
-        const result = await rpc.computer.preview({ botId: previewBotId });
-        if (!alive) return;
-        if (result.image) {
-          failures = 0;
-          setPreview({
-            image: result.image,
-            capturedAt: result.capturedAt,
-            receivedAt: Date.now(),
-          });
-          setPreviewFailed(false);
-        } else {
-          failures += 1;
-          setPreview(null);
-          setPreviewFailed(true);
-        }
-      } catch {
-        if (!alive) return;
-        failures += 1;
-        setPreview(null);
-        setPreviewFailed(true);
-      }
-      if (alive) timer = window.setTimeout(() => void tick(), previewPollDelayMs(failures));
-    };
-    void tick();
-    return () => {
-      alive = false;
-      if (timer !== null) window.clearTimeout(timer);
-    };
+    const poller = createPreviewPoller({
+      fetch: () => rpc.computer.preview({ botId: previewBotId }),
+      setTimeout: (callback, ms) => window.setTimeout(callback, ms),
+      clearTimeout: (id) => window.clearTimeout(id),
+      onFrame: (frame) => {
+        setPreview(frame);
+        setPreviewFailed(false);
+      },
+      onFailure: () => setPreviewFailed(true),
+    });
+    return () => poller.stop();
   }, [wantsPreview, previewBotId]);
   // O selo "há Ns" anda a cada segundo, independente de quando chega o próximo retrato.
   useEffect(() => {
@@ -1272,7 +1276,12 @@ export function ShellPage() {
     const timer = window.setInterval(() => setPreviewNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
   }, [preview]);
-  const previewLabel = preview ? previewAgeLabel(previewAgeMs(preview, previewNow)) : null;
+  const previewAge = preview ? previewAgeMs(preview, previewNow) : null;
+  const previewLabel = previewAge !== null ? previewAgeLabel(previewAge) : null;
+  // Um retrato de até um minuto ainda é a tela (velha, e o selo diz quanto); depois disso
+  // volta a ilustração, para ninguém tomar uma tela parada por atual.
+  const previewShown =
+    preview && previewAge !== null && !previewIsStale(previewAge) ? preview : null;
 
   async function pasteToComputer() {
     if (!active) return;
@@ -2247,11 +2256,7 @@ export function ShellPage() {
                 <button
                   type="button"
                   className="qb-dash__screen"
-                  aria-label={
-                    computer?.controlHolder === "user"
-                      ? "Abrir computador"
-                      : "Assumir controle do computador"
-                  }
+                  aria-label={holdsControl ? "Abrir computador" : "Assumir controle do computador"}
                   onClick={() => void openComputer()}
                 >
                   {computerOpen ? (
@@ -2268,19 +2273,25 @@ export function ShellPage() {
                         style={{ pointerEvents: "none" }}
                       />
                     </ComputerPreview>
-                  ) : computer?.state === "running" && preview && !screenLost ? (
+                  ) : computer?.state === "running" && previewShown && !screenLost ? (
                     // Sem o controle: o retrato mais recente, com a idade em cima, para
-                    // ninguém tomar uma tela velha por atual.
+                    // ninguém tomar uma tela velha por atual. Uma falha de poll não o
+                    // apaga: o sub-rótulo avisa que está tentando de novo.
                     <ComputerPreview bare host="desktop" title={`tela de ${active.name}`}>
                       <img
                         className="qb-dash__window-image"
-                        src={preview.image}
+                        src={previewShown.image}
                         alt={`Tela do computador de ${active.name}`}
                       />
                       <span className="qb-live-badge" aria-live="off">
                         <span className="qb-live-badge__dot" aria-hidden="true" />
                         {previewLabel}
                       </span>
+                      {previewFailed ? (
+                        <span className="qb-live-badge is-muted qb-live-badge--sub">
+                          sem prévia · tentando de novo
+                        </span>
+                      ) : null}
                     </ComputerPreview>
                   ) : computer?.state === "running" && !screenLost ? (
                     // Ainda sem retrato (ou a prévia falhou): a ilustração de mesa, com o
@@ -2292,7 +2303,11 @@ export function ShellPage() {
                         alt={`Tela do computador de ${active.name}`}
                       />
                       <span className="qb-live-badge is-muted">
-                        {previewFailed ? "sem prévia · tentando de novo" : "buscando a tela…"}
+                        {othersControl
+                          ? "Outra pessoa está no controle"
+                          : previewFailed
+                            ? "sem prévia · tentando de novo"
+                            : "buscando a tela…"}
                       </span>
                     </ComputerPreview>
                   ) : (
@@ -2326,23 +2341,23 @@ export function ShellPage() {
                 </button>
                 <div className="qb-dash__screen-meta">
                   <span>
-                    {computer?.controlHolder === "user"
-                      ? `Você tem o controle ${controlUntilLabel(computer.controlLeaseExpiresAt) ?? ""}`.trim()
-                      : computer?.state === "suspended"
-                        ? "Dormindo"
-                        : `tela de ${active.name}`}
+                    {holdsControl
+                      ? `Você tem o controle ${controlUntilLabel(computer?.controlLeaseExpiresAt) ?? ""}`.trim()
+                      : othersControl
+                        ? "Outra pessoa está no controle"
+                        : computer?.state === "suspended"
+                          ? "Dormindo"
+                          : `tela de ${active.name}`}
                   </span>
                   {/* Um botão de contorno vazio pesava mais que a própria prévia. */}
                   <button
                     type="button"
                     className="qb-dash__screen-action"
                     onClick={() =>
-                      computer?.controlHolder === "user"
-                        ? void releaseComputer()
-                        : void takeOverComputer()
+                      holdsControl ? void releaseComputer() : void takeOverComputer()
                     }
                   >
-                    {computer?.controlHolder === "user" ? "Liberar" : "Assumir controle"}
+                    {holdsControl ? "Liberar" : "Assumir controle"}
                   </button>
                 </div>
                 {routines.length === 0 ? (
@@ -2894,20 +2909,30 @@ export function ShellPage() {
                   </button>
                 ) : null}
               </div>
-            ) : computer?.state === "running" && preview && !screenLost ? (
+            ) : computer?.state === "running" && previewShown && !screenLost ? (
               // Sem o controle: o retrato mais recente ocupa a tela, com a idade no canto e
               // a pílula de assumir — o clique continua oferecendo entrar, como no stream.
+              // Com outra pessoa no controle a pílula só avisa: a API negaria o assumir.
               <div className="relative h-full w-full">
                 <img
                   className="qb-screen-still"
-                  src={preview.image}
+                  src={previewShown.image}
                   alt={`Tela do computador de ${active.name}`}
                 />
                 <span className="qb-live-badge qb-live-badge--overlay">
                   <span className="qb-live-badge__dot" aria-hidden="true" />
                   {previewLabel}
                 </span>
-                {!trackpadMode ? (
+                {previewFailed ? (
+                  <span className="qb-live-badge is-muted qb-live-badge--overlay qb-live-badge--sub">
+                    sem prévia · tentando de novo
+                  </span>
+                ) : null}
+                {othersControl ? (
+                  <span className="qb-screen-claim is-static">
+                    <span className="qb-screen-claim__pill">Outra pessoa está no controle</span>
+                  </span>
+                ) : !trackpadMode ? (
                   <button
                     type="button"
                     className="qb-screen-claim"
@@ -2930,15 +2955,17 @@ export function ShellPage() {
                       ? "A tela caiu e não voltou."
                       : computer?.state === "suspended"
                         ? "Este computador está dormindo."
-                        : computer?.state === "running" && computer?.controlHolder === "user"
+                        : computer?.state === "running" && holdsControl
                           ? `Procurando a tela de ${active.name}…`
-                          : computer?.state === "running" && previewFailed
-                            ? `Sem prévia da tela de ${active.name} por enquanto. Tentando de novo…`
-                            : computer?.state === "running"
-                              ? `Buscando a tela de ${active.name}…`
-                              : booting || computer?.state === "booting"
-                                ? "Ligando o computador…"
-                                : "O computador está parado."}
+                          : computer?.state === "running" && othersControl
+                            ? `Outra pessoa está no controle do computador de ${active.name}.`
+                            : computer?.state === "running" && previewFailed
+                              ? `Sem prévia da tela de ${active.name} por enquanto. Tentando de novo…`
+                              : computer?.state === "running"
+                                ? `Buscando a tela de ${active.name}…`
+                                : booting || computer?.state === "booting"
+                                  ? "Ligando o computador…"
+                                  : "O computador está parado."}
                   </p>
                   {screenLost ? (
                     <Button

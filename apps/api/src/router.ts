@@ -213,6 +213,14 @@ export function controlDenialMessage(reason: ControlDenial): string {
 /** A prévia parada da tela, por bot: tirar um print custa ~1 s; quem olha em fila divide o mesmo. */
 const PREVIEW_TTL_MS = 3_000;
 const previewCache = new Map<string, { image: string; at: number }>();
+/** Lê o PNG em base64 e apaga o arquivo, guardando o código do base64. */
+const PREVIEW_ENCODE_SCRIPT = 'base64 -w0 "$1"; status=$?; rm -f -- "$1"; exit $status';
+
+/** O retrato de cada bot vai num arquivo só dele: os bots de um Docker dividem o /tmp. */
+export function previewImagePath(botId: string): string {
+  const safe = botId.replace(/[^A-Za-z0-9_-]/g, "");
+  return `/tmp/quibt-preview-${safe || "bot"}.png`;
+}
 
 export function createRouter(deps: RouterDeps) {
   const os = implement(appContract).$context<{
@@ -1507,7 +1515,10 @@ export function createRouter(deps: RouterDeps) {
             capturedAt: new Date(cached.at).toISOString(),
           };
         }
-        const target = "/tmp/quibt-preview.png";
+        // Um arquivo por bot: no Docker os bots dividem o mesmo /tmp, e dois pollers (o
+        // painel web num bot, o celular noutro) escrevendo o mesmo nome entregavam a
+        // tela de um como retrato do outro, ou um PNG pela metade.
+        const target = previewImagePath(bot.id);
         const run = {
           operationId: "preview",
           traceId: "preview",
@@ -1524,10 +1535,11 @@ export function createRouter(deps: RouterDeps) {
           run,
         );
         if (shot.code !== 0) return { image: null, capturedAt: null };
+        // O PNG some depois de lido, dê certo ou não: o próximo retrato nunca lê um resto.
         const encoded = await runSandboxCommand(
           deps.sandbox,
           computer,
-          ["bash", "-lc", 'base64 -w0 "$1"', "quibt-preview", target],
+          ["bash", "-lc", PREVIEW_ENCODE_SCRIPT, "quibt-preview", target],
           "/home/quibt",
           run,
           6 * 1024 * 1024,
