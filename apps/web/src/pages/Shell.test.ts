@@ -80,6 +80,7 @@ describe("dashboard copies the landing product demo", () => {
     expect(shell).toMatch(
       /if \(holdsControl\) return;\s+screenRetries\.current = 0;\s+setScreenLost\(false\);/,
     );
+  });
 
   it("o heartbeat do computador só bate com a aba à vista e escreve o prazo novo na tela", () => {
     // Aba escondida batendo a cada minuto segurava o teclado de um bot parado esperando
