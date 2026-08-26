@@ -3,6 +3,7 @@ import { implement, ORPCError } from "@orpc/server";
 import type {
   AgentHomeStore,
   MemoryStore,
+  NotificationProvider,
   SandboxProvider,
   WakeupDriver,
 } from "@quibt/adapter-kit";
@@ -17,7 +18,7 @@ import {
   destroyBot,
   type EncryptedSecretStore,
   ensureDesktopScreenUrl,
-  failRunsQueuedWithoutWorker,
+  failRunsWithoutWorker,
   isComputerAlreadyStoppedError,
   lessonCaptureCommand,
   lessonStartCommand,
@@ -71,10 +72,10 @@ import {
   parseApprovalDecision,
   parseRunCheckpoint,
   projectMessages,
-  QUEUED_RUN_PATIENCE_MS,
   type ResolvedMachine,
   releaseControlLease,
   resolveDeploymentMachine,
+  runLooksStranded,
   scheduleControlReap,
   scopeApprovalDecision,
   titleFromMessage,
@@ -141,6 +142,8 @@ export interface RouterDeps {
   probeFetch?: typeof fetch;
   /** Quem diz se há worker vivo; sem ele, lê o batimento direto do banco. */
   workerPresence?: WorkerPresenceReader;
+  /** O push do celular, para o run que o reconciliador reprova quando ninguém está olhando. */
+  notifications?: NotificationProvider;
   env: TrustedOriginEnv & {
     defaultProvider: string;
     defaultModel: string;
@@ -161,6 +164,11 @@ export interface RouterDeps {
     resendApiKey?: string;
     /** AGENT_RUNTIME: "pi" no produto; "scripted" só no emulador dos testes. */
     agentRuntime?: string;
+    /**
+     * SIGNUPS_ENABLED cru. Quando está definido, o .env é a única fonte do interruptor de
+     * cadastro: a tela não pode gravar um valor que a próxima subida vai desfazer.
+     */
+    signupsEnabled?: string;
   };
 }
 
@@ -2603,19 +2611,30 @@ async function persistModelCredential(
 }
 
 /**
- * Um run parado na fila sem worker por perto é o silêncio que esta tela mais confunde: a
- * pessoa mandou, nada acontece, e o composer diz "trabalhando". Em vez de esperar a varredura
- * periódica da API, o snapshot resolve na hora — o run vira `failed` (com o evento que leva a
- * frase até o chat) e deixa de contar como ativo. Um run recém-enfileirado nem é olhado.
+ * Um run sem worker por perto é o silêncio que esta tela mais confunde: a pessoa mandou, nada
+ * acontece, e o composer diz "trabalhando". Vale para o run parado na fila e para o run cujo
+ * worker morreu no meio do trabalho (lease vencido há tempo demais). Em vez de esperar a
+ * varredura periódica da API, o snapshot resolve na hora — o run vira `failed`, a frase entra
+ * no fio e ele deixa de contar como ativo. Um run recente nem é olhado.
  */
-async function reconcileQueuedRun<
-  T extends { id: string; botId: string; status: string; updatedAt: Date },
+async function reconcileStrandedRun<
+  T extends {
+    id: string;
+    botId: string;
+    status: string;
+    updatedAt: Date;
+    leaseExpiresAt?: Date | null;
+  },
 >(deps: RouterDeps, run: T | null): Promise<T | null> {
-  if (run?.status !== "queued") return run;
-  if (Date.now() - run.updatedAt.getTime() <= QUEUED_RUN_PATIENCE_MS) return run;
+  if (!run || !runLooksStranded(run)) return run;
   const presence = workerPresenceFor(deps);
-  const failed = await failRunsQueuedWithoutWorker(
-    { prisma: deps.prisma, workerSeenAt: () => presence.seenAt() },
+  const failed = await failRunsWithoutWorker(
+    {
+      prisma: deps.prisma,
+      workerSeenAt: () => presence.seenAt(),
+      apiStartedAt: presence.startedAt,
+      notifications: deps.notifications,
+    },
     { botId: run.botId },
   ).catch(() => [] as string[]);
   return failed.includes(run.id) ? null : run;
@@ -2658,7 +2677,7 @@ async function snapshot(
       data: { unread: false },
     }),
   ]);
-  const run = await reconcileQueuedRun(deps, queued);
+  const run = await reconcileStrandedRun(deps, queued);
   const projected = projectMessages(events);
   const rows = await deps.prisma.message.findMany({
     where: {
@@ -2962,7 +2981,7 @@ async function deploymentDto(prisma: PrismaClient, env: RouterDeps["env"]) {
   return {
     ownerUserId: settings?.ownerUserId ?? null,
     deploymentClaimed: Boolean(claim?.claimedAt),
-    signupsEnabled: settings?.signupsEnabled ?? true,
+    signupsEnabled: settings?.signupsEnabled ?? false,
     signupAllowlist: settings?.signupAllowlist
       ? settings.signupAllowlist.split(",").filter(Boolean)
       : [],
@@ -3054,6 +3073,15 @@ async function saveDeploymentMachine(
     webhookPublicUrl?: string | null;
   },
 ) {
+  // Uma fonte só para o cadastro: com SIGNUPS_ENABLED no .env, quem manda é o .env (a API
+  // alinha o interruptor salvo a cada subida). Aceitar a gravação aqui seria prometer uma
+  // troca que o próximo boot desfaz sem avisar — melhor recusar dizendo onde se muda.
+  if (input.signupsEnabled !== undefined && deps.env.signupsEnabled !== undefined) {
+    throw new ORPCError("BAD_REQUEST", {
+      message:
+        "Este deploy decide o cadastro pelo .env: defina SIGNUPS_ENABLED lá e reinicie o Quibt Bot.",
+    });
+  }
   if (input.sandboxProvider) {
     if (!editionGateFor(deps.env).canChooseMachine) {
       throw new ORPCError("FORBIDDEN", {
@@ -3140,7 +3168,7 @@ async function saveDeploymentMachine(
     create: {
       id: "default",
       ownerUserId,
-      signupsEnabled: input.signupsEnabled ?? true,
+      signupsEnabled: input.signupsEnabled ?? false,
       signupAllowlist: (input.signupAllowlist ?? []).join(","),
       sandboxProvider: input.sandboxProvider,
       sandboxEndpoint: input.sandboxEndpoint,
