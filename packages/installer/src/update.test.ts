@@ -19,7 +19,7 @@ function validCustomDump(): Buffer {
 function seedInstalledState(dataDir: string): void {
   ensureInstallEnvironment(dataDir, "http://127.0.0.1:5173");
   saveInstallState(dataDir, {
-    ...initialInstallState("0.2.11", new Date("2026-08-17T00:00:00.000Z")),
+    ...initialInstallState("0.2.12", new Date("2026-08-17T00:00:00.000Z")),
     completed: [
       "requirements",
       "environment",
@@ -97,7 +97,7 @@ describe("runUpdate", () => {
       composeFile: COMPOSE_FILE,
       // A suíte não pode depender do disco livre de quem a roda.
       statfs: async () => ({ bsize: 4096, bavail: 25_000_000 }),
-      targetRelease: "0.2.11",
+      targetRelease: "0.2.12",
       run: makeRunner("success"),
       fetch: async (url) => {
         if (String(url).endsWith("/ready")) {
@@ -116,11 +116,11 @@ describe("runUpdate", () => {
     const rollback = JSON.parse(
       readFileSync(path.join(dataDir, "rollback-images.json"), "utf8"),
     ) as { release: string; images: Array<{ reference: string; id: string }> };
-    expect(rollback.release).toBe("0.2.11");
+    expect(rollback.release).toBe("0.2.12");
     expect(rollback.images).toEqual([
-      { reference: "ghcr.io/quibt/quibt-stack:0.2.11", id: "sha256:stack-old" },
-      { reference: "ghcr.io/quibt/quibt-supervisor:0.2.11", id: "sha256:supervisor-old" },
-      { reference: "ghcr.io/quibt/quibt-computer:0.2.11", id: "sha256:computer-old" },
+      { reference: "ghcr.io/quibt/quibt-stack:0.2.12", id: "sha256:stack-old" },
+      { reference: "ghcr.io/quibt/quibt-supervisor:0.2.12", id: "sha256:supervisor-old" },
+      { reference: "ghcr.io/quibt/quibt-computer:0.2.12", id: "sha256:computer-old" },
     ]);
     expect(readFileSync(path.join(dataDir, "quibt.env"), "utf8")).toBe(envBefore);
   });
@@ -154,7 +154,7 @@ describe("runUpdate", () => {
       composeFile: COMPOSE_FILE,
       // A suíte não pode depender do disco livre de quem a roda.
       statfs: async () => ({ bsize: 4096, bavail: 25_000_000 }),
-      targetRelease: "0.2.11",
+      targetRelease: "0.2.12",
       run: makeRunner("up-fail"),
       fetch: async (url) => {
         if (String(url).endsWith("/ready")) {
@@ -181,7 +181,7 @@ describe("runUpdate", () => {
       composeFile: COMPOSE_FILE,
       // A suíte não pode depender do disco livre de quem a roda.
       statfs: async () => ({ bsize: 4096, bavail: 25_000_000 }),
-      targetRelease: "0.2.11",
+      targetRelease: "0.2.12",
       run: makeRunner("migrate-fail"),
       fetch: async (url) => {
         if (String(url).endsWith("/ready")) {
@@ -206,7 +206,7 @@ describe("runUpdate", () => {
     const dump = validCustomDump();
     const targetImages = [
       "postgres:16@sha256:e17e86066e5ef83e0952a9347f5c792b7ece00972e2aa787a6986f471b3dd3d5",
-      "ghcr.io/quibt/quibt-stack:0.2.12",
+      "ghcr.io/quibt/quibt-stack:0.2.13",
     ];
     const pulled: string[] = [];
     const pullOptions: Array<{ inactivityTimeoutMs?: number; timeoutMs?: number }> = [];
@@ -221,7 +221,7 @@ describe("runUpdate", () => {
         if (joined.includes("image inspect")) {
           const reference = args.at(-1) ?? "";
           // Só a release instalada está no disco; a nova ainda não.
-          return reference.endsWith(":0.2.11")
+          return reference.endsWith(":0.2.12")
             ? { code: 0, stdout: `${imageInspectResponse(reference)}\n`, stderr: "" }
             : { code: 1, stdout: "", stderr: "Error: No such image" };
         }
@@ -254,7 +254,7 @@ describe("runUpdate", () => {
       dataDir,
       composeFile: COMPOSE_FILE,
       statfs: async () => ({ bsize: 4096, bavail: 25_000_000 }),
-      targetRelease: "0.2.11",
+      targetRelease: "0.2.12",
       run,
       fetch: async (url) =>
         String(url).endsWith("/ready")
@@ -273,7 +273,7 @@ describe("runUpdate", () => {
       expect(options.timeoutMs).toBe(60 * 60_000);
     }
     const images = events.filter((event) => event.step === "images");
-    expect(images.some((event) => event.progress?.label === "quibt-stack:0.2.12")).toBe(true);
+    expect(images.some((event) => event.progress?.label === "quibt-stack:0.2.13")).toBe(true);
     expect(images.map((event) => event.message)).toContainEqual(
       expect.stringContaining("Vou baixar cerca de 1,7 GB"),
     );
@@ -291,7 +291,7 @@ describe("runUpdate", () => {
       composeFile: COMPOSE_FILE,
       // A suíte não pode depender do disco livre de quem a roda.
       statfs: async () => ({ bsize: 4096, bavail: 25_000_000 }),
-      targetRelease: "0.2.11",
+      targetRelease: "0.2.12",
       run: makeRunner("health-fail"),
       fetch: async () => new Response("down", { status: 503 }),
       clock: { now: () => new Date("2026-08-17T01:00:00.000Z"), sleep: async () => undefined },

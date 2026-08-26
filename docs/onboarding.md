@@ -15,7 +15,7 @@ Escolha um caminho.
 **App de desktop (mais fácil)**
 
 1. Baixe o instalador em [quibt.com.br](https://quibt.com.br) ou nas [Releases do GitHub](https://github.com/CaioJusto/quibtbot/releases/latest):
-   - Mac (Apple silicon): `QuibtBot.dmg` — o arquivo da v0.2.11 é sem assinatura, então o macOS avisa; na primeira vez, clique com o botão direito → Abrir. Mac Intel: ainda sem instalador — só rodando a partir do código-fonte (veja o README).
+   - Mac (Apple silicon): `QuibtBot.dmg` — o arquivo da v0.2.12 é sem assinatura, então o macOS avisa; na primeira vez, clique com o botão direito → Abrir. Mac Intel: ainda sem instalador — só rodando a partir do código-fonte (veja o README).
    - Windows: `QuibtBot-setup.exe` — instalador de teste 64 bits, sem assinatura; o SmartScreen avisa: Mais informações → Executar assim mesmo. Instale o Docker Desktop por conta própria.
    - Linux: `QuibtBot.AppImage` — AppImage x64 de teste, sem assinatura; precisa de libfuse2, marque como executável e instale o Docker (Engine ou Desktop) por conta própria.
 2. Abra o Quibt Bot. Se o stack local ainda não estiver de pé, o app mostra um assistente.
@@ -24,8 +24,8 @@ Escolha um caminho.
 **Por um comando** (Mac ou Linux, sem o app): cole no terminal
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CaioJusto/quibtbot/v0.2.11/scripts/install.sh \
-  | QUIBT_RELEASE=0.2.11 sh
+curl -fsSL https://raw.githubusercontent.com/CaioJusto/quibtbot/v0.2.12/scripts/install.sh \
+  | QUIBT_RELEASE=0.2.12 sh
 ```
 
 Ele baixa o `quibtbot` certo para a sua máquina, confere o SHA-256 publicado e roda `quibtbot install`. No fim imprime o endereço e o código para o celular. Para sair: `quibtbot uninstall` (ou, no app, **Quibt Bot → Desinstalar**).

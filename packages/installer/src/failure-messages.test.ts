@@ -97,9 +97,9 @@ describe("mensagens do lock e da versão", () => {
   });
 
   it("versão diferente manda atualizar em vez de instalar", () => {
-    const message = explainUpdateRequired("0.2.10", "0.2.11");
+    const message = explainUpdateRequired("0.2.10", "0.2.12");
     expect(message).toContain("0.2.10");
-    expect(message).toContain("0.2.11");
+    expect(message).toContain("0.2.12");
     expect(message).toContain("quibtbot update");
   });
 });
