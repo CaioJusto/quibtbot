@@ -8,6 +8,10 @@
  * is dead for everyone: the bot gets its computer back, any run parked in `waiting_takeover` is
  * woken, and the next member to ask gets control.
  *
+ * O prazo anda com o uso: cada tecla ou clique do dono empurra a janela, e o heartbeat da tela
+ * só empurra com prova de gente na frente dela — senão uma aba esquecida aberta seguraria o
+ * teclado para sempre e o bot em `waiting_takeover` nunca receberia o computador de volta.
+ *
  * The fence is what the sandbox sees, so input from a lease that was superseded mid-flight is
  * recognisable as stale rather than replayed as if it were current.
  */
@@ -39,6 +43,12 @@ export interface ControlLeaseSnapshot {
   controlLeaseUserId: string | null;
   controlLeaseExpiresAt: Date | null;
   controlFence: number;
+  /**
+   * Última tecla, clique ou colagem de verdade. É o que separa "a pessoa está usando" de
+   * "a aba ficou aberta": sem isto, o heartbeat de 60 s de uma tela esquecida empurrava o
+   * prazo para sempre e o bot parado em `waiting_takeover` nunca recuperava o computador.
+   */
+  controlLastInputAt?: Date | null;
 }
 
 /** Live means: a user holds it, and the recorded expiry has not passed. */
@@ -91,6 +101,30 @@ export function canTakeControl(
   return { ok: true, renew: true };
 }
 
+/** Quando o prazo atual foi escrito: o começo da janela de 15 minutos que está valendo. */
+export function controlLeaseGrantedAt(
+  session: ControlLeaseSnapshot,
+  leaseMs: number = CONTROL_LEASE_MS,
+): Date | null {
+  if (!session.controlLeaseExpiresAt) return null;
+  return new Date(session.controlLeaseExpiresAt.getTime() - leaseMs);
+}
+
+/**
+ * Houve uso de verdade desde que este prazo foi escrito? O heartbeat sozinho não é prova de
+ * nada — o navegador segue batendo com a aba no fundo e o celular com a tela apagada. Só uma
+ * tecla, um clique ou uma colagem depois da última renovação valem outra janela.
+ */
+export function controlLeaseHasFreshInput(
+  session: ControlLeaseSnapshot,
+  leaseMs: number = CONTROL_LEASE_MS,
+): boolean {
+  const grantedAt = controlLeaseGrantedAt(session, leaseMs);
+  const lastInput = session.controlLastInputAt;
+  if (!grantedAt || !lastInput) return false;
+  return lastInput.getTime() > grantedAt.getTime();
+}
+
 /**
  * Se vale renovar o prazo agora. Quem está preenchendo um formulário há 15 minutos via a
  * tela virar "Assuma o controle para ver a tela" e as teclas seguintes falharem em silêncio:
@@ -121,6 +155,21 @@ export function controlUntilLabel(
   if (Number.isNaN(deadline.getTime()) || deadline.getTime() <= now.getTime()) return null;
   const pad = (value: number) => String(value).padStart(2, "0");
   return `até ${pad(deadline.getHours())}:${pad(deadline.getMinutes())}`;
+}
+
+/**
+ * O prazo que `computer.input` / `computer.heartbeat` acabou de devolver, aplicado ao status
+ * que a tela já tem. Sem isto o rótulo "controle até HH:mm" ficava congelado no horário do
+ * takeover e sumia quando aquele minuto passava, mesmo com o lease renovado. Devolve o mesmo
+ * objeto quando nada muda, para a tela não redesenhar à toa.
+ */
+export function withControlLease<
+  T extends { controlHolder: string; controlLeaseExpiresAt?: string | null },
+>(status: T | null, expiresAt: string | null | undefined): T | null {
+  if (!status || !expiresAt) return status;
+  if (status.controlHolder !== "user") return status;
+  if (status.controlLeaseExpiresAt === expiresAt) return status;
+  return { ...status, controlLeaseExpiresAt: expiresAt };
 }
 
 /** Prisma shape this module needs, so @quibt/core stays free of a database dependency. */
@@ -209,6 +258,8 @@ export async function grantControlLease(
       controlLeaseId: leaseId,
       controlLeaseUserId: input.userId,
       controlLeaseExpiresAt: expiresAt,
+      // Lease novo, folha em branco: o uso do dono anterior não conta como prova aqui.
+      controlLastInputAt: null,
       controlFence: fence,
       state: "running",
       bootClaimToken: null,
@@ -227,7 +278,15 @@ export async function grantControlLease(
  */
 export async function renewControlLease(
   db: ControlLeaseDb,
-  input: { botId: string; leaseId: string; userId: string; now?: Date; leaseMs?: number },
+  input: {
+    botId: string;
+    leaseId: string;
+    userId: string;
+    now?: Date;
+    leaseMs?: number;
+    /** Gravado junto quando quem renovou foi uma tecla ou um clique, não o heartbeat. */
+    lastInputAt?: Date;
+  },
 ): Promise<{ expiresAt: Date } | null> {
   const now = input.now ?? new Date();
   const expiresAt = new Date(now.getTime() + (input.leaseMs ?? CONTROL_LEASE_MS));
@@ -238,33 +297,101 @@ export async function renewControlLease(
       controlLeaseId: input.leaseId,
       controlLeaseUserId: input.userId,
     },
-    data: { controlLeaseExpiresAt: expiresAt },
+    data: {
+      controlLeaseExpiresAt: expiresAt,
+      ...(input.lastInputAt ? { controlLastInputAt: input.lastInputAt } : {}),
+    },
   });
   if (renewed.count !== 1) return null;
   return { expiresAt };
 }
 
 /**
- * O que cada uso do dono (heartbeat, tecla, mouse) faz com o lease: nada enquanto a folga não
- * foi consumida; depois dela, empurra o prazo e reagenda o `control.reap` para o prazo novo
- * (mesmo `jobKey`, então o agendamento antigo é substituído, não somado). Quem não é o dono
- * não renova nada — o lease é de quem assumiu.
+ * Anota que a pessoa usou o computador, sem mexer no prazo. É o bilhete que o heartbeat lê
+ * depois para saber se vale outra janela; escrito no máximo uma vez por janela, então o
+ * trackpad continua sem escrever no banco a cada movimento.
+ */
+export async function markControlLeaseInput(
+  db: ControlLeaseDb,
+  input: { botId: string; leaseId: string; userId: string; now?: Date },
+): Promise<boolean> {
+  const marked = await db.desktopSession.updateMany({
+    where: {
+      botId: input.botId,
+      controlHolder: "user",
+      controlLeaseId: input.leaseId,
+      controlLeaseUserId: input.userId,
+    },
+    data: { controlLastInputAt: input.now ?? new Date() },
+  });
+  return marked.count === 1;
+}
+
+/** De onde veio a batida: uma tecla/clique da pessoa, ou o heartbeat que a tela manda sozinha. */
+export type ControlLeaseUse = "input" | "heartbeat";
+
+/**
+ * O que cada batida do dono faz com o lease.
+ *
+ * `input` é uso de verdade: anota a hora (uma vez por janela) e, passada a folga, empurra o
+ * prazo e reagenda o `control.reap` para o prazo novo (mesmo `jobKey`, então o agendamento
+ * antigo é substituído, não somado).
+ *
+ * `heartbeat` não é uso: uma aba deixada aberta bate a cada 60 s sem ninguém na frente, e
+ * renovar por isso segurava o teclado para sempre — o bot parado em `waiting_takeover` nunca
+ * voltava e o colega ouvia "outra pessoa está no controle" sem fim. Então o heartbeat só
+ * renova com prova de gente: tecla ou clique **depois** da última renovação, ou o `atScreen`
+ * do cliente. Sem prova ele apenas acorda o container e o prazo segue correndo até o reap.
+ *
+ * `atScreen` existe porque quem dirige a tela embutida (noVNC) não passa por
+ * `computer.input`: as teclas vão direto pelo WebSocket do próprio noVNC, e o servidor não
+ * as vê. Então o cliente afirma o que só ele sabe — a aba está à vista, a janela em foco e o
+ * teclado dentro do quadro da tela (no celular: o app em primeiro plano nessa tela). Sem
+ * isso, quem passasse 20 minutos preenchendo um formulário dentro do noVNC perderia o
+ * controle no meio, que é o bug que o prazo por uso veio corrigir.
+ *
+ * Quem não é o dono não renova nada — o lease é de quem assumiu.
  */
 export async function touchControlLease(
   deps: { db: ControlLeaseDb; wakeup?: WakeupDriver },
   session: ControlLeaseSnapshot,
-  input: { botId: string; userId: string; now?: Date; leaseMs?: number },
+  input: {
+    botId: string;
+    userId: string;
+    now?: Date;
+    leaseMs?: number;
+    use?: ControlLeaseUse;
+    /** O cliente afirma que a pessoa está na frente da tela do bot agora. */
+    atScreen?: boolean;
+  },
 ): Promise<{ expiresAt: Date } | null> {
   const now = input.now ?? new Date();
+  const use = input.use ?? "input";
   const check = checkControlLease(session, { userId: input.userId }, now);
   if (!check.ok) return null;
-  if (!controlLeaseWantsRenewal(session, now)) return null;
+  const leaseMs = input.leaseMs ?? CONTROL_LEASE_MS;
+  const fresh = controlLeaseHasFreshInput(session, leaseMs);
+  if (use === "heartbeat" && !fresh && !input.atScreen) return null;
+  if (!controlLeaseWantsRenewal(session, now)) {
+    // Ainda dentro da folga: guarda só o bilhete de uso, para o heartbeat de daqui a pouco
+    // saber que havia alguém teclando. Uma escrita por janela, não uma por tecla.
+    if (use === "input" && !fresh) {
+      await markControlLeaseInput(deps.db, {
+        botId: input.botId,
+        leaseId: check.leaseId,
+        userId: input.userId,
+        now,
+      });
+    }
+    return null;
+  }
   const renewed = await renewControlLease(deps.db, {
     botId: input.botId,
     leaseId: check.leaseId,
     userId: input.userId,
     now,
     leaseMs: input.leaseMs,
+    ...(use === "input" ? { lastInputAt: now } : {}),
   });
   if (!renewed) return null;
   scheduleControlReap(deps.wakeup, input.botId, renewed.expiresAt);
@@ -283,6 +410,7 @@ export async function releaseControlLease(
       controlLeaseId: null,
       controlLeaseUserId: null,
       controlLeaseExpiresAt: null,
+      controlLastInputAt: null,
     },
   });
   return released.count === 1;

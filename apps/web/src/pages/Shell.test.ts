@@ -80,6 +80,16 @@ describe("dashboard copies the landing product demo", () => {
     expect(shell).toMatch(
       /if \(holdsControl\) return;\s+screenRetries\.current = 0;\s+setScreenLost\(false\);/,
     );
+
+  it("o heartbeat do computador só bate com a aba à vista e escreve o prazo novo na tela", () => {
+    // Aba escondida batendo a cada minuto segurava o teclado de um bot parado esperando
+    // a pessoa — o navegador só desacelera o timer, não o desliga.
+    expect(shell).toContain('if (document.visibilityState !== "visible") return;');
+    expect(shell).toContain(".heartbeat({ botId, atScreen })");
+    // O que se digita dentro do quadro do noVNC não passa pela API: o foco no quadro é a
+    // única prova de uso que a web tem para oferecer.
+    expect(shell).toContain("document.activeElement === screenFrame.current");
+    expect(shell).toContain("withControlLease(current, answer.controlLeaseExpiresAt)");
   });
 
   it("keeps the monitor toggle on the side panel, not a jump to fullscreen", () => {

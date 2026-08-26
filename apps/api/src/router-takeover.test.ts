@@ -25,6 +25,7 @@ interface DesktopRow {
   controlLeaseId: string | null;
   controlLeaseUserId: string | null;
   controlLeaseExpiresAt: Date | null;
+  controlLastInputAt: Date | null;
   controlFence: number;
   computer: { id: string; kind: string; providerRef: string | null };
 }
@@ -41,6 +42,7 @@ function harness(overrides: Partial<DesktopRow> = {}) {
     controlLeaseId: null,
     controlLeaseUserId: null,
     controlLeaseExpiresAt: null,
+    controlLastInputAt: null,
     controlFence: 0,
     computer: { id: "computer-1", kind: "docker", providerRef: "container-1" },
     ...overrides,
@@ -228,25 +230,38 @@ describe("computer.input", () => {
   });
 });
 
-/** Um lease do dono com parte do prazo já consumida — o caso de quem está usando há um tempo. */
-function usedLease(consumedMs: number) {
+/**
+ * Um lease do dono com parte do prazo já consumida — o caso de quem está usando há um tempo.
+ * `typed` diz se houve tecla depois da última renovação: é isso, e não o heartbeat, que
+ * autoriza outra janela.
+ */
+function usedLease(consumedMs: number, typed = false) {
+  const grantedAt = Date.now() - consumedMs;
   return {
     controlHolder: "user",
     controlLeaseId: "ctl_live",
     controlLeaseUserId: "user-1",
-    controlLeaseExpiresAt: new Date(Date.now() + CONTROL_LEASE_MS - consumedMs),
+    controlLeaseExpiresAt: new Date(grantedAt + CONTROL_LEASE_MS),
+    controlLastInputAt: typed ? new Date(grantedAt + Math.floor(consumedMs / 2)) : null,
     controlFence: 2,
   };
 }
 
 describe("computer.heartbeat", () => {
-  it("renova o prazo do dono e reagenda o reap, sem mexer no fence nem no id", async () => {
+  it("renova o prazo de quem esteve teclando e reagenda o reap, sem mexer no fence nem no id", async () => {
     const { router, desktop, jobs, keepAlives } = harness(
-      usedLease(2 * CONTROL_LEASE_RENEW_GAP_MS),
+      usedLease(2 * CONTROL_LEASE_RENEW_GAP_MS, true),
     );
     const before = desktop.controlLeaseExpiresAt?.getTime() ?? 0;
-    await call(router.computer.heartbeat, { botId: "bot-1" }, { context: { actor: owner } });
+    const answer = await call(
+      router.computer.heartbeat,
+      { botId: "bot-1" },
+      { context: { actor: owner } },
+    );
     const after = desktop.controlLeaseExpiresAt?.getTime() ?? 0;
+    // A tela precisa do prazo novo para escrever "controle até HH:mm" sem ficar parada no
+    // horário do takeover.
+    expect(answer.controlLeaseExpiresAt).toBe(desktop.controlLeaseExpiresAt?.toISOString());
     expect(after).toBeGreaterThan(before);
     expect(after).toBeGreaterThanOrEqual(Date.now() + CONTROL_LEASE_MS - 1_000);
     expect(desktop.controlLeaseId).toBe("ctl_live");
@@ -258,11 +273,36 @@ describe("computer.heartbeat", () => {
   });
 
   it("não renova a cada batida: um lease recém-concedido fica como está", async () => {
-    const { router, desktop, jobs } = harness(usedLease(0));
+    const { router, desktop, jobs } = harness(usedLease(0, true));
     const before = desktop.controlLeaseExpiresAt;
-    await call(router.computer.heartbeat, { botId: "bot-1" }, { context: { actor: owner } });
+    const answer = await call(
+      router.computer.heartbeat,
+      { botId: "bot-1" },
+      { context: { actor: owner } },
+    );
+    expect(desktop.controlLeaseExpiresAt).toEqual(before);
+    expect(answer.controlLeaseExpiresAt).toBeNull();
+    expect(jobs.map((job) => job.name)).not.toContain("control.reap");
+  });
+
+  it("uma tela deixada aberta não segura o teclado: sem tecla, o heartbeat só acorda o container", async () => {
+    const { router, desktop, jobs, keepAlives } = harness(
+      usedLease(2 * CONTROL_LEASE_RENEW_GAP_MS),
+    );
+    const before = desktop.controlLeaseExpiresAt;
+    // Meia hora de aba aberta batendo de minuto em minuto, ninguém na frente.
+    for (let beat = 0; beat < 30; beat += 1) {
+      const answer = await call(
+        router.computer.heartbeat,
+        { botId: "bot-1" },
+        { context: { actor: owner } },
+      );
+      expect(answer.controlLeaseExpiresAt).toBeNull();
+    }
     expect(desktop.controlLeaseExpiresAt).toEqual(before);
     expect(jobs.map((job) => job.name)).not.toContain("control.reap");
+    // O container continua acordado — é para isso que o heartbeat existe.
+    expect(keepAlives.length).toBe(30);
   });
 
   it("o heartbeat de quem não é o dono não estica o lease de ninguém", async () => {
@@ -289,6 +329,44 @@ describe("computer.input renova pelo uso", () => {
     expect(jobs.find((job) => job.name === "control.reap")?.runAt).toEqual(
       desktop.controlLeaseExpiresAt,
     );
+  });
+
+  it("quem está com o teclado dentro da tela (noVNC) renova pelo heartbeat", async () => {
+    // Esse caminho não passa por computer.input: as teclas vão direto pelo WebSocket.
+    const { router, desktop } = harness(usedLease(2 * CONTROL_LEASE_RENEW_GAP_MS));
+    const before = desktop.controlLeaseExpiresAt?.getTime() ?? 0;
+    const answer = await call(
+      router.computer.heartbeat,
+      { botId: "bot-1", atScreen: true },
+      { context: { actor: owner } },
+    );
+    expect(desktop.controlLeaseExpiresAt?.getTime() ?? 0).toBeGreaterThan(before);
+    expect(answer.controlLeaseExpiresAt).toBe(desktop.controlLeaseExpiresAt?.toISOString());
+  });
+
+  it("a tecla dentro da folga fica registrada e é ela que libera o heartbeat seguinte", async () => {
+    const { router, desktop, jobs } = harness(usedLease(1_000));
+    const before = desktop.controlLeaseExpiresAt;
+    const typed = await call(
+      router.computer.input,
+      { ...keypress, leaseId: "ctl_live" },
+      { context: { actor: owner } },
+    );
+    // Cedo demais para renovar, mas o uso ficou anotado.
+    expect(typed.controlLeaseExpiresAt).toBeNull();
+    expect(desktop.controlLeaseExpiresAt).toEqual(before);
+    expect(desktop.controlLastInputAt).toBeInstanceOf(Date);
+    // Agora sim: o prazo já consumiu a folga e houve tecla desde a última renovação.
+    desktop.controlLeaseExpiresAt = new Date(
+      Date.now() + CONTROL_LEASE_MS - 2 * CONTROL_LEASE_RENEW_GAP_MS,
+    );
+    const beat = await call(
+      router.computer.heartbeat,
+      { botId: "bot-1" },
+      { context: { actor: owner } },
+    );
+    expect(beat.controlLeaseExpiresAt).toBe(desktop.controlLeaseExpiresAt?.toISOString());
+    expect(jobs.map((job) => job.name)).toContain("control.reap");
   });
 });
 

@@ -20,7 +20,18 @@ export const MOBILE_RPC_RETRIES = 2;
 export const MOBILE_RPC_RETRY_DELAY_MS = 400;
 
 function isTransientStatus(status: number) {
-  return status === 502 || status === 503 || status === 429;
+  // 504 é o gateway desistindo de esperar a API — tão passageiro quanto o 502, e antes
+  // aparecia na tela já na primeira tentativa.
+  return status === 502 || status === 503 || status === 504 || status === 429;
+}
+
+/**
+ * O 502/503/504 do proxy chegava à tela como "rpc threads/get failed": jargão, e é a falha
+ * mais comum de uma VPS com o container reiniciando. A frase é nossa e leva o código junto,
+ * então `isConnectionProblem` a reconhece pelo "HTTP 5xx" e a tela mostra o chip de rede.
+ */
+export function unreachableMessage(status: number) {
+  return `Não foi possível alcançar o seu Quibt (HTTP ${status}).`;
 }
 
 function isTransientNetworkError(error: unknown) {
@@ -127,7 +138,12 @@ async function apiFetch(input: string, init: RequestInit): Promise<Response> {
     const timer = setTimeout(() => controller.abort(), MOBILE_REQUEST_TIMEOUT_MS);
     try {
       const res = await fetch(input, { ...init, signal: controller.signal });
-      if (res.ok || !isTransientStatus(res.status) || attempt === MOBILE_RPC_RETRIES) {
+      if (res.ok || !isTransientStatus(res.status)) return res;
+      if (attempt === MOBILE_RPC_RETRIES) {
+        // Devolver o 502 calado fazia cada chamada inventar a própria mensagem a partir de
+        // um corpo HTML que não parseia. Um 5xx que insistiu é falha de rede, e diz isso.
+        if (res.status >= 500) throw new Error(unreachableMessage(res.status));
+        // 429 e afins voltam inteiros: a resposta traz a mensagem que a pessoa precisa ler.
         return res;
       }
       lastError = new Error(`HTTP ${res.status}`);
@@ -404,7 +420,11 @@ export async function rpc<T>(
   };
   if (!res.ok || parsed.error) {
     const payload = parsed.error ?? (isRpcErrorJson(parsed.json) ? parsed.json : undefined);
-    const error = new Error(payload?.message ?? `rpc ${proc} failed`) as Error & {
+    // Sem mensagem no corpo e com status de servidor, quem responde é o proxy (HTML, não
+    // JSON): a pessoa lê que não deu para alcançar o Quibt, não "rpc threads/get failed".
+    const fallback =
+      !res.ok && res.status >= 500 ? unreachableMessage(res.status) : `rpc ${proc} failed`;
+    const error = new Error(payload?.message ?? fallback) as Error & {
       code?: string;
       data?: unknown;
     };
@@ -642,14 +662,21 @@ export type SubscribeOptions = {
   stallMs?: number;
 };
 
+/**
+ * Como o fluxo terminou. `stalled` é o vigia derrubando um socket mudo — o caso do proxy que
+ * bufferiza o SSE, em que reconectar é rotina e não vale assustar a pessoa com o chip;
+ * `closed` é o servidor fechando de verdade; `aborted` é a tela saindo.
+ */
+export type StreamEnd = "aborted" | "closed" | "stalled";
+
 export async function subscribeThread(
   botId: string,
   cursor: number,
   onEvent: (event: ThreadEvent) => void,
   signal: AbortSignal,
   options: SubscribeOptions = {},
-) {
-  await subscribeEvents("threads/subscribe", { botId, cursor }, onEvent, signal, options);
+): Promise<StreamEnd> {
+  return subscribeEvents("threads/subscribe", { botId, cursor }, onEvent, signal, options);
 }
 
 export async function subscribeGroupThread(
@@ -658,8 +685,8 @@ export async function subscribeGroupThread(
   onEvent: (event: ThreadEvent) => void,
   signal: AbortSignal,
   options: SubscribeOptions = {},
-) {
-  await subscribeEvents("botGroups/subscribe", { groupId, cursor }, onEvent, signal, options);
+): Promise<StreamEnd> {
+  return subscribeEvents("botGroups/subscribe", { groupId, cursor }, onEvent, signal, options);
 }
 
 type StreamingFetch = (input: string, init: RequestInit) => Promise<Response>;
@@ -690,7 +717,7 @@ async function subscribeEvents(
   onEvent: (event: ThreadEvent) => void,
   signal: AbortSignal,
   options: SubscribeOptions = {},
-) {
+): Promise<StreamEnd> {
   const streamFetch = await loadStreamingFetch();
   let res: Response;
   try {
@@ -706,7 +733,7 @@ async function subscribeEvents(
       signal,
     });
   } catch (error) {
-    if (signal.aborted) return;
+    if (signal.aborted) return "aborted";
     throw error;
   }
   if (res.status === 401) {
@@ -723,6 +750,7 @@ async function subscribeEvents(
   // keepalive é sinal de vida tanto quanto um evento.
   const stallMs = options.stallMs ?? STREAM_STALL_MS;
   let lastByteAt = Date.now();
+  let wentQuiet = false;
   let stalled: (() => void) | undefined;
   const stall = new Promise<{ done: true; value: undefined }>((resolve) => {
     stalled = () => resolve({ done: true, value: undefined });
@@ -731,6 +759,7 @@ async function subscribeEvents(
     () => {
       if (Date.now() - lastByteAt < stallMs) return;
       clearInterval(watchdog);
+      wentQuiet = true;
       stalled?.();
       // Também cancela a leitura: num socket meio-aberto o `read()` nunca voltaria.
       reader.cancel().catch(() => undefined);
@@ -763,12 +792,14 @@ async function subscribeEvents(
       }
     }
   } catch (error) {
-    if (signal.aborted) return;
+    if (signal.aborted) return "aborted";
     throw error;
   } finally {
     clearInterval(watchdog);
     reader.cancel().catch(() => undefined);
   }
+  if (signal.aborted) return "aborted";
+  return wentQuiet ? "stalled" : "closed";
 }
 
 /**

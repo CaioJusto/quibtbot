@@ -36,6 +36,7 @@ import {
   type MobileMessage,
   mergeThreadSnapshot,
   rpc,
+  type StreamEnd,
   sendToGroup,
   subscribeGroupThread,
   subscribeThread,
@@ -74,9 +75,9 @@ import {
 import { FileViewer, type ViewerFile } from "../lib/file-viewer";
 import {
   connectionChipLabel,
+  createSafetyPoller,
   isConnectionProblem,
-  SAFETY_POLL_TICK_MS,
-  shouldSafetyPoll,
+  RECONNECTING_CHIP_DELAY_MS,
   userFacingError,
 } from "../lib/live-link";
 import {
@@ -193,6 +194,16 @@ export default function Thread() {
   const [pollFailed, setPollFailed] = useState(false);
   /** Se o bot está num run, para o poll de segurança decidir sem reabrir o efeito do fio. */
   const workingRef = useRef(false);
+  /** Mesma ideia para o poll que falhou: insistir é o que apaga o chip. */
+  const pollFailedRef = useRef(false);
+  pollFailedRef.current = pollFailed;
+  /**
+   * Como o fluxo anterior terminou. Um socket que emudeceu (proxy segurando o SSE) volta
+   * em cerca de um segundo e não merece chip; uma queda de verdade avisa na hora.
+   */
+  const streamEnd = useRef<StreamEnd>("closed");
+  /** A reconexão já dura o bastante para valer o aviso na tela. */
+  const [reconnectingSettled, setReconnectingSettled] = useState(true);
   const [bots, setBots] = useState<MobileBot[]>([]);
   const [group, setGroup] = useState<MobileGroup | null>(null);
   const [computerMenu, setComputerMenu] = useState(false);
@@ -220,11 +231,15 @@ export default function Thread() {
     if (groupId) {
       const next = await getGroupThread(groupId);
       setSnap((prev) => mergeThreadSnapshot(prev, next));
+      // Qualquer volta boa apaga o chip: enviar, reagir ou parar também provam que o
+      // servidor responde, e antes só um `reload` limpava — o aviso ficava preso.
+      setPollFailed(false);
       return next;
     }
     if (!botId) return null;
     const next = await rpc<ThreadState>("threads/get", { botId });
     setSnap((prev) => mergeThreadSnapshot(prev, next));
+    setPollFailed(false);
     return next;
   }, [botId, groupId, isDemo]);
 
@@ -319,18 +334,34 @@ export default function Thread() {
     const feed = startLiveFeed({
       onStatus: setFeedStatus,
       connect: async (signal, opened) => {
+        streamEnd.current = "closed";
         const next = await refresh();
         setError(null);
-        setPollFailed(false);
+        // O silêncio conta do fio recém-aberto, não de antes de o app dormir: sem isto,
+        // voltar do segundo plano no meio de um run fazia o poll buscar o retrato inteiro
+        // a cada 2 s enquanto a ferramenta rodava, justamente o tráfego que cortamos.
+        lastEventAt = Date.now();
         if (signal.aborted) return;
         // `opened` é o que leva o estado a "connected"; sem ele o chip nunca saberia que
         // o fio voltou. O stream avisa quando a resposta chegou com corpo.
+        const open = () => {
+          lastEventAt = Date.now();
+          opened();
+        };
         if (groupId) {
-          await subscribeGroupThread(groupId, next?.cursor ?? -1, onEvent, signal, {
-            onOpen: opened,
-          });
+          streamEnd.current = await subscribeGroupThread(
+            groupId,
+            next?.cursor ?? -1,
+            onEvent,
+            signal,
+            {
+              onOpen: open,
+            },
+          );
         } else if (botId) {
-          await subscribeThread(botId, next?.cursor ?? -1, onEvent, signal, { onOpen: opened });
+          streamEnd.current = await subscribeThread(botId, next?.cursor ?? -1, onEvent, signal, {
+            onOpen: open,
+          });
         }
       },
       refresh: reload,
@@ -356,19 +387,14 @@ export default function Thread() {
     // sempre — e cada volta trocava o snapshot: o fio tremia. Agora só entra com o fio caído
     // ou quando o bot trabalha e nada chega há mais de 8 s (proxy antigo segurando o SSE),
     // e o snapshot entra por merge (`mergeThreadSnapshot`), sem apagar o que o fio já mostra.
-    const safetyPoll = setInterval(() => {
-      if (paused) return;
-      if (
-        shouldSafetyPoll({
-          status: feed.status(),
-          working: workingRef.current,
-          lastEventAt,
-          now: Date.now(),
-        })
-      ) {
-        void reload();
-      }
-    }, SAFETY_POLL_TICK_MS);
+    const stopSafetyPoll = createSafetyPoller({
+      status: () => feed.status(),
+      working: () => workingRef.current,
+      lastEventAt: () => lastEventAt,
+      pollFailed: () => pollFailedRef.current,
+      paused: () => paused,
+      reload: () => void reload(),
+    });
     const appState = AppState.addEventListener("change", (state) => {
       if (state === "background" && !paused) {
         paused = true;
@@ -380,12 +406,31 @@ export default function Thread() {
     });
     return () => {
       stopped = true;
-      clearInterval(safetyPoll);
+      stopSafetyPoll();
       cadence.dispose();
       appState.remove();
       feed.stop();
     };
   }, [botId, groupId, isDemo, refresh]);
+
+  /**
+   * Num proxy que bufferiza o SSE o vigia derruba o socket mudo a cada ~16 s e a volta leva
+   * cerca de um segundo: o chip piscava "Reconectando…" com tudo funcionando. Uma queda de
+   * verdade (o servidor fechou, o fluxo nem abriu) continua avisando na hora.
+   */
+  useEffect(() => {
+    if (feedStatus !== "reconnecting") {
+      setReconnectingSettled(true);
+      return;
+    }
+    if (streamEnd.current !== "stalled") {
+      setReconnectingSettled(true);
+      return;
+    }
+    setReconnectingSettled(false);
+    const timer = setTimeout(() => setReconnectingSettled(true), RECONNECTING_CHIP_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [feedStatus]);
 
   const composerToken = activeComposerToken(draft, caret);
   const mentionCandidates = useMemo(
@@ -413,7 +458,9 @@ export default function Thread() {
     ? (snap?.runs ?? []).some((run) => ACTIVE_RUN.includes(run.status))
     : Boolean(snap?.run && ACTIVE_RUN.includes(snap.run.status));
   workingRef.current = working;
-  const connectionChip = isDemo ? null : connectionChipLabel({ status: feedStatus, pollFailed });
+  const connectionChip = isDemo
+    ? null
+    : connectionChipLabel({ status: feedStatus, pollFailed, reconnectingSettled });
 
   async function stopWorkingRuns() {
     if (isDemo || stopping) return;

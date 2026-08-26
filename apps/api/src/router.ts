@@ -1409,12 +1409,15 @@ export function createRouter(deps: RouterDeps) {
         }
         // Cada tecla é prova de que a pessoa ainda está lá: o prazo anda com o uso, em vez de
         // vencer no meio de um formulário. Renovar falhando não pode segurar a tecla.
-        await touchControlLease({ db: deps.prisma, wakeup: deps.wakeup }, desktop, {
+        const touched = await touchControlLease({ db: deps.prisma, wakeup: deps.wakeup }, desktop, {
           botId: bot.id,
           userId: context.actor.userId,
+          use: "input",
         }).catch(() => undefined);
+        // O prazo novo volta junto para a tela poder escrever "controle até HH:mm" certo.
+        const leaseExpiry = { controlLeaseExpiresAt: touched?.expiresAt.toISOString() ?? null };
         const providerRef = desktop ? workspaceProviderRef(desktop) : undefined;
-        if (!computer || !providerRef) return { ok: true as const };
+        if (!computer || !providerRef) return { ok: true as const, ...leaseExpiry };
         const mapped =
           input.kind === "key"
             ? {
@@ -1465,7 +1468,7 @@ export function createRouter(deps: RouterDeps) {
           },
         );
         scheduleComputerSleep(deps.wakeup, bot.id);
-        return { ok: true as const };
+        return { ok: true as const, ...leaseExpiry };
       }),
       /**
        * Ensinar uma tarefa. As duas pontas exigem o controle na mão de quem pede: o
@@ -1636,14 +1639,18 @@ export function createRouter(deps: RouterDeps) {
         const desktop = bot.desktopSession;
         const computer = desktop?.computer;
         const providerRef = desktop ? workspaceProviderRef(desktop) : undefined;
-        // O app manda o heartbeat enquanto a pessoa está com o controle: além de acordar o
-        // container, ele empurra o prazo do lease do próprio dono (só do dono).
-        if (desktop) {
-          await touchControlLease({ db: deps.prisma, wakeup: deps.wakeup }, desktop, {
-            botId: bot.id,
-            userId: context.actor.userId,
-          }).catch(() => undefined);
-        }
+        // O app manda o heartbeat enquanto a pessoa está com o controle. Ele acorda o
+        // container sempre; o prazo do lease só anda com prova de gente — tecla ou clique
+        // desde a última renovação, ou o `atScreen` de quem está dirigindo a tela embutida.
+        // Uma aba deixada aberta batendo sozinha não segura o teclado do bot.
+        const touched = desktop
+          ? await touchControlLease({ db: deps.prisma, wakeup: deps.wakeup }, desktop, {
+              botId: bot.id,
+              userId: context.actor.userId,
+              use: "heartbeat",
+              atScreen: input.atScreen === true,
+            }).catch(() => undefined)
+          : undefined;
         if (desktop?.state === "running" && computer && providerRef) {
           await touchRunningComputer(
             { sandbox: deps.sandbox, wakeup: deps.wakeup },
@@ -1658,7 +1665,10 @@ export function createRouter(deps: RouterDeps) {
             },
           ).catch(() => undefined);
         }
-        return { ok: true as const };
+        return {
+          ok: true as const,
+          controlLeaseExpiresAt: touched?.expiresAt.toISOString() ?? null,
+        };
       }),
       grantFolder: authed.computer.grantFolder.handler(async ({ context, input }) => {
         if (!context.actor.isDeploymentOwner) throw new ORPCError("FORBIDDEN");

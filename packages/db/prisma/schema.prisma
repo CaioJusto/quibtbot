@@ -727,6 +727,7 @@ model DesktopSession {
   controlLeaseId String?
   controlLeaseUserId String?
   controlLeaseExpiresAt DateTime?
+  controlLastInputAt DateTime?
   controlFence   Int          @default(0)
   bootClaimToken String?
   bootClaimedAt  DateTime?

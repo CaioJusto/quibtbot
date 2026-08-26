@@ -1,9 +1,12 @@
-import { describe, expect, it } from "vitest";
+import type { LiveFeedStatus } from "@quibt/core";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CONNECTION_PROBLEM_MESSAGE,
   connectionChipLabel,
+  createSafetyPoller,
   isConnectionProblem,
   QUIET_RUN_MS,
+  SAFETY_POLL_TICK_MS,
   shouldSafetyPoll,
   userFacingError,
 } from "./live-link";
@@ -55,6 +58,28 @@ describe("shouldSafetyPoll", () => {
     );
   });
 
+  it("insiste enquanto um poll falhado deixou o chip 'Reconectando…' na tela", () => {
+    // Fio de pé, bot parado: nada mais chamaria o reload, e o aviso ficava preso para sempre.
+    expect(
+      shouldSafetyPoll({
+        status: "connected",
+        working: false,
+        lastEventAt: now,
+        now,
+        pollFailed: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldSafetyPoll({
+        status: "connected",
+        working: false,
+        lastEventAt: now,
+        now,
+        pollFailed: false,
+      }),
+    ).toBe(false);
+  });
+
   it("aceita um silêncio sob medida", () => {
     expect(
       shouldSafetyPoll({
@@ -65,6 +90,85 @@ describe("shouldSafetyPoll", () => {
         quietMs: 2_000,
       }),
     ).toBe(true);
+  });
+});
+
+describe("createSafetyPoller", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function poller(overrides: {
+    status?: LiveFeedStatus;
+    working?: boolean;
+    lastEventAt?: number;
+    pollFailed?: boolean;
+    paused?: boolean;
+  }) {
+    const state = {
+      status: overrides.status ?? ("connected" as LiveFeedStatus),
+      working: overrides.working ?? false,
+      lastEventAt: overrides.lastEventAt ?? Date.now(),
+      pollFailed: overrides.pollFailed ?? false,
+      paused: overrides.paused ?? false,
+    };
+    const reload = vi.fn();
+    const stop = createSafetyPoller({
+      status: () => state.status,
+      working: () => state.working,
+      lastEventAt: () => state.lastEventAt,
+      pollFailed: () => state.pollFailed,
+      paused: () => state.paused,
+      reload,
+    });
+    return { state, reload, stop };
+  }
+
+  it("fica quieto com o fio de pé e o bot parado", () => {
+    vi.useFakeTimers();
+    const { reload, stop } = poller({ status: "connected", working: false });
+    vi.advanceTimersByTime(10 * SAFETY_POLL_TICK_MS);
+    expect(reload).not.toHaveBeenCalled();
+    stop();
+  });
+
+  it("busca o retrato enquanto o fio está caído e para quando é mandado parar", () => {
+    vi.useFakeTimers();
+    const { state, reload, stop } = poller({ status: "reconnecting" });
+    vi.advanceTimersByTime(SAFETY_POLL_TICK_MS);
+    expect(reload).toHaveBeenCalledTimes(1);
+    state.status = "connected";
+    vi.advanceTimersByTime(3 * SAFETY_POLL_TICK_MS);
+    expect(reload).toHaveBeenCalledTimes(1);
+    state.status = "offline";
+    vi.advanceTimersByTime(SAFETY_POLL_TICK_MS);
+    expect(reload).toHaveBeenCalledTimes(2);
+    stop();
+    vi.advanceTimersByTime(10 * SAFETY_POLL_TICK_MS);
+    expect(reload).toHaveBeenCalledTimes(2);
+  });
+
+  it("num run mudo entra em cena, e cada evento que chega zera o silêncio", () => {
+    vi.useFakeTimers();
+    const { state, reload, stop } = poller({ working: true, lastEventAt: Date.now() });
+    vi.advanceTimersByTime(QUIET_RUN_MS - SAFETY_POLL_TICK_MS);
+    expect(reload).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(SAFETY_POLL_TICK_MS);
+    expect(reload).toHaveBeenCalledTimes(1);
+    // Chegou um `thread.progress`: o fio está entregando, o poll sai de cena.
+    state.lastEventAt = Date.now();
+    reload.mockClear();
+    vi.advanceTimersByTime(QUIET_RUN_MS - SAFETY_POLL_TICK_MS);
+    expect(reload).not.toHaveBeenCalled();
+    stop();
+  });
+
+  it("não polla com o app no fundo, mesmo com o fio caído", () => {
+    vi.useFakeTimers();
+    const { reload, stop } = poller({ status: "offline", paused: true });
+    vi.advanceTimersByTime(5 * SAFETY_POLL_TICK_MS);
+    expect(reload).not.toHaveBeenCalled();
+    stop();
   });
 });
 
@@ -116,5 +220,24 @@ describe("connectionChipLabel", () => {
     expect(connectionChipLabel({ status: "offline", pollFailed: true })).toBe(
       "Sem contato com o seu Quibt",
     );
+  });
+
+  it("segura o aviso enquanto a reconexão é só um socket mudo voltando", () => {
+    // Proxy que bufferiza o SSE: o vigia derruba o socket a cada ~16 s e a volta leva ~1 s.
+    expect(
+      connectionChipLabel({
+        status: "reconnecting",
+        pollFailed: false,
+        reconnectingSettled: false,
+      }),
+    ).toBeNull();
+    // Passados os 3 s, é queda de verdade e vale avisar.
+    expect(
+      connectionChipLabel({ status: "reconnecting", pollFailed: false, reconnectingSettled: true }),
+    ).toBe("Reconectando…");
+    // "Sem contato" não espera nada: o feed já desistiu algumas vezes.
+    expect(
+      connectionChipLabel({ status: "offline", pollFailed: false, reconnectingSettled: false }),
+    ).toBe("Sem contato com o seu Quibt");
   });
 });

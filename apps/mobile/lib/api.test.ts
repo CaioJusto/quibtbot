@@ -250,7 +250,59 @@ describe("mobile rpc", () => {
       }),
     );
     const { rpc } = await import("./api");
-    await expect(rpc("me")).rejects.toThrow("rpc me failed");
+    // Antes saía "rpc me failed": jargão para quem só quer saber que o Quibt não respondeu.
+    await expect(rpc("me")).rejects.toThrow("HTTP 500");
+  });
+
+  it("o 502 do proxy que insiste vira falha de rede, não 'rpc threads/get failed'", async () => {
+    vi.useFakeTimers();
+    const html = {
+      ok: false,
+      status: 502,
+      json: async () => {
+        throw new Error("<html>502 Bad Gateway</html>");
+      },
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(html));
+    const { MOBILE_RPC_RETRY_DELAY_MS, MOBILE_RPC_RETRIES, rpc } = await import("./api");
+    const { isConnectionProblem } = await import("./live-link");
+    const request = rpc("threads/get", { botId: "bot-1" }).catch((error: Error) => error);
+    await vi.advanceTimersByTimeAsync(MOBILE_RPC_RETRY_DELAY_MS * 2 ** MOBILE_RPC_RETRIES);
+    const failure = (await request) as Error;
+    expect(failure.message).toContain("HTTP 502");
+    // É isso que faz a tela mostrar o chip de rede em vez do banner vermelho com jargão.
+    expect(isConnectionProblem(failure.message)).toBe(true);
+    expect(fetch).toHaveBeenCalledTimes(MOBILE_RPC_RETRIES + 1);
+  });
+
+  it("o 504 do gateway é passageiro: tenta de novo antes de desistir", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 504, json: async () => ({}) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ json: { id: "me" } }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const { MOBILE_RPC_RETRY_DELAY_MS, rpc } = await import("./api");
+    const request = rpc("me");
+    await vi.advanceTimersByTimeAsync(MOBILE_RPC_RETRY_DELAY_MS);
+    await expect(request).resolves.toEqual({ id: "me" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("um 429 volta inteiro para a mensagem do servidor chegar à pessoa", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 429,
+        json: async () => ({ json: { message: "Muitas mensagens seguidas. Espere um pouco." } }),
+      }),
+    );
+    const { MOBILE_RPC_RETRY_DELAY_MS, MOBILE_RPC_RETRIES, rpc } = await import("./api");
+    const request = rpc("threads/send", { botId: "bot-1" }).catch((error: Error) => error);
+    await vi.advanceTimersByTimeAsync(MOBILE_RPC_RETRY_DELAY_MS * 2 ** MOBILE_RPC_RETRIES);
+    expect(((await request) as Error).message).toBe("Muitas mensagens seguidas. Espere um pouco.");
   });
 });
 
@@ -315,8 +367,16 @@ describe("mobile thread streaming", () => {
     }));
     const { subscribeThread } = await import("./api");
     const onOpen = vi.fn();
-    await subscribeThread("bot-1", -1, () => undefined, new AbortController().signal, { onOpen });
+    const ended = await subscribeThread(
+      "bot-1",
+      -1,
+      () => undefined,
+      new AbortController().signal,
+      { onOpen },
+    );
     expect(onOpen).toHaveBeenCalledOnce();
+    // O servidor fechou de verdade: a tela pode avisar na hora que está reconectando.
+    expect(ended).toBe("closed");
 
     vi.doMock("expo/fetch", () => ({
       fetch: vi.fn().mockResolvedValue({ ok: false, status: 502, body: null }),
@@ -346,9 +406,14 @@ describe("mobile thread streaming", () => {
     const { subscribeThread } = await import("./api");
     const startedAt = Date.now();
     const abort = new AbortController();
-    await subscribeThread("bot-1", -1, () => undefined, abort.signal, { stallMs: 40 });
+    const ended = await subscribeThread("bot-1", -1, () => undefined, abort.signal, {
+      stallMs: 40,
+    });
     // Terminou sozinho, sem abort e sem erro: para o live-feed é "o servidor fechou".
     expect(abort.signal.aborted).toBe(false);
+    // E diz por quê: um socket mudo é o proxy segurando o SSE, não a rede caindo — a
+    // conversa reconecta calada em vez de piscar "Reconectando…" a cada 16 s.
+    expect(ended).toBe("stalled");
     expect(Date.now() - startedAt).toBeLessThan(2_000);
     expect(cancel).toHaveBeenCalled();
     vi.doUnmock("expo/fetch");
@@ -381,13 +446,14 @@ describe("mobile thread streaming", () => {
     let endedOnItsOwn = false;
     const done = subscribeThread("bot-1", -1, (event) => events.push(event), abort.signal, {
       stallMs: 60,
-    }).then(() => {
+    }).then((reason) => {
       if (!abort.signal.aborted) endedOnItsOwn = true;
+      return reason;
     });
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(endedOnItsOwn).toBe(false);
     abort.abort();
-    await done;
+    expect(await done).toBe("aborted");
     expect(events).toEqual([]);
     if (ticker) clearInterval(ticker);
     vi.doUnmock("expo/fetch");
