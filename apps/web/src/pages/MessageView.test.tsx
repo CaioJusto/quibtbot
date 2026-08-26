@@ -173,6 +173,65 @@ describe("MessageView", () => {
     expect(html).not.toContain("Assumir controle");
   });
 
+  it("abre o PDF dentro do app e deixa a planilha baixar", () => {
+    const pdf = renderToStaticMarkup(
+      <MessageView
+        message={message({
+          blocks: [
+            {
+              kind: "file",
+              artifactId: "art_1",
+              name: "contrato.pdf",
+              mimeType: "application/pdf",
+              size: 400_000,
+            },
+          ],
+        })}
+        onAnswer={() => undefined}
+      />,
+    );
+    expect(pdf).toContain('aria-label="Abrir contrato.pdf"');
+    expect(pdf).not.toContain('download="contrato.pdf"');
+
+    const sheet = renderToStaticMarkup(
+      <MessageView
+        message={message({
+          blocks: [
+            {
+              kind: "file",
+              artifactId: "art_2",
+              name: "vendas.xlsx",
+              mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+              size: 20_000,
+            },
+          ],
+        })}
+        onAnswer={() => undefined}
+      />,
+    );
+    expect(sheet).toContain('download="vendas.xlsx"');
+  });
+
+  it("toca no fio o vídeo e o áudio que chegam com o tipo certo", () => {
+    const html = renderToStaticMarkup(
+      <MessageView
+        message={message({
+          blocks: [
+            {
+              kind: "file",
+              artifactId: "art_3",
+              name: "tela.mp4",
+              mimeType: "video/mp4",
+              size: 900_000,
+            },
+          ],
+        })}
+        onAnswer={() => undefined}
+      />,
+    );
+    expect(html).toContain("<video");
+  });
+
   it("summarizes a multi-agent burst in Portuguese", () => {
     const html = renderToStaticMarkup(
       <BurstSummary

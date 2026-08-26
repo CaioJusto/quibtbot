@@ -40,6 +40,21 @@ export function shortcutFromKey(
   return null;
 }
 
+/**
+ * ⌘F no Mac, Ctrl+F no resto: achar dentro da conversa aberta.
+ *
+ * Vale mesmo com o cursor dentro do campo de escrever — é ali que a mão está quando dá
+ * vontade de reler o que o bot respondeu há vinte recados. O navegador também usa ⌘F, mas
+ * o dele procura só no que está desenhado: numa conversa que rola, isso acha quase nada.
+ */
+export function opensThreadSearch(event: {
+  key: string;
+  metaKey: boolean;
+  ctrlKey: boolean;
+}): boolean {
+  return (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f";
+}
+
 export function starterPrompts(name: string): string[] {
   return [
     `O que você consegue fazer por mim, ${name}?`,
