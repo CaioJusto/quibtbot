@@ -9,7 +9,7 @@ import {
   type DestinationEmulator,
   EncryptedSecretStore,
   ExpoPushProvider,
-  failRunsQueuedWithoutWorker,
+  failRunsWithoutWorker,
   GraphileWakeupDriver,
   InMemoryWakeupDriver,
   isComposioEnabled,
@@ -306,20 +306,24 @@ export async function createApp(overrides: CreateAppOverrides = {}): Promise<App
   }
 
   // Com Graphile, quem executa os runs é o processo do worker: a API só o enxerga pelo
-  // batimento. Com o driver em memória, a própria API é o worker.
+  // batimento. Com o driver em memória, a própria API é o worker. `startedAt` é a carência do
+  // reinício: no Compose o worker só parte depois do healthcheck da API.
   const workerPresence = createWorkerPresenceReader({
     prisma,
     inProcess: wakeupKind !== "graphile",
   });
-  // Reconciliador leve: um run parado na fila sem worker vira erro legível em vez de
-  // silêncio. O reaper do worker não serve para isso — ele roda no worker que não subiu.
+  // Reconciliador leve: um run parado na fila — ou abandonado no meio, com o worker morto —
+  // vira erro legível em vez de silêncio, com a frase no fio e o push no celular. O reaper de
+  // leases não serve para isso: ele roda dentro do worker que não subiu.
   const queueReconciler =
     wakeupKind === "graphile"
       ? setInterval(() => {
-          void failRunsQueuedWithoutWorker({
+          void failRunsWithoutWorker({
             prisma,
             workerSeenAt: () => workerPresence.seenAt(),
-          }).catch((error) => console.error("queued run reconcile", error));
+            apiStartedAt: workerPresence.startedAt,
+            notifications,
+          }).catch((error) => console.error("stranded run reconcile", error));
         }, QUEUED_RUN_RECONCILE_MS)
       : undefined;
   queueReconciler?.unref();
@@ -365,6 +369,7 @@ export async function createApp(overrides: CreateAppOverrides = {}): Promise<App
     dataDir: env.dataDir,
     pool: created.pool,
     workerPresence,
+    notifications,
     onDeploymentSettingsChanged: () => {
       sandbox.invalidate();
       stack.composio?.invalidateKey();
@@ -398,6 +403,7 @@ export async function createApp(overrides: CreateAppOverrides = {}): Promise<App
       nodeEnv: env.nodeEnv,
       screenProxySecret: env.authSecret,
       agentRuntime: env.agentRuntime,
+      signupsEnabled: env.signupsEnabled,
     },
   });
   const rpc = new RPCHandler(router);
@@ -1199,8 +1205,10 @@ function requestClientIp(
 }
 
 /**
- * Whether the deployment's own settings refuse this sign-up. Env stays in force too (better-auth
- * still applies it), so the two gates are an AND: whichever says "no" wins.
+ * Whether the deployment's own settings refuse this sign-up. better-auth applies SIGNUPS_ENABLED
+ * on its own too, so the two gates read as an AND — but they can no longer disagree: quando a
+ * variável está definida, a subida alinha `deployment_settings.signupsEnabled` com ela e a tela
+ * recusa gravar o campo. Sem a variável, vale só o que está salvo (e o padrão salvo é fechado).
  *
  * O cadastro nasce fechado, e o primeiro dono não pode ficar do lado de fora por causa disso:
  * enquanto o deploy não tem dono, o interruptor ainda não vale — quem entra prova o controle

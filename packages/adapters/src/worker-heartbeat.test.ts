@@ -2,7 +2,7 @@ import { QUEUED_RUN_PATIENCE_MS, WORKER_DOWN_MESSAGE, WORKER_GONE_MS } from "@qu
 import type { PrismaClient } from "@quibt/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  failRunsQueuedWithoutWorker,
+  failRunsWithoutWorker,
   lastWorkerSeenAt,
   recordWorkerHeartbeat,
   startWorkerHeartbeat,
@@ -36,10 +36,18 @@ type Where = Record<string, unknown>;
 /** O bastante do casador do Prisma para os filtros que o reconciliador usa. */
 function matches(row: Record<string, unknown>, where: Where): boolean {
   return Object.entries(where).every(([key, condition]) => {
+    if (key === "OR") {
+      const branches = condition as Where[];
+      return branches.some((branch) => matches(row, branch));
+    }
     const value = row[key];
     if (condition && typeof condition === "object" && !(condition instanceof Date)) {
       const filter = condition as Record<string, unknown>;
-      if ("lt" in filter) return (value as Date).getTime() < (filter.lt as Date).getTime();
+      if ("lt" in filter) {
+        if (!(value instanceof Date)) return false;
+        return value.getTime() < (filter.lt as Date).getTime();
+      }
+      if ("in" in filter) return (filter.in as unknown[]).includes(value);
       throw new Error(`filtro sem suporte ${JSON.stringify(filter)}`);
     }
     return value === condition;
@@ -50,6 +58,7 @@ function store(input: { heartbeats?: HeartbeatRow[]; runs?: RunRow[] } = {}) {
   const heartbeats = input.heartbeats ?? [];
   const runs = input.runs ?? [];
   const tasks: Array<Record<string, unknown>> = [];
+  const messages: Array<Record<string, unknown>> = [];
   const events: Array<Record<string, unknown>> = [];
   const prisma = {
     workerHeartbeat: {
@@ -102,6 +111,27 @@ function store(input: { heartbeats?: HeartbeatRow[]; runs?: RunRow[] } = {}) {
         return {};
       }),
     },
+    attempt: {
+      updateMany: vi.fn(async () => ({ count: 1 })),
+    },
+    bot: {
+      findUnique: vi.fn(async () => ({
+        name: "Quib",
+        notifyOnFinish: false,
+        activeConversationId: null,
+      })),
+    },
+    conversation: {
+      findUnique: vi.fn(async () => null),
+      update: vi.fn(async () => ({})),
+    },
+    message: {
+      findFirst: vi.fn(async () => null),
+      create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        messages.push(data);
+        return { ...data, id: `m${messages.length}` };
+      }),
+    },
     event: {
       findFirst: vi.fn(async () => null),
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
@@ -112,7 +142,7 @@ function store(input: { heartbeats?: HeartbeatRow[]; runs?: RunRow[] } = {}) {
     $executeRaw: vi.fn(async () => 1),
     $transaction: vi.fn(async (arg: unknown) => (arg as (tx: unknown) => Promise<unknown>)(prisma)),
   };
-  return { prisma: prisma as unknown as PrismaClient, heartbeats, runs, tasks, events };
+  return { prisma: prisma as unknown as PrismaClient, heartbeats, runs, tasks, events, messages };
 }
 
 function queuedRun(patch: Partial<RunRow> = {}): RunRow {
@@ -220,10 +250,10 @@ describe("startWorkerHeartbeat", () => {
   });
 });
 
-describe("failRunsQueuedWithoutWorker", () => {
+describe("failRunsWithoutWorker", () => {
   it("um run recém-enfileirado fica em paz, mesmo sem worker", async () => {
     const s = store({ runs: [queuedRun({ updatedAt: ago(30_000) })] });
-    expect(await failRunsQueuedWithoutWorker({ prisma: s.prisma }, { now })).toEqual([]);
+    expect(await failRunsWithoutWorker({ prisma: s.prisma }, { now })).toEqual([]);
     expect(s.runs[0]?.status).toBe("queued");
   });
 
@@ -232,7 +262,7 @@ describe("failRunsQueuedWithoutWorker", () => {
       runs: [queuedRun()],
       heartbeats: [{ id: "w", version: "x", startedAt: now, seenAt: ago(WORKER_GONE_MS) }],
     });
-    expect(await failRunsQueuedWithoutWorker({ prisma: s.prisma }, { now })).toEqual([]);
+    expect(await failRunsWithoutWorker({ prisma: s.prisma }, { now })).toEqual([]);
     expect(s.runs[0]?.status).toBe("queued");
     expect(s.events).toHaveLength(0);
   });
@@ -242,14 +272,22 @@ describe("failRunsQueuedWithoutWorker", () => {
       runs: [queuedRun()],
       heartbeats: [{ id: "w", version: "x", startedAt: now, seenAt: ago(WORKER_GONE_MS + 1) }],
     });
-    expect(await failRunsQueuedWithoutWorker({ prisma: s.prisma }, { now })).toEqual(["run-1"]);
+    expect(await failRunsWithoutWorker({ prisma: s.prisma }, { now })).toEqual(["run-1"]);
     expect(s.runs[0]).toMatchObject({
       status: "failed",
       error: WORKER_DOWN_MESSAGE,
       completedAt: now,
     });
     expect(s.tasks).toEqual([{ where: { id: "task-1" }, data: { status: "failed" } }]);
-    expect(s.events).toEqual([
+    expect(s.messages).toEqual([
+      expect.objectContaining({
+        threadId: "thr-1",
+        role: "system",
+        blocks: [{ kind: "text", text: WORKER_DOWN_MESSAGE }],
+      }),
+    ]);
+    expect(s.events.map((event) => event.type)).toEqual(["thread.message.created", "run.failed"]);
+    expect(s.events).toContainEqual(
       expect.objectContaining({
         type: "run.failed",
         runId: "run-1",
@@ -257,7 +295,7 @@ describe("failRunsQueuedWithoutWorker", () => {
         botId: "bot-1",
         payload: { error: WORKER_DOWN_MESSAGE },
       }),
-    ]);
+    );
   });
 
   it("nunca houve worker: a fila inteira do bot pedido vira erro, a dos outros fica", async () => {
@@ -268,18 +306,16 @@ describe("failRunsQueuedWithoutWorker", () => {
         queuedRun({ id: "run-c", botId: "bot-1", status: "running" }),
       ],
     });
-    expect(
-      await failRunsQueuedWithoutWorker({ prisma: s.prisma }, { now, botId: "bot-1" }),
-    ).toEqual(["run-a"]);
+    expect(await failRunsWithoutWorker({ prisma: s.prisma }, { now, botId: "bot-1" })).toEqual([
+      "run-a",
+    ]);
     expect(s.runs.map((row) => row.status)).toEqual(["failed", "queued", "running"]);
   });
 
   it("sem run parado, nem pergunta pelo batimento", async () => {
     const s = store();
     const workerSeenAt = vi.fn(async () => null);
-    expect(await failRunsQueuedWithoutWorker({ prisma: s.prisma, workerSeenAt }, { now })).toEqual(
-      [],
-    );
+    expect(await failRunsWithoutWorker({ prisma: s.prisma, workerSeenAt }, { now })).toEqual([]);
     expect(workerSeenAt).not.toHaveBeenCalled();
   });
 
@@ -291,7 +327,7 @@ describe("failRunsQueuedWithoutWorker", () => {
       (s.runs[0] as RunRow).status = "leased";
       return snapshot;
     });
-    expect(await failRunsQueuedWithoutWorker({ prisma: s.prisma }, { now })).toEqual([]);
+    expect(await failRunsWithoutWorker({ prisma: s.prisma }, { now })).toEqual([]);
     expect(s.runs[0]?.status).toBe("leased");
     expect(s.events).toHaveLength(0);
   });

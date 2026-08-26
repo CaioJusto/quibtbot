@@ -10,13 +10,14 @@ export function WorkerDownNotice({ alive }: { alive: boolean | null }) {
     <div
       role="alert"
       data-testid="worker-down"
-      className="flex shrink-0 items-center gap-2 border-b border-[var(--qb-hairline)] bg-[var(--qb-danger-soft)] px-4 py-2 text-[var(--qb-t-sm)] text-[var(--qb-ink)]"
+      className="flex shrink-0 items-start gap-2 border-b border-[var(--qb-hairline)] bg-[var(--qb-danger-soft)] px-4 py-2 text-[var(--qb-t-sm)] text-[var(--qb-ink)]"
     >
       <span
         aria-hidden="true"
-        className="inline-block h-2 w-2 shrink-0 rounded-full bg-[var(--qb-danger)]"
+        className="mt-[0.4em] inline-block h-2 w-2 shrink-0 rounded-full bg-[var(--qb-danger)]"
       />
-      <span className="min-w-0 truncate">{WORKER_DOWN_MESSAGE}</span>
+      {/* Nada de `truncate`: no celular a parte cortada seria justamente a que diz o que fazer. */}
+      <span className="min-w-0 whitespace-normal">{WORKER_DOWN_MESSAGE}</span>
     </div>
   );
 }
