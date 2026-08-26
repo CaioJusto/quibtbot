@@ -24,9 +24,10 @@ import {
   xdotoolCommand,
 } from "./computer-spec.js";
 import {
-  allocateDisplay,
+  allocateStableDisplay,
+  applyStoppedContainerPolicy,
   assertExecArgv,
-  computerStoppedError,
+  COMPUTER_REVIVED_MESSAGE,
   containerNeedsRestartPolicy,
   containerUsesWorkspaceHome,
   createDockerStreamDemuxer,
@@ -36,7 +37,7 @@ import {
   dockerUnreachableMessage,
   execEnvEntries,
   explainContainerExit,
-  explainReviveFailure,
+  forgetWorkspaceMemory,
   HOME_MODE_REPAIR_COMMAND,
   HOME_NOT_WRITABLE_MESSAGE,
   HOME_REPAIR_COMMAND,
@@ -55,14 +56,20 @@ import {
   parseSessionProbe,
   parseSessionStart,
   publicError,
+  type ReviveDocker,
+  recordSessionDisplayCommand,
   retryableOnce,
+  reviveStoppedContainer,
   SESSION_PROBE_COMMAND,
+  SESSION_RECORDED_PROBE_COMMAND,
+  type StoppedContainerPolicy,
   SupervisorError,
   sandboxTimeoutCommand,
   sessionRuntimeDir,
   sessionUser,
   shouldRemoveSharedContainer,
   splitSentinelSessions,
+  type WorkspaceMemory,
   withGroupWritableUmask,
   withWorkspaceSessionLock,
 } from "./supervisor-core.js";
@@ -88,6 +95,14 @@ const sessions = new Map<
   }
 >();
 const workspaceBoxes = new Map<string, { containerId: string; displays: Map<string, number> }>();
+const workspaceMemory: WorkspaceMemory = { sessions, workspaceBoxes };
+/**
+ * O display que o chamador diz ser deste bot (cabeçalho `x-quibt-display`, vindo da linha
+ * do banco). É preferência, não pedido: cede na hora se outro bot estiver nele. Fica de
+ * fora de `workspaceBoxes` de propósito — uma entrada lá vira "sessão existente" e faria
+ * o supervisor devolver a URL de uma tela que ninguém está servindo.
+ */
+const displayPreferences = new Map<string, number>();
 const ensureComputerImage = retryableOnce(buildComputerImage);
 let supervisorInfo: Docker.ContainerInspectInfo | undefined;
 const supervisorToken = resolveSupervisorToken(process.env);
@@ -224,6 +239,20 @@ app.post("/computers", async (c) => {
 });
 
 /**
+ * `x-quibt-display` é o display que o chamador tem escrito para este bot. Guardado como
+ * preferência antes de qualquer sessão nascer, é ele que devolve ao bot o mesmo desktop
+ * (mesmo uid, mesma pasta 700) depois de o container voltar de um reboot.
+ */
+function rememberRequestedDisplay(c: Context) {
+  const botId = c.req.header("x-quibt-bot-id");
+  const workspaceId = c.req.header("x-quibt-workspace-id");
+  const display = Number(c.req.header("x-quibt-display"));
+  if (!botId || !workspaceId) return;
+  if (!Number.isInteger(display) || display < 1 || display > MAX_WORKSPACE_SESSIONS) return;
+  displayPreferences.set(sessionKey(workspaceId, botId), display);
+}
+
+/**
  * Existir não é ter tela. O boot precisa saber se o container ainda está lá — depois de
  * uma imagem nova, um `docker rm` ou um Docker reiniciado — e nesse momento não há bot
  * nenhum pedindo sessão. A rota da tela exige identidade de bot e respondia 403 a esta
@@ -261,6 +290,9 @@ app.post("/computers/:id/start", async (c) => {
   if (!workspaceId) return c.json({ error: "missing computer identity" }, 403);
   const id = c.req.param("id");
   try {
+    // Antes do revive: religar esquece a memória do workspace, e a preferência precisa
+    // sobreviver a isso para a primeira sessão do bot já nascer no display certo.
+    rememberRequestedDisplay(c);
     const container = docker.getContainer(id);
     const info = await inspectWorkspaceContainer(container);
     if (!isWorkspaceContainer(info, workspaceId)) {
@@ -280,6 +312,7 @@ app.post("/computers/:id/start", async (c) => {
 app.get("/computers/:id", async (c) => {
   const id = c.req.param("id");
   try {
+    rememberRequestedDisplay(c);
     // Pedir a tela é o momento de abrir a sessão do bot, não de recusar por não existir.
     const found = await managedSession(
       id,
@@ -301,7 +334,9 @@ app.get("/computers/:id", async (c) => {
       revived: found.revived,
     });
   } catch (error) {
-    return failure(c, error, "inspect", 404);
+    // Sem remapear 500 para 404: "session not found" já nasce 404, e engolir o resto
+    // fazia a tela que não abriu virar "não existe" — o boot devolvia a URL velha, morta.
+    return failure(c, error, "inspect");
   }
 });
 
@@ -350,8 +385,9 @@ app.post("/computers/:id/exec", async (c) => {
           ? `${output.stderr}${output.stderr && !output.stderr.endsWith("\n") ? "\n" : ""}command timed out after ${timeoutMs} ms\n`
           : output.stderr,
       code,
-      // O bot precisa saber que as janelas de antes se foram; o adapter põe isso no stderr.
-      ...(revived ? { revived: true } : {}),
+      // O bot precisa saber que as janelas de antes se foram; o adapter põe isso no
+      // stderr. A frase vem daqui para não haver duas cópias dela em pacotes diferentes.
+      ...(revived ? { revived: true, revivedMessage: COMPUTER_REVIVED_MESSAGE } : {}),
     });
   } catch (error) {
     const { status, message, code: errorCode } = publicError(normalizeError(error));
@@ -399,10 +435,15 @@ app.post("/computers/:id/input", async (c) => {
   try {
     const body = inputSchema.parse(await readJson(c.req.raw));
     const input = toSandboxInput(body.input);
+    rememberRequestedDisplay(c);
+    // Como no exec: um container parado é religado, não recusado. E o clique precisa de
+    // tela — depois do reboot a sessão gráfica não voltou sozinha —, então ela é aberta
+    // aqui em vez de o bot receber "session not found".
     const found = await managedSession(
       id,
       c.req.header("x-quibt-bot-id"),
       c.req.header("x-quibt-workspace-id"),
+      { ensureSession: true, stopped: "revive" },
     );
     const session = requireSession(found.session);
     const exec = await found.container.exec({
@@ -762,42 +803,29 @@ async function ensureWorkspaceRestartPolicy(
 }
 
 /**
- * Religa um container de workspace parado, uma vez por workspace de cada vez (a fila é
- * a mesma das sessões: dois bots acordando juntos não disputam o `start`). O que a
- * memória guardava daquela caixa — displays, telas — morreu com o container e é
- * esquecido; a próxima sessão redescobre o que estiver vivo, como após um restart do
- * supervisor. Depois do `start` valem as mesmas conferências do provision: `/run` é
- * tmpfs e nasce vazio de novo.
+ * O container do Docker visto como o revive precisa dele. A decisão — quem liga, quem
+ * espera na fila, o que a memória esquece — mora em `supervisor-core.ts`, onde entra em
+ * teste; aqui fica só o que fala com o daemon de verdade.
  */
-async function reviveWorkspaceContainer(container: Docker.Container, workspaceId: string) {
-  return withWorkspaceSessionLock(workspaceId, async () => {
-    const current = await inspectWorkspaceContainer(container);
-    if (current.State.Running) return { info: current, revived: false };
-    console.log(
-      `workspace container ${container.id.slice(0, 12)} is ${current.State.Status}; starting it again`,
-    );
-    forgetWorkspace(workspaceId, container.id);
-    await ensureWorkspaceRestartPolicy(container, current);
-    let info: Docker.ContainerInspectInfo;
-    try {
-      info = await startWorkspaceContainer(container);
-    } catch (error) {
-      throw explainReviveFailure(error);
-    }
-    await ensureHomeWritable(container);
-    await ensureSharedHomePermissions(container);
-    await assertPrivateDesktopRoot(container);
-    return { info, revived: true };
-  });
+function reviveDocker(container: Docker.Container): ReviveDocker<Docker.ContainerInspectInfo> {
+  return {
+    id: container.id,
+    inspect: () => inspectWorkspaceContainer(container),
+    start: async (info) => {
+      await ensureWorkspaceRestartPolicy(container, info);
+      return startWorkspaceContainer(container);
+    },
+    verify: async () => {
+      await ensureHomeWritable(container);
+      await ensureSharedHomePermissions(container);
+      await assertPrivateDesktopRoot(container);
+    },
+  };
 }
 
-/**
- * O que fazer com um container que existe mas não roda: `revive` liga antes de seguir
- * (exec, abrir a tela); `allow` devolve como está, sem sessão, para quem só quer parar ou
- * apagar; `reject` (padrão) recusa com `computer-stopped` — digitar numa tela parada não
- * tem sentido.
- */
-type StoppedContainerPolicy = "revive" | "allow" | "reject";
+function reviveWorkspaceContainer(container: Docker.Container, workspaceId: string) {
+  return reviveStoppedContainer(reviveDocker(container), workspaceId, workspaceMemory);
+}
 
 async function managedSession(
   id: string,
@@ -817,17 +845,16 @@ async function managedSession(
   }
   let revived = false;
   if (!info.State.Running) {
-    const policy = opts.stopped ?? "reject";
-    if (policy === "revive") {
-      const result = await reviveWorkspaceContainer(container, workspaceId);
-      info = result.info;
-      revived = result.revived;
-    } else {
-      // Parado: o que a memória guarda desta caixa é de antes de parar.
-      forgetWorkspace(workspaceId, container.id);
-      if (policy === "reject") throw computerStoppedError();
-      return { container, info, session: undefined, revived };
-    }
+    const decided = await applyStoppedContainerPolicy(
+      opts.stopped ?? "reject",
+      reviveDocker(container),
+      info,
+      workspaceId,
+      workspaceMemory,
+    );
+    info = decided.info;
+    revived = decided.revived;
+    if (decided.halted) return { container, info, session: undefined, revived };
   }
   const key = sessionKey(workspaceId, botId);
   let session = sessions.get(key);
@@ -995,12 +1022,18 @@ async function startBotSession(
       sessionUser(staleDisplay),
     ).catch(() => undefined);
   }
-  const requested = allocateDisplay(box.displays, botId, requestedDisplay);
+  // Sem estas duas lembranças o display seria realocado por ordem de chegada depois de um
+  // reboot, e a sessão morreria no `chmod 700` da pasta de outro uid.
+  const recorded = await probeRecordedDisplays(container);
+  const requested = allocateStableDisplay(box.displays, botId, {
+    requested: requestedDisplay,
+    preferred: displayPreferences.get(sessionKey(workspaceId, botId)),
+    recorded,
+  });
   box.displays.set(botId, requested);
   workspaceBoxes.set(workspaceId, box);
   // Validate the identifier before using it as a path component below.
   novncEnsureCommand(botId);
-  const runtimeDir = sessionRuntimeDir(requested);
   await prepareSessionDirs(container, botId, requested);
   const started = await execIn(
     container,
@@ -1013,6 +1046,13 @@ async function startBotSession(
   const display = parseSessionStart(started, requested);
   box.displays.set(botId, display);
   workspaceBoxes.set(workspaceId, box);
+  // Escrito depois do `start`, com o display que o container realmente serve: é o que faz
+  // este bot voltar ao mesmo desktop — mesmo uid, mesma pasta — no próximo boot.
+  await execIn(container, recordSessionDisplayCommand(botId, display), "0").catch(
+    (error: unknown) => {
+      console.warn(`display record failed for ${botId}`, error);
+    },
+  );
   const info = await container.inspect();
   const screenUrl = await publishedSessionUrl(container, display, info);
   await ensureNovnc(container, botId, display);
@@ -1340,6 +1380,18 @@ async function assertPrivateDesktopRoot(container: Docker.Container) {
   );
 }
 
+/**
+ * O display que cada bot tem gravado, com a sessão viva ou morta. Como root: a pasta das
+ * lembranças é dele, e a do bot é 700 do dono — lá dentro ninguém mais entra.
+ * `undefined` quando o probe falhou; uma leitura sem resposta não vira reserva.
+ */
+async function probeRecordedDisplays(container: Docker.Container) {
+  const output = await execIn(container, SESSION_RECORDED_PROBE_COMMAND, "0").catch(
+    () => undefined,
+  );
+  return output === undefined ? undefined : parseSessionProbe(output);
+}
+
 /** Lists the sessions the container is really running; `undefined` when the probe failed. */
 async function probeSessions(container: Docker.Container) {
   // Como o usuário do computador (1000), que é o grupo dono dos desktops. Root não
@@ -1358,12 +1410,7 @@ function dropSession(workspaceId: string, botId: string) {
 }
 
 function forgetWorkspace(workspaceId: string, containerId: string) {
-  workspaceBoxes.delete(workspaceId);
-  for (const [key, session] of sessions) {
-    if (session.workspaceId === workspaceId || session.containerId === containerId) {
-      sessions.delete(key);
-    }
-  }
+  forgetWorkspaceMemory(workspaceMemory, workspaceId, containerId);
 }
 
 function toSandboxInput(input: {

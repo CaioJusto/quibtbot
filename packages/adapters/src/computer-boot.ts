@@ -96,6 +96,10 @@ type WorkspaceEnsureContext = AdapterContext & {
   traceId: string;
 };
 
+/** Religou, mas a tela não voltou: a frase precisa passar por `publicComputerBootMessage`. */
+export const COMPUTER_SCREEN_MISSING_MESSAGE =
+  "O computador religou, mas a tela não abriu. Tente de novo em instantes.";
+
 /**
  * Asks the provider where a running session's screen is and writes the answer down.
  *
@@ -119,12 +123,19 @@ export async function ensureDesktopScreenUrl(
    * para a porta de outro bot, ou para uma que ninguém mais serve: a tela abria preta
    * e ficava piscando, com o controle na mão. Ao abrir a tela e ao assumir o controle
    * — que são momentos raros — vale perguntar ao provedor e corrigir o que está escrito.
+   *
+   * `required` é para depois de religar o container: `/run` é tmpfs, então a senha do VNC
+   * e a porta publicada do noVNC são outras, e o endereço guardado está garantidamente
+   * morto. Repeti-lo entregava "ligado" com uma tela preta que ninguém tentava de novo.
    */
-  options?: { refresh?: boolean },
+  options?: { refresh?: boolean; required?: boolean },
 ): Promise<string | undefined> {
   if (session.screenUrl && !options?.refresh) return session.screenUrl;
   const providerRef = workspaceProviderRef(session) ?? session.providerRef;
-  if (!providerRef) return undefined;
+  if (!providerRef) {
+    if (options?.required) throw new Error(COMPUTER_SCREEN_MISSING_MESSAGE);
+    return undefined;
+  }
   // A provider that cannot answer must not fail the boot that asked: the caller ends up where
   // it already was, with no screen recorded, and can try again.
   const screen = await (async () => {
@@ -140,11 +151,25 @@ export async function ensureDesktopScreenUrl(
         { view: "stream" },
         { ...context, botId: session.botId },
       );
-    } catch {
+    } catch (error) {
+      if (options?.required) throw error;
       return null;
     }
   })();
-  if (!screen?.url) return session.screenUrl ?? undefined;
+  if (!screen?.url) {
+    if (options?.required) {
+      // Nada de servir o endereço velho: melhor apagá-lo e falhar com o motivo do
+      // supervisor do que a pessoa clicar em "Ligar", ler "ligado" e ver preto.
+      await deps.prisma.desktopSession
+        .updateMany({
+          where: { botId: session.botId, state: "running" },
+          data: { screenUrl: null },
+        })
+        .catch(() => undefined);
+      throw new Error(screen?.reason?.trim() || COMPUTER_SCREEN_MISSING_MESSAGE);
+    }
+    return session.screenUrl ?? undefined;
+  }
   if (screen.url === session.screenUrl) return screen.url;
   try {
     await deps.prisma.desktopSession.updateMany({
@@ -592,19 +617,22 @@ export async function bootComputer(
   });
   if (!existing) throw new Error("Bot is missing its desktop session");
 
+  // O container acabou de ser religado por este boot: a tela de antes morreu com ele.
+  let justRevived = false;
   if (existing.state === "running" && workspaceProviderRef(existing)) {
     const presence = await workspaceComputerPresence(deps, existing, context);
     // Parado (reboot, `docker stop`) não é sumido: o container está lá, com a casa do bot
     // dentro. Religa no lugar e a linha continua "running" — o atalho abaixo só pede a
     // tela de novo, que o supervisor reabre. Nada de esquecer a sessão nem provisionar.
-    const gone =
-      presence === "missing" ||
-      (presence === "stopped" &&
-        !(await reviveStoppedWorkspaceComputer(deps, computerRefFromSession(existing), {
-          ...context,
-          botId: existing.botId,
-        })));
+    if (presence === "stopped") {
+      justRevived = await reviveStoppedWorkspaceComputer(deps, computerRefFromSession(existing), {
+        ...context,
+        botId: existing.botId,
+      });
+    }
+    const gone = presence === "missing" || (presence === "stopped" && !justRevived);
     if (gone) {
+      justRevived = false;
       // O container sumiu por baixo do banco (imagem nova, `rm` manual), ou parou e não
       // deu para religar este mesmo: sem isto cada comando voltava "computer not found"
       // até o sono por ociosidade zerar a linha. Esquece o que está escrito e segue pelo
@@ -623,7 +651,10 @@ export async function bootComputer(
     // Already up, but not necessarily addressable: a row can reach `running` without a screen
     // URL. Booting is the moment to repair that, otherwise the caller opens the computer and
     // finds nothing to connect to.
-    const screenUrl = await ensureDesktopScreenUrl(deps, existing, context, { refresh: true });
+    const screenUrl = await ensureDesktopScreenUrl(deps, existing, context, {
+      refresh: true,
+      required: justRevived,
+    });
     return { ...computerRefFromSession(existing), screenUrl };
   }
 

@@ -53,8 +53,14 @@ export function publicError(error: unknown): {
 export const DOCKER_DOWN_MESSAGE =
   "O Docker não está respondendo: abra o Docker (ou o serviço dele) e tente de novo.";
 
+/**
+ * Quem lê esta frase é o bot, não a pessoa: ela sobe pelo stderr do exec e pela recusa
+ * do clique. "Toque em Ligar" não serve — o bot não tem botão nenhum; o que ele tem é o
+ * terminal. A frase para a pessoa mora no adapter (`computerErrorMessage`, audiência
+ * "person"), porque só lá se sabe que a tela do dono está do outro lado.
+ */
 export const COMPUTER_STOPPED_MESSAGE =
-  "O computador está desligado. Abra a tela do bot ou mande um comando para religar.";
+  "O computador estava desligado; rode um comando de terminal para religá-lo e abra a tela de novo antes de clicar.";
 
 export const COMPUTER_REVIVED_MESSAGE =
   "O computador estava desligado e foi religado. As janelas abertas antes se perderam; os arquivos da pasta de casa continuam lá.";
@@ -137,6 +143,100 @@ export function containerNeedsRestartPolicy(info: {
   HostConfig?: { RestartPolicy?: { Name?: string } | undefined };
 }): boolean {
   return info.HostConfig?.RestartPolicy?.Name !== WORKSPACE_RESTART_POLICY;
+}
+
+// ── Religar um container parado ──────────────────────────────────────────────
+// Mora aqui, e não no `index.ts`, porque o `index.ts` abre o Docker e escuta uma porta só
+// de ser importado: nada dele entra num teste. O Docker é injetado, e as duas memórias do
+// supervisor (sessões e caixas) vêm por parâmetro.
+
+/** O mínimo que o revive precisa saber do container. */
+export type ContainerRunState = { State: { Running: boolean; Status?: string } };
+
+export interface ReviveDocker<TInfo extends ContainerRunState = ContainerRunState> {
+  /** Só para o log. */
+  readonly id: string;
+  /** `inspect` que já separou "não existe" (404) de "o Docker não respondeu" (503). */
+  inspect(): Promise<TInfo>;
+  /** Liga o container e devolve o estado depois; adota a política de reinício no caminho. */
+  start(info: TInfo): Promise<TInfo>;
+  /** Refaz as conferências do provision: `/run` é tmpfs e nasce vazio a cada boot. */
+  verify(): Promise<void>;
+}
+
+/** As duas memórias do supervisor, para o revive poder esquecê-las. */
+export interface WorkspaceMemory {
+  sessions: Map<string, { containerId: string; workspaceId: string }>;
+  workspaceBoxes: Map<string, { containerId: string; displays: Map<string, number> }>;
+}
+
+/** Tudo que o supervisor guardava daquela caixa morreu com o container. */
+export function forgetWorkspaceMemory(
+  memory: WorkspaceMemory,
+  workspaceId: string,
+  containerId: string,
+): void {
+  memory.workspaceBoxes.delete(workspaceId);
+  for (const [key, session] of memory.sessions) {
+    if (session.workspaceId === workspaceId || session.containerId === containerId) {
+      memory.sessions.delete(key);
+    }
+  }
+}
+
+/**
+ * Religa um container de workspace parado, uma vez por workspace de cada vez (a fila é a
+ * mesma das sessões: dois bots acordando juntos não disputam o `start`). Quem chega
+ * depois encontra o container já de pé e recebe `revived:false`, sem um segundo `start`.
+ */
+export function reviveStoppedContainer<TInfo extends ContainerRunState>(
+  docker: ReviveDocker<TInfo>,
+  workspaceId: string,
+  memory: WorkspaceMemory,
+): Promise<{ info: TInfo; revived: boolean }> {
+  return withWorkspaceSessionLock(workspaceId, async () => {
+    const current = await docker.inspect();
+    if (current.State.Running) return { info: current, revived: false };
+    console.log(
+      `workspace container ${docker.id.slice(0, 12)} is ${current.State.Status ?? "stopped"}; starting it again`,
+    );
+    forgetWorkspaceMemory(memory, workspaceId, docker.id);
+    let info: TInfo;
+    try {
+      info = await docker.start(current);
+    } catch (error) {
+      // Com o Docker fora, o `start` nem chega ao daemon: o recado é "abra o Docker",
+      // nunca um ECONNREFUSED cru vindo de dentro do supervisor.
+      throw explainReviveFailure(isDockerUnreachable(error) ? dockerDownError() : error);
+    }
+    await docker.verify();
+    return { info, revived: true };
+  });
+}
+
+/**
+ * O que fazer com um container que existe mas não roda: `revive` liga antes de seguir
+ * (exec, abrir a tela, clicar); `allow` devolve como está, sem sessão, para quem só quer
+ * parar ou apagar; `reject` recusa com `computer-stopped`.
+ */
+export type StoppedContainerPolicy = "revive" | "allow" | "reject";
+
+/** `halted` significa "devolva o container como está, sem sessão". */
+export async function applyStoppedContainerPolicy<TInfo extends ContainerRunState>(
+  policy: StoppedContainerPolicy,
+  docker: ReviveDocker<TInfo>,
+  info: TInfo,
+  workspaceId: string,
+  memory: WorkspaceMemory,
+): Promise<{ info: TInfo; revived: boolean; halted: boolean }> {
+  if (policy === "revive") {
+    const result = await reviveStoppedContainer(docker, workspaceId, memory);
+    return { ...result, halted: false };
+  }
+  // Parado: o que a memória guarda desta caixa é de antes de parar.
+  forgetWorkspaceMemory(memory, workspaceId, docker.id);
+  if (policy === "reject") throw computerStoppedError();
+  return { info, revived: false, halted: true };
 }
 
 /**
@@ -360,6 +460,55 @@ export const SESSION_PROBE_COMMAND = [
   // pode ser de outro processo. Só um Xvfb vivo naquele pid conta como sessão.
   'for d in /quibt-desktops/*/; do [ -f "$d/session.pid" ] || continue; p=$(cat "$d/session.pid" 2>/dev/null); [ -n "$p" ] || continue; kill -0 "$p" 2>/dev/null || continue; [ "$(cat /proc/$p/comm 2>/dev/null)" = Xvfb ] || continue; echo "$(basename "$d") $(cat "$d/display" 2>/dev/null)"; done',
 ];
+
+/**
+ * Onde fica escrito, por bot, o display que é dele.
+ *
+ * O display não é detalhe de runtime: o uid da sessão é `10000+display` e
+ * `/quibt-desktops/<bot>` nasce 700 desse uid. Depois de um reboot o container volta com
+ * a memória do supervisor vazia; realocar por ordem de chegada dava ao bot B o display do
+ * bot A, o `chmod 700` da pasta do outro falha e nenhum dos dois volta a ter tela.
+ *
+ * O `quibt-session` grava `<dir>/display` dentro da pasta do bot, mas ninguém consegue ler
+ * de lá: a pasta é 700 do dono e o computador roda com `CapDrop: ALL`, então nem o root
+ * atravessa modo de arquivo (é o mesmo motivo pelo qual a senha do VNC só é lida como o
+ * dono da sessão). Por isso a lembrança mora ao lado, numa pasta do root — legível por
+ * qualquer sessão, gravável só pelo supervisor — dentro do mesmo bind mount, que sobrevive
+ * ao reboot. O ponto no nome a esconde do glob que procura sessões vivas, que não pega
+ * nomes começados por ponto.
+ */
+export const SESSION_DISPLAY_RECORD_DIR = "/quibt-desktops/.displays";
+
+/** Lista `<botId> <display>` do que está gravado, com a sessão viva ou morta. Roda como root. */
+export const SESSION_RECORDED_PROBE_COMMAND = [
+  "bash",
+  "-lc",
+  `for f in ${SESSION_DISPLAY_RECORD_DIR}/*; do [ -f "$f" ] || continue; echo "$(basename "$f") $(cat "$f" 2>/dev/null)"; done`,
+];
+
+/** Grava o display deste bot para o próximo boot do container. Roda como root. */
+export function recordSessionDisplayCommand(botId: string, display: number): string[] {
+  if (!SESSION_BOT_ID.test(botId)) throw new SupervisorError("invalid session id");
+  sessionUser(display);
+  return [
+    "bash",
+    "-lc",
+    [
+      `dir="${SESSION_DISPLAY_RECORD_DIR}"`,
+      // A raiz é 1777 (sticky): qualquer sessão cria coisas ali, mas só o dono apaga a
+      // dele. A pasta das lembranças nasce do root e fica 755 — todos leem, ninguém mais
+      // escreve. O `test ! -L` fecha a única janela: um bot que corresse na frente e
+      // deixasse um link no lugar faria o root escrever do outro lado dele.
+      'test ! -L "$dir" || exit 1',
+      'mkdir -p "$dir" && chmod 755 "$dir"',
+      'test ! -L "$dir/$1"',
+      'printf %s "$2" > "$dir/$1"',
+    ].join("\n"),
+    "quibt-display-record",
+    botId,
+    String(display),
+  ];
+}
 
 /**
  * Can the container's own user write its home?
@@ -586,6 +735,53 @@ export function allocateDisplay(
     if (!taken.has(display)) return display;
   }
   throw new SupervisorError("no free graphical sessions", 409);
+}
+
+/**
+ * O display de um bot tem de ser o mesmo depois de religar o container.
+ *
+ * `allocateDisplay` só conhece a memória do processo, que um reboot zera: o primeiro bot
+ * a acordar levava o display 1, mesmo que ele fosse de outro, e a sessão morria no
+ * `chmod 700` de uma pasta que pertence a outro uid. Aqui entram duas lembranças que
+ * sobrevivem ao reboot — a preferida (o que o banco guarda para este bot, via cabeçalho
+ * `x-quibt-display`) e a gravada em disco (`/quibt-desktops/<bot>/display`) — sem nunca
+ * roubar um display de quem está vivo.
+ *
+ * Ordem: pedido explícito do provision (falha com 409 se estiver ocupado) → preferido →
+ * gravado → o menor livre que não seja reserva de outro bot → o menor livre. O último
+ * degrau existe para um workspace com mais bots do que displays não travar em ninguém.
+ */
+export function allocateStableDisplay(
+  used: Map<string, number>,
+  botId: string,
+  options: {
+    /** Display pedido no corpo do provision: continua sendo um pedido firme. */
+    requested?: number;
+    /** O que o chamador lembra deste bot (linha do banco). Cede se estiver ocupado. */
+    preferred?: number;
+    /** `<botId> <display>` gravado no disco do container, vivo ou morto. */
+    recorded?: Map<string, number>;
+  } = {},
+): number {
+  const current = used.get(botId);
+  if (current) return current;
+  if (options.requested) return allocateDisplay(used, botId, options.requested);
+  const taken = new Set([...used].filter(([id]) => id !== botId).map(([, display]) => display));
+  const isFree = (display: number | undefined): display is number =>
+    Number.isInteger(display) &&
+    (display as number) >= 1 &&
+    (display as number) <= MAX_WORKSPACE_SESSIONS &&
+    !taken.has(display as number);
+  if (isFree(options.preferred)) return options.preferred;
+  const recorded = options.recorded;
+  if (isFree(recorded?.get(botId))) return recorded!.get(botId)!;
+  const reserved = new Set(
+    [...(recorded ?? [])].filter(([id]) => id !== botId).map(([, display]) => display),
+  );
+  for (let display = 1; display <= MAX_WORKSPACE_SESSIONS; display += 1) {
+    if (!taken.has(display) && !reserved.has(display)) return display;
+  }
+  return allocateDisplay(used, botId);
 }
 
 /**
