@@ -4,7 +4,7 @@ import type { ConnectorTool } from "@quibt/adapter-kit";
 import { CAPABILITY_LIMITS } from "@quibt/contracts";
 
 const MAX_MCP_RESPONSE_BYTES = 1024 * 1024;
-type ResolveHost = (hostname: string) => Promise<Array<{ address: string }>>;
+export type ResolveHost = (hostname: string) => Promise<Array<{ address: string }>>;
 
 const resolveHost: ResolveHost = async (hostname) =>
   dnsLookup(hostname, { all: true, verbatim: true });
@@ -45,22 +45,31 @@ export async function validateMcpEndpoint(
   source: string,
   resolver: ResolveHost = resolveHost,
 ): Promise<URL> {
+  return validatePublicHttpsEndpoint(source, "MCP endpoint", resolver);
+}
+
+/** Shared outbound-network boundary for MCP and first-party HTTP adapters. */
+export async function validatePublicHttpsEndpoint(
+  source: string,
+  label: string,
+  resolver: ResolveHost = resolveHost,
+): Promise<URL> {
   let url: URL;
   try {
     url = new URL(source);
   } catch {
-    throw new Error("MCP endpoint must be a valid HTTPS URL");
+    throw new Error(`${label} must be a valid HTTPS URL`);
   }
   if (url.protocol !== "https:" || url.username || url.password) {
-    throw new Error("MCP endpoint must use HTTPS without embedded credentials");
+    throw new Error(`${label} must use HTTPS without embedded credentials`);
   }
   const hostname = url.hostname.toLowerCase();
   if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local")) {
-    throw new Error("MCP endpoint cannot target a local network address");
+    throw new Error(`${label} cannot target a local network address`);
   }
   const addresses = isIP(hostname) ? [{ address: hostname }] : await resolver(hostname);
   if (!addresses.length || addresses.some(({ address }) => isPrivateMcpAddress(address))) {
-    throw new Error("MCP endpoint cannot target a private or reserved network address");
+    throw new Error(`${label} cannot target a private or reserved network address`);
   }
   return url;
 }

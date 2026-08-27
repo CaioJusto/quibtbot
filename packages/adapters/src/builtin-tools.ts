@@ -107,6 +107,18 @@ export const builtinAgentTools: ConnectorTool[] = [
     },
   },
   {
+    name: "web_fetch",
+    description:
+      "Fetch a public HTTPS page directly and return its final URL, title, and readable text. Use it for research and reading; it cannot access private networks or authenticated URLs.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "A public HTTPS page without credentials." },
+      },
+      required: ["url"],
+    },
+  },
+  {
     name: "request_takeover",
     description:
       "Ask the user to take over the computer screen for login or human judgment. Protected input stays off the thread.",
