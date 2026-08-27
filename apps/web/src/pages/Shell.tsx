@@ -7,6 +7,8 @@ import type {
   Connection,
   GroupThreadSnapshot,
   Routine,
+  RoutineRun,
+  ThreadMessage,
   ThreadSnapshot,
 } from "@quibt/contracts";
 import type { LiveFeedStatus } from "@quibt/core";
@@ -47,7 +49,12 @@ import { applyGroupThreadEvent, applyThreadEvent } from "../lib/apply-thread-eve
 import { type Attachment, attachmentTooBig, uploadAttachment } from "../lib/attachments";
 import { authClient } from "../lib/auth";
 import { bootStatusLine, bootSteps } from "../lib/boot-steps";
-import { buildPaletteItems, opensPalette, type PaletteItem } from "../lib/command-palette";
+import {
+  buildPaletteItems,
+  messagePaletteItems,
+  opensPalette,
+  type PaletteItem,
+} from "../lib/command-palette";
 import {
   type ComposerDraft,
   conversationKey,
@@ -58,7 +65,7 @@ import {
   writeStoredDrafts,
 } from "../lib/composer-drafts";
 import { filesFromTransfer, transferHasFiles } from "../lib/composer-drop";
-import { dayStamps } from "../lib/day-stamps";
+import { dayStamps, inboxTimeLabel } from "../lib/day-stamps";
 import { desktopBridge, trafficLightInset } from "../lib/desktop";
 import {
   opensThreadSearch,
@@ -95,6 +102,16 @@ import {
   shouldFetchScreenUrl,
 } from "../lib/screen-url";
 import { groupAuthor, peerAuthor } from "../lib/thread-authors";
+import {
+  HISTORY_PAGE_LIMIT,
+  lastUserMessageSeq,
+  mergeThreadMessages,
+  oldestMessageSeq,
+  readThreadCursors,
+  type UnreadDivider,
+  unreadDivider,
+  writeThreadCursor,
+} from "../lib/thread-history";
 import { stepMatch, threadMatches } from "../lib/thread-search";
 import type { TranscribeStatus } from "../lib/transcribe";
 import { isAnsweringMessage } from "../lib/turn-start";
@@ -153,6 +170,21 @@ function emptyRoutineDraft() {
   };
 }
 
+function routineRunStatusLabel(status: RoutineRun["status"]): string {
+  if (status === "completed") return "Concluída";
+  if (status === "failed") return "Falhou";
+  if (status === "cancelled") return "Cancelada";
+  if (status === "waiting_input" || status === "waiting_takeover") return "Esperando você";
+  if (status === "queued") return "Na fila";
+  return "Rodando";
+}
+
+function routineRunBadgeClass(status: RoutineRun["status"]): string {
+  if (status === "failed") return "bg-[var(--qb-danger-soft)] text-[var(--qb-danger)]";
+  if (status === "completed") return "bg-[var(--qb-accent-soft)] text-[var(--qb-accent)]";
+  return "bg-[var(--qb-surface-2)] text-[var(--qb-muted)]";
+}
+
 /** Idempotency key for a send; `crypto.randomUUID` is missing on plain-http LAN origins. */
 function newClientNonce() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -190,6 +222,11 @@ export function ShellPage() {
   const [mentionIndex, setMentionIndex] = useState(0);
   const [panel, setPanel] = useState<Panel>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const searchPaletteMessages = useCallback(
+    async (value: string) =>
+      messagePaletteItems(await rpc.threads.search({ query: value, limit: 8 })),
+    [],
+  );
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState("");
   const [findIndex, setFindIndex] = useState(0);
@@ -214,6 +251,21 @@ export function ShellPage() {
     active: true,
   });
   const [routineSaving, setRoutineSaving] = useState(false);
+  const [routineRuns, setRoutineRuns] = useState<RoutineRun[]>([]);
+  const [routineRunsLoading, setRoutineRunsLoading] = useState(false);
+  const [routineRunsError, setRoutineRunsError] = useState<string | null>(null);
+  const [routineRunsVersion, setRoutineRunsVersion] = useState(0);
+  /** Páginas antigas vivem fora do snapshot vivo: um poll não pode fazê-las sumir. */
+  const [olderMessages, setOlderMessages] = useState<ThreadMessage[]>([]);
+  const [historyHasMore, setHistoryHasMore] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [newMessagesDivider, setNewMessagesDivider] = useState<UnreadDivider | null>(null);
+  const historyOpenedKey = useRef<string | null>(null);
+  const readState = useRef<{ accountId: string; cursors: Record<string, number> }>({
+    accountId: "",
+    cursors: {},
+  });
   const [screenUrl, setScreenUrl] = useState<string | null>(null);
   const [computerOpen, setComputerOpen] = useState(false);
   const [computerMenu, setComputerMenu] = useState(false);
@@ -421,6 +473,40 @@ export function ShellPage() {
   const paramsRef = useRef({ botId, groupId });
   paramsRef.current = { botId, groupId };
 
+  const readAccountId = session.data?.user.id ?? session.data?.user.email ?? "";
+  if (readState.current.accountId !== readAccountId) {
+    readState.current = {
+      accountId: readAccountId,
+      cursors:
+        readAccountId && typeof window !== "undefined"
+          ? readThreadCursors(window.localStorage, readAccountId)
+          : {},
+    };
+  }
+
+  function initializeHistory(
+    key: string,
+    messages: readonly ThreadMessage[],
+    legacyUnread: boolean,
+  ) {
+    if (historyOpenedKey.current === key) return;
+    const stored = readState.current.cursors[key];
+    const readThrough =
+      stored !== undefined ? stored : legacyUnread ? lastUserMessageSeq(messages) : null;
+    setNewMessagesDivider(unreadDivider(messages, readThrough));
+    setHistoryHasMore(messages.length === HISTORY_PAGE_LIMIT);
+    historyOpenedKey.current = key;
+  }
+
+  function markThreadRead(key: string, messages: readonly ThreadMessage[]) {
+    const newest = messages.reduce((seq, message) => Math.max(seq, message.seq), -1);
+    if (newest < 0 || !readState.current.accountId) return;
+    readState.current.cursors[key] = newest;
+    if (typeof window !== "undefined") {
+      writeThreadCursor(window.localStorage, readState.current.accountId, key, newest);
+    }
+  }
+
   async function refreshBots() {
     const list = await rpc.bots.list();
     setBots(list);
@@ -446,6 +532,8 @@ export function ShellPage() {
     const snap = await rpc.botGroups.thread({ groupId: id });
     // A slow response for a group the user already left must not overwrite the current one.
     if (paramsRef.current.groupId !== id) return snap;
+    initializeHistory(`group:${id}`, snap.messages, false);
+    markThreadRead(`group:${id}`, snap.messages);
     setGroupSnapshot(snap);
     return snap;
   }
@@ -471,6 +559,9 @@ export function ShellPage() {
       rpc.routines.list({ botId: id }),
     ]);
     if (paramsRef.current.botId !== id) return snap;
+    const key = `bot:${id}`;
+    initializeHistory(key, snap.messages, Boolean(bots.find((bot) => bot.id === id)?.unread));
+    markThreadRead(key, snap.messages);
     setSnapshot(snap);
     setComputer(snap.computer);
     setRoutines(r);
@@ -491,22 +582,49 @@ export function ShellPage() {
   }
 
   /**
-   * A webhook activity row's "Abrir no chat": closes the panel, refreshes the bot's
-   * own thread, and scrolls to the earliest message carrying that run — a webhook's
-   * bot is always the panel's own bot, so no navigation is needed. If no message
-   * carries that run yet (still queued, or nothing written), the chat still opens
-   * with no error; it simply has nothing to scroll to.
+   * Histórico de webhook e rotina abre o run na conversa atual. Se ainda está na fila ou
+   * não escreveu nada, o painel fecha sem inventar um destino que não existe.
    */
-  async function openWebhookRun(runId: string) {
+  async function openRunInChat(runId: string) {
     setPanel(null);
-    if (!active) return;
-    await refreshThread(active.id).catch(() => undefined);
+    if (activeGroup) await refreshGroupThread(activeGroup.id).catch(() => undefined);
+    else if (active) await refreshThread(active.id).catch(() => undefined);
+    else return;
     requestAnimationFrame(() => {
       threadRef.current
         ?.querySelector<HTMLElement>(`[data-run-id="${runId}"]`)
         ?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   }
+
+  useEffect(() => {
+    if (panel !== "routine" || !routineDraft.id) {
+      setRoutineRuns([]);
+      setRoutineRunsError(null);
+      setRoutineRunsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setRoutineRunsLoading(true);
+    setRoutineRuns([]);
+    setRoutineRunsError(null);
+    rpc.routines
+      .runs({ routineId: routineDraft.id, limit: 5 })
+      .then((rows) => {
+        if (!cancelled) setRoutineRuns(rows);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setRoutineRunsError(errorMessage(error, "Não foi possível carregar as execuções"));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setRoutineRunsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [panel, routineDraft.id, routineRunsVersion]);
 
   useEffect(() => {
     void refreshComposerRefs();
@@ -802,7 +920,62 @@ export function ShellPage() {
     setMentionIndex(0);
   }, [mention?.query, mention?.kind]);
 
-  const threadMessages = activeGroup ? (groupSnapshot?.messages ?? []) : (snapshot?.messages ?? []);
+  const liveThreadMessages = activeGroup
+    ? groupSnapshot?.groupId === activeGroup.id
+      ? groupSnapshot.messages
+      : []
+    : active && snapshot?.botId === active.id
+      ? snapshot.messages
+      : [];
+  const threadMessages = useMemo(
+    () => mergeThreadMessages(olderMessages, liveThreadMessages),
+    [olderMessages, liveThreadMessages],
+  );
+
+  async function loadOlderMessages() {
+    const beforeSeq = oldestMessageSeq(threadMessages);
+    if (beforeSeq === null || historyLoading || (!active && !activeGroup)) return;
+    const key = chatKey;
+    const element = threadRef.current;
+    const previousHeight = element?.scrollHeight ?? 0;
+    const previousTop = element?.scrollTop ?? 0;
+    setFollowThread(false);
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const page = activeGroup
+        ? await rpc.botGroups.thread({
+            groupId: activeGroup.id,
+            beforeSeq,
+            limit: HISTORY_PAGE_LIMIT,
+          })
+        : await rpc.threads.get({
+            botId: active!.id,
+            beforeSeq,
+            limit: HISTORY_PAGE_LIMIT,
+          });
+      if (conversationKey(paramsRef.current) !== key) return;
+      setOlderMessages((current) => mergeThreadMessages(page.messages, current));
+      setHistoryHasMore(page.messages.length === HISTORY_PAGE_LIMIT);
+      requestAnimationFrame(() => {
+        const current = threadRef.current;
+        if (!current || conversationKey(paramsRef.current) !== key) return;
+        current.scrollTop = previousTop + (current.scrollHeight - previousHeight);
+        lastScrollTop.current = current.scrollTop;
+      });
+    } catch (error) {
+      if (conversationKey(paramsRef.current) === key) {
+        setHistoryError(errorMessage(error, "Não foi possível carregar as mensagens antigas"));
+      }
+    } finally {
+      if (conversationKey(paramsRef.current) === key) setHistoryLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (chatKey === "inbox" || historyOpenedKey.current !== chatKey) return;
+    markThreadRead(chatKey, threadMessages);
+  }, [chatKey, threadMessages]);
 
   /**
    * "trabalhando…" é a espera antes da primeira palavra. Assim que o bot escreve alguma
@@ -1549,6 +1722,12 @@ export function ShellPage() {
   // menção do texto antigo some e a busca aberta não segue para um fio que não é o dela.
   useEffect(() => {
     setFollowThread(true);
+    setOlderMessages([]);
+    setHistoryHasMore(false);
+    setHistoryLoading(false);
+    setHistoryError(null);
+    setNewMessagesDivider(null);
+    historyOpenedKey.current = null;
     setQueued(null);
     setMentionDismissed(false);
     setCaret(draftAt(draftsRef.current, chatKey).text.length);
@@ -1646,6 +1825,11 @@ export function ShellPage() {
     }
     if (action.kind === "group") {
       navigate(`/app/g/${action.id}`);
+      return;
+    }
+    if (action.kind === "message") {
+      if (action.groupId) navigate(`/app/g/${action.groupId}`);
+      else if (action.botId) navigate(`/app/${action.botId}`);
       return;
     }
     if (action.kind === "route") {
@@ -1917,6 +2101,25 @@ export function ShellPage() {
             if (el.scrollTop < previous) setFollowThread(false);
           }}
         >
+          {historyHasMore || historyError ? (
+            <div className="flex flex-col items-center gap-1.5 pb-3" role="status">
+              <button
+                type="button"
+                onClick={() => void loadOlderMessages()}
+                disabled={historyLoading}
+                className="rounded-full border border-[var(--qb-hairline)] bg-[var(--qb-canvas)] px-4 py-2 text-[13px] font-medium text-[var(--qb-accent)] disabled:opacity-50"
+              >
+                {historyLoading
+                  ? "Carregando mensagens antigas…"
+                  : historyError
+                    ? "Tentar carregar de novo"
+                    : "Ver mensagens antigas"}
+              </button>
+              {historyError ? (
+                <span className="text-[12px] text-[var(--qb-danger)]">{historyError}</span>
+              ) : null}
+            </div>
+          ) : null}
           {threadMessages.length === 0 ? (
             <div className="qb-dash__empty-thread">
               {active ? (
@@ -1979,6 +2182,21 @@ export function ShellPage() {
                 data-run-id={message.runId ?? undefined}
                 className={findCurrentId === message.id ? "qb-find-hit" : undefined}
               >
+                {newMessagesDivider?.firstMessageId === message.id ? (
+                  <div
+                    className="flex items-center gap-3 py-2 text-[12.5px] font-semibold text-[var(--qb-accent)]"
+                    role="status"
+                    aria-label={`${newMessagesDivider.count} ${
+                      newMessagesDivider.count === 1 ? "mensagem nova" : "mensagens novas"
+                    }`}
+                  >
+                    <span className="h-px flex-1 bg-[var(--qb-hairline)]" />
+                    <span>
+                      {newMessagesDivider.count} {newMessagesDivider.count === 1 ? "nova" : "novas"}
+                    </span>
+                    <span className="h-px flex-1 bg-[var(--qb-hairline)]" />
+                  </div>
+                ) : null}
                 {stamps[message.id] ? (
                   <div className="flex items-center justify-center py-1 text-[15px] text-[var(--qb-muted-2)]">
                     <span>{stamps[message.id]}</span>
@@ -2791,7 +3009,7 @@ export function ShellPage() {
               <WebhooksPanel
                 key={active.id}
                 bot={active}
-                onOpenRun={(runId) => void openWebhookRun(runId)}
+                onOpenRun={(runId) => void openRunInChat(runId)}
                 onBack={() => setPanel("settings")}
                 onClose={() => setPanel(null)}
               />
@@ -2847,6 +3065,7 @@ export function ShellPage() {
                           routineId: routineDraft.id,
                         });
                         if (active) await refreshThread(active.id).catch(() => undefined);
+                        setRoutineRunsVersion((version) => version + 1);
                       } catch (err) {
                         setActionFailure(err, "Não foi possível testar a rotina");
                       }
@@ -2886,10 +3105,69 @@ export function ShellPage() {
                   />
                 </details>
                 <div className="qb-routine__history">
-                  <span>Histórico de execuções</span>
-                  <p>
-                    {routineDraft.id ? "As execuções aparecem aqui." : "Nenhuma execução ainda."}
-                  </p>
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span>Histórico de execuções</span>
+                    {routineDraft.id ? (
+                      <button
+                        type="button"
+                        onClick={() => setRoutineRunsVersion((version) => version + 1)}
+                        disabled={routineRunsLoading}
+                        className="text-[12.5px] text-[var(--qb-accent)] disabled:opacity-40"
+                      >
+                        {routineRunsLoading ? "Atualizando…" : "Atualizar"}
+                      </button>
+                    ) : null}
+                  </div>
+                  {!routineDraft.id ? (
+                    <p>Salve a rotina para acompanhar as execuções.</p>
+                  ) : routineRunsLoading && routineRuns.length === 0 ? (
+                    <p>Carregando execuções…</p>
+                  ) : routineRunsError ? (
+                    <p role="alert" className="text-[var(--qb-danger)]">
+                      {routineRunsError}
+                    </p>
+                  ) : !routineRunsLoading && routineRuns.length === 0 ? (
+                    <p>Nenhuma execução ainda. Use "Testar" para rodar agora.</p>
+                  ) : (
+                    <div className="overflow-hidden rounded-[var(--qb-r-md)] border border-[var(--qb-hairline)] bg-[var(--qb-canvas)]">
+                      {routineRuns.map((run, index) => (
+                        <div
+                          key={run.id}
+                          className="px-3.5 py-2.5"
+                          style={
+                            index > 0 ? { borderTop: "1px solid var(--qb-hairline)" } : undefined
+                          }
+                        >
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`rounded-[var(--qb-r-xs)] px-2 py-0.5 text-[11.5px] font-semibold ${routineRunBadgeClass(
+                                run.status,
+                              )}`}
+                            >
+                              {routineRunStatusLabel(run.status)}
+                            </span>
+                            <span className="text-[12px] text-[var(--qb-muted-2)]">
+                              {inboxTimeLabel(run.startedAt ?? run.createdAt) ??
+                                run.startedAt ??
+                                run.createdAt}
+                            </span>
+                          </div>
+                          {run.error ? (
+                            <div className="mt-1 truncate text-[12.5px] text-[var(--qb-danger)]">
+                              {run.error}
+                            </div>
+                          ) : null}
+                          <button
+                            type="button"
+                            onClick={() => void openRunInChat(run.id)}
+                            className="mt-1.5 text-[12.5px] text-[var(--qb-accent)]"
+                          >
+                            Abrir no chat
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <button
                   type="button"
@@ -3336,6 +3614,7 @@ export function ShellPage() {
         <CommandPalette
           items={buildPaletteItems(bots, groups, { hasActiveBot: Boolean(active) })}
           onClose={() => setPaletteOpen(false)}
+          searchMessages={searchPaletteMessages}
           onPick={(item) => {
             setPaletteOpen(false);
             runPaletteAction(item);

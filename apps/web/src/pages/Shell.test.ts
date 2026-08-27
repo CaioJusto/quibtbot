@@ -189,8 +189,13 @@ describe("dashboard copies the landing product demo", () => {
     expect(shell).toContain('aria-label="Achar nesta conversa"');
     expect(shell).toContain('aria-label="Próxima ocorrência"');
     expect(shell).toContain("qb-find-hit");
-    // A busca é do lado de cá: o fio já está na memória, não há chamada nova ao servidor.
-    expect(shell).not.toContain("rpc.threads.search");
+    // A busca ⌘F continua do lado de cá. A ⌘K pode consultar mensagens no servidor,
+    // então a ausência de RPC precisa ser verificada só dentro do bloco do ⌘F.
+    const findSection = shell.slice(
+      shell.indexOf("* ⌘F:"),
+      shell.indexOf("function acceptMention"),
+    );
+    expect(findSection).not.toContain("rpc.");
   });
 
   it("clears inbox search after creating a group and lands on it", () => {

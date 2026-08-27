@@ -147,6 +147,54 @@ export function createRepos(prisma: PrismaClient) {
   };
 
   return {
+    async listThreadSearchTargets(actor: Actor) {
+      const [bots, groups] = await Promise.all([
+        prisma.bot.findMany({
+          where: { workspaceId: actor.workspaceId, userId: actor.userId },
+          select: {
+            id: true,
+            name: true,
+            thread: { select: { id: true } },
+          },
+        }),
+        prisma.botGroup.findMany({
+          where: { workspaceId: actor.workspaceId, userId: actor.userId },
+          select: {
+            id: true,
+            name: true,
+            thread: { select: { id: true } },
+          },
+        }),
+      ]);
+
+      return [
+        ...bots.flatMap((bot) =>
+          bot.thread
+            ? [
+                {
+                  threadId: bot.thread.id,
+                  botId: bot.id,
+                  groupId: null,
+                  ownerName: bot.name,
+                },
+              ]
+            : [],
+        ),
+        ...groups.flatMap((group) =>
+          group.thread
+            ? [
+                {
+                  threadId: group.thread.id,
+                  botId: null,
+                  groupId: group.id,
+                  ownerName: group.name,
+                },
+              ]
+            : [],
+        ),
+      ];
+    },
+
     async listBots(actor: Actor): Promise<Bot[]> {
       const bots = await prisma.bot.findMany({
         where: { workspaceId: actor.workspaceId, userId: actor.userId },

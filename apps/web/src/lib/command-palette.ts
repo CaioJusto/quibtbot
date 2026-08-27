@@ -1,3 +1,5 @@
+import type { ThreadSearchResult } from "@quibt/contracts";
+
 /**
  * Busca por teclado do app: bots, grupos e ações, sem sair do teclado.
  *
@@ -10,6 +12,7 @@
 export type PaletteAction =
   | { kind: "bot"; id: string }
   | { kind: "group"; id: string }
+  | { kind: "message"; botId: string | null; groupId: string | null }
   | { kind: "panel"; panel: "create" | "create-group" | "settings" | "computer" | "routine" }
   | { kind: "route"; path: string };
 
@@ -184,6 +187,23 @@ export function buildPaletteItems(
         (item) => !["action:computer", "action:routine", "action:settings"].includes(item.id),
       );
   return [...botItems, ...groupItems, ...actions];
+}
+
+export function messagePaletteItems(results: ThreadSearchResult[]): PaletteItem[] {
+  return results.map((result) => {
+    const compact = result.text.replace(/\s+/g, " ").trim();
+    return {
+      id: `message:${result.messageId}`,
+      label: compact.length > 90 ? `${compact.slice(0, 89)}…` : compact,
+      detail: `Mensagem em ${result.ownerName}`,
+      keywords: ["mensagem", result.ownerName],
+      action: {
+        kind: "message",
+        botId: result.botId,
+        groupId: result.groupId,
+      },
+    };
+  });
 }
 
 /** ⌘K no Mac, Ctrl+K no resto. */

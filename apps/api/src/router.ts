@@ -854,6 +854,40 @@ export function createRouter(deps: RouterDeps) {
           context.screenOrigin,
         ),
       ),
+      search: authed.threads.search.handler(async ({ context, input }) => {
+        const targets = await repos.listThreadSearchTargets(context.actor);
+        if (targets.length === 0) return [];
+
+        const targetByThread = new Map(targets.map((target) => [target.threadId, target]));
+        const messages = await deps.prisma.message.findMany({
+          where: { threadId: { in: targets.map((target) => target.threadId) } },
+          orderBy: { createdAt: "desc" },
+          take: 500,
+        });
+        const terms = normalizeThreadSearch(input.query).split(" ").filter(Boolean);
+
+        return messages
+          .flatMap((message) => {
+            const target = targetByThread.get(message.threadId);
+            if (!target) return [];
+            const text = threadSearchText(message.blocks);
+            const normalized = normalizeThreadSearch(text);
+            if (!text || !terms.every((term) => normalized.includes(term))) return [];
+            return [
+              {
+                messageId: message.id,
+                threadId: message.threadId,
+                seq: message.seq,
+                botId: target.botId,
+                groupId: target.groupId,
+                ownerName: target.ownerName,
+                text,
+                createdAt: message.createdAt.toISOString(),
+              },
+            ];
+          })
+          .slice(0, input.limit ?? 8);
+      }),
       subscribe: authed.threads.subscribe.handler(async function* ({ context, input }) {
         const bot = await repos.getBot(context.actor, input.botId);
         if (!bot.thread) throw new IsolationError();
@@ -1892,6 +1926,29 @@ export function createRouter(deps: RouterDeps) {
         });
         return rows.map(mapRoutine);
       }),
+      runs: authed.routines.runs.handler(async ({ context, input }) => {
+        const routine = await deps.prisma.routine.findFirst({
+          where: {
+            id: input.routineId,
+            workspaceId: context.actor.workspaceId,
+            userId: context.actor.userId,
+          },
+        });
+        if (!routine) throw new IsolationError();
+        const rows = await deps.prisma.run.findMany({
+          where: {
+            routineId: routine.id,
+            workspaceId: context.actor.workspaceId,
+            userId: context.actor.userId,
+          },
+          orderBy: { createdAt: "desc" },
+          take: input.limit ?? 5,
+        });
+        return rows.map((row) => ({
+          ...mapRun(row),
+          createdAt: row.createdAt.toISOString(),
+        }));
+      }),
       create: authed.routines.create.handler(async ({ context, input }) => {
         const owner = input.botId
           ? {
@@ -2010,6 +2067,7 @@ export function createRouter(deps: RouterDeps) {
             workspaceId: context.actor.workspaceId,
             userId: context.actor.userId,
             prompt: routine.prompt,
+            routineId: routine.id,
           });
           await Promise.all(
             runs.map((run) =>
@@ -2043,6 +2101,7 @@ export function createRouter(deps: RouterDeps) {
             userId: context.actor.userId,
             status: "queued",
             trigger: "routine",
+            routineId: routine.id,
           },
         });
         await deps.wakeup.enqueue({
@@ -2798,6 +2857,32 @@ async function reconcileStrandedRun<
     { botId: run.botId },
   ).catch(() => [] as string[]);
   return failed.includes(run.id) ? null : run;
+}
+
+export function normalizeThreadSearch(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/\p{M}+/gu, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
+export function threadSearchText(blocks: unknown): string {
+  if (!Array.isArray(blocks)) return "";
+  return blocks
+    .flatMap((block) =>
+      block &&
+      typeof block === "object" &&
+      "kind" in block &&
+      block.kind === "text" &&
+      "text" in block &&
+      typeof block.text === "string"
+        ? [block.text]
+        : [],
+    )
+    .join(" ")
+    .trim();
 }
 
 export const THREAD_HISTORY_DEFAULT_LIMIT = 50;
