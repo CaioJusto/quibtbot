@@ -3615,3 +3615,27 @@ select.qb-account-field {
     animation: none;
   }
 }
+
+/*
+ * O ponto do passo que está andando enquanto o computador liga. Ele pisca porque é a
+ * única coisa que ainda se move: não existe percentual honesto para desenhar aqui.
+ */
+.qb-boot-dot {
+  animation: qb-boot-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes qb-boot-pulse {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qb-boot-dot {
+    animation: none;
+  }
+}

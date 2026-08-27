@@ -2,8 +2,9 @@ import { ChatMarkdown } from "@quibt/chat-ui/web";
 import type { ThreadMessage } from "@quibt/contracts";
 import { fileViewerKind, TEXT_VIEWER_MAX_BYTES } from "@quibt/core";
 import { BotAvatar } from "@quibt/ui-web";
-import { type ReactNode, useEffect, useId, useState } from "react";
+import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
 import { Icon } from "../components/desktop-ui";
+import { type CsvTable, csvTableNote, isSpreadsheetFile, parseCsvTable } from "../lib/csv-table";
 import type { MessageAuthor } from "../lib/thread-authors";
 import { isTurnStartMarker } from "../lib/turn-start";
 
@@ -289,6 +290,65 @@ function opensInViewer(block: { mimeType: string; name: string; size: number }):
  *
  * A tela escura é do visualizador, como num app de fotos: não é cromo do produto, é o fundo
  * que tira o resto da tela do caminho. É a mesma escolha do celular.
+ * A planilha de texto desenhada como tabela. A primeira linha vira o cabeçalho e ele gruda
+ * no topo enquanto a pessoa rola — sem isso, uma planilha de trezentas linhas obriga a
+ * subir de volta a cada célula para lembrar de que coluna ela é.
+ */
+function CsvSheet({ table }: { table: CsvTable }) {
+  return (
+    <div className="flex max-h-full w-full max-w-[1080px] flex-col gap-2">
+      <div className="min-h-0 flex-1 overflow-auto rounded-[var(--qb-r-md)] bg-[#161618]">
+        <table className="w-full border-collapse text-[13px] text-[#F2F2F4]">
+          <thead className="sticky top-0 z-10 bg-[#1F1F22]">
+            <tr>
+              <th
+                scope="col"
+                className="border-b border-[rgba(255,255,255,.12)] px-3 py-2 text-right font-normal text-[#8A8A90] tabular-nums"
+              >
+                #
+              </th>
+              {table.header.map((cell, column) => (
+                <th
+                  // A célula não tem identidade própria: duas colunas podem se chamar igual.
+                  key={column}
+                  scope="col"
+                  className="border-b border-[rgba(255,255,255,.12)] px-3 py-2 text-left font-semibold whitespace-nowrap"
+                >
+                  {cell}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {table.rows.map((row, index) => (
+              <tr key={index} className={index % 2 ? "bg-[rgba(255,255,255,.03)]" : undefined}>
+                <td className="px-3 py-1.5 text-right align-top text-[#8A8A90] tabular-nums">
+                  {index + 1}
+                </td>
+                {row.map((cell, column) => (
+                  <td key={column} className="px-3 py-1.5 align-top" title={cell || undefined}>
+                    {/*
+                      O corte mora no span, não na célula: `max-width` numa `td` de tabela
+                      automática é sugestão, e uma célula com um parágrafo dentro esticava a
+                      planilha inteira para fora da tela.
+                    */}
+                    <span className="block max-w-[280px] truncate">{cell}</span>
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="shrink-0 text-center text-[13px] text-white/60">{csvTableNote(table)}</p>
+    </div>
+  );
+}
+
+/**
+ * O visualizador de arquivos do app: imagem em tela grande e texto legível abrem aqui
+ * dentro, num overlay escuro, em vez de virarem uma aba nova ou um download. Vídeo e
+ * áudio já tocam no fio; o resto continua baixando.
  */
 function FileOverlay({ file, onClose }: { file: ViewerFile; onClose: () => void }) {
   const kind = fileViewerKind(file.mimeType, file.name);
@@ -296,6 +356,15 @@ function FileOverlay({ file, onClose }: { file: ViewerFile; onClose: () => void 
   const mode = kind === "other" ? (isPdfFile(file.mimeType, file.name) ? "pdf" : "none") : kind;
   const [text, setText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** A planilha abre como tabela; este botão é a saída para quem quer o arquivo cru. */
+  const [rawText, setRawText] = useState(false);
+  const sheet = useMemo(
+    () =>
+      text !== null && isSpreadsheetFile(file.mimeType, file.name)
+        ? parseCsvTable(text, file.name)
+        : null,
+    [text, file.mimeType, file.name],
+  );
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -345,6 +414,15 @@ function FileOverlay({ file, onClose }: { file: ViewerFile; onClose: () => void 
         <span className="min-w-0 flex-1 truncate text-center text-[15px] font-semibold text-white">
           {file.name}
         </span>
+        {sheet ? (
+          <button
+            type="button"
+            onClick={() => setRawText((current) => !current)}
+            className="shrink-0 rounded-full bg-[rgba(255,255,255,0.14)] px-3.5 py-2 text-[13px] font-medium text-white"
+          >
+            {rawText ? "Ver como tabela" : "Ver o texto"}
+          </button>
+        ) : null}
         <a
           href={fileUrl(file.artifactId)}
           download={file.name}
@@ -391,6 +469,8 @@ function FileOverlay({ file, onClose }: { file: ViewerFile; onClose: () => void 
           <p className="text-[15px] text-[#FF8A8E]">{error}</p>
         ) : text === null ? (
           <p className="text-[15px] text-white/70">Abrindo…</p>
+        ) : sheet && !rawText ? (
+          <CsvSheet table={sheet} />
         ) : (
           <pre className="max-h-full w-full max-w-[880px] overflow-auto rounded-[var(--qb-r-md)] bg-[#161618] p-5 font-mono text-[13px] leading-[1.7] whitespace-pre-wrap text-[#F2F2F4]">
             {text}
