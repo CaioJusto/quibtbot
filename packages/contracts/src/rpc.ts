@@ -26,7 +26,9 @@ import {
   ModelConnectResultSchema,
   ModelCredentialSchema,
   ModelInputText,
+  RoutineRunSchema,
   RoutineSchema,
+  ThreadSearchResultSchema,
   ThreadSnapshotSchema,
   UpdateBotGroupInput,
   UpdateBotInput,
@@ -257,6 +259,14 @@ export const appContract = {
         }),
       )
       .output(ThreadSnapshotSchema),
+    search: oc
+      .input(
+        z.object({
+          query: z.string().trim().min(2).max(100),
+          limit: z.number().int().min(1).max(20).optional(),
+        }),
+      )
+      .output(z.array(ThreadSearchResultSchema)),
     subscribe: oc
       .input(z.object({ botId: Id, cursor: z.number().int().min(-1) }))
       .output(eventIterator(ProductEventSchema)),
@@ -408,6 +418,14 @@ export const appContract = {
           }),
       )
       .output(z.array(RoutineSchema)),
+    runs: oc
+      .input(
+        z.object({
+          routineId: Id,
+          limit: z.number().int().min(1).max(100).optional(),
+        }),
+      )
+      .output(z.array(RoutineRunSchema)),
     create: oc.input(CreateRoutineInput).output(RoutineSchema),
     update: oc.input(UpdateRoutineInput).output(RoutineSchema),
     remove: oc.input(z.object({ routineId: Id })).output(z.object({ ok: z.literal(true) })),

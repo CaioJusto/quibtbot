@@ -199,6 +199,7 @@ export async function createGroupRoutineWakes(
     workspaceId: string;
     userId: string;
     prompt: string;
+    routineId: string;
     /**
      * Runs inside the same transaction as the group's runs, so the caller can mark the
      * routine as fired atomically: a crash between the two writes let the retry fire the
@@ -230,6 +231,7 @@ export async function createGroupRoutineWakes(
         threadId: group.thread!.id,
         prompt: input.prompt,
         trigger: "routine",
+        routineId: input.routineId,
       });
       createdRuns.push(created.run);
     }
@@ -293,6 +295,7 @@ async function createRun(
     trigger: Trigger;
     clientNonce?: string;
     webhookId?: string | null;
+    routineId?: string | null;
   },
 ) {
   const task = await tx.task.create({
@@ -316,6 +319,7 @@ async function createRun(
       trigger: input.trigger,
       clientNonce: input.clientNonce,
       webhookId: input.webhookId ?? undefined,
+      routineId: input.routineId ?? undefined,
     },
   });
   return { task, run };

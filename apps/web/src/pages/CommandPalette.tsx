@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../components/desktop-ui";
-import { filterPalette, moveHighlight, type PaletteItem } from "../lib/command-palette";
+import {
+  filterPalette,
+  moveHighlight,
+  normalizeQuery,
+  type PaletteItem,
+} from "../lib/command-palette";
 
 /**
  * Busca de teclado sobre a lista já montada pelo Shell. O componente não conhece
@@ -11,20 +16,53 @@ export function CommandPalette({
   items,
   onPick,
   onClose,
+  searchMessages,
 }: {
   items: PaletteItem[];
   onPick: (item: PaletteItem) => void;
   onClose: () => void;
+  searchMessages?: (query: string) => Promise<PaletteItem[]>;
 }) {
   const [query, setQuery] = useState("");
   const [highlight, setHighlight] = useState(0);
+  const [remoteItems, setRemoteItems] = useState<PaletteItem[]>([]);
+  const [searching, setSearching] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
-  const rows = useMemo(() => filterPalette(items, query), [items, query]);
+  const localRows = useMemo(() => filterPalette(items, query), [items, query]);
+  const rows = useMemo(() => [...localRows, ...remoteItems], [localRows, remoteItems]);
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  useEffect(() => {
+    const normalized = normalizeQuery(query);
+    if (!searchMessages || normalized.length < 2) {
+      setRemoteItems([]);
+      setSearching(false);
+      return;
+    }
+    let cancelled = false;
+    setSearching(true);
+    setRemoteItems([]);
+    const timer = window.setTimeout(() => {
+      searchMessages(query)
+        .then((results) => {
+          if (!cancelled) setRemoteItems(results);
+        })
+        .catch(() => {
+          if (!cancelled) setRemoteItems([]);
+        })
+        .finally(() => {
+          if (!cancelled) setSearching(false);
+        });
+    }, 220);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [query, searchMessages]);
 
   // Uma busca nova pode encurtar a lista: manter o índice antigo destacaria uma
   // linha que não existe mais, e o Enter abriria outra coisa.
@@ -78,8 +116,8 @@ export function CommandPalette({
             ref={inputRef}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Buscar bot, grupo ou ação"
-            aria-label="Buscar bot, grupo ou ação"
+            placeholder="Buscar bot, grupo, ação ou mensagem"
+            aria-label="Buscar bot, grupo, ação ou mensagem"
             autoComplete="off"
             className="w-full bg-transparent text-[14px] text-[var(--qb-ink)] outline-none placeholder:text-[var(--qb-muted)]"
           />
@@ -89,7 +127,7 @@ export function CommandPalette({
         </div>
         {rows.length === 0 ? (
           <p className="px-3 py-6 text-center text-[13px] text-[var(--qb-muted)]">
-            Nada com esse nome.
+            {searching ? "Buscando mensagens…" : "Nada com esse nome."}
           </p>
         ) : (
           <ul ref={listRef} className="max-h-[320px] overflow-y-auto py-1.5">

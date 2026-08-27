@@ -156,6 +156,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           workspaceId: routine.workspaceId,
           userId: routine.userId,
           prompt: routine.prompt,
+          routineId: routine.id,
           mark: markFired,
           schedule: enqueueNextWake,
         });
@@ -202,6 +203,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             userId: routine.userId,
             status: "queued",
             trigger: "routine",
+            routineId: routine.id,
           },
         });
         await markFired(tx);

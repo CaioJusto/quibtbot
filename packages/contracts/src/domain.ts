@@ -303,6 +303,11 @@ export const RunSchema = z.object({
 });
 export type Run = z.infer<typeof RunSchema>;
 
+export const RoutineRunSchema = RunSchema.extend({
+  createdAt: z.string(),
+});
+export type RoutineRun = z.infer<typeof RoutineRunSchema>;
+
 export const ThreadSnapshotSchema = z.object({
   botId: Id,
   threadId: Id,
@@ -314,6 +319,18 @@ export const ThreadSnapshotSchema = z.object({
   activeConversationId: Id.nullable().default(null),
 });
 export type ThreadSnapshot = z.infer<typeof ThreadSnapshotSchema>;
+
+export const ThreadSearchResultSchema = z.object({
+  messageId: Id,
+  threadId: Id,
+  seq: z.number().int().nonnegative(),
+  botId: Id.nullable(),
+  groupId: Id.nullable(),
+  ownerName: z.string(),
+  text: z.string(),
+  createdAt: z.string(),
+});
+export type ThreadSearchResult = z.infer<typeof ThreadSearchResultSchema>;
 
 export const GroupThreadSnapshotSchema = z.object({
   groupId: Id,
