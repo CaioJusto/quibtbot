@@ -1,6 +1,6 @@
 {
   "name": "@quibt/desktop",
-  "version": "0.2.13",
+  "version": "0.2.14",
   "description": "Quibt Bot — seu time digital, ligado do seu jeito.",
   "author": "QuibTI Inovações",
   "homepage": "https://quibt.com.br",
@@ -31,7 +31,7 @@
     "@electron/asar": "^3.4.1",
     "electron": "^43.4.0",
     "electron-builder": "^26.0.12",
-    "esbuild": "^0.25.9",
+    "esbuild": "^0.28.0",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2",
     "vitest": "^4.1.10"
@@ -60,7 +60,7 @@
     ],
     "extraMetadata": {
       "main": "dist/main.js",
-      "quibtStackVersion": "0.2.13"
+      "quibtStackVersion": "0.2.14"
     },
     "protocols": [
       {

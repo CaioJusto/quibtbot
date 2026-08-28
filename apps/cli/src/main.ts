@@ -463,10 +463,18 @@ export async function runCliAsync(args: string[], deps: RunCliDeps = {}): Promis
 }
 
 export function runCli(args: string[]): void {
-  void runCliAsync(args).catch((error) => {
-    console.error(error instanceof Error ? error.message : "unexpected error");
-    process.exitCode = 1;
-  });
+  // O código de saída é o contrato do CLI (`doctor` devolve 1, uso errado devolve 2).
+  // Sem repassar o retorno, o `bin` saía 0 mesmo recusando o comando, e um script que
+  // encadeia `quibtbot status && …` seguia adiante com a instalação quebrada.
+  void runCliAsync(args).then(
+    (code) => {
+      process.exitCode = code;
+    },
+    (error) => {
+      console.error(error instanceof Error ? error.message : "unexpected error");
+      process.exitCode = 1;
+    },
+  );
 }
 
 if (isMainModule()) {

@@ -134,91 +134,96 @@ export const COPY = {
     },
     privacy: {
       title: "Privacy Policy",
-      description: "How Quibt collects, protects, uses, and deletes waitlist information.",
+      description: "What the Quibt Bot website collects: no account, no form, no database.",
       intro:
-        "This policy applies to the public Quibt website and its early-access waitlist. Quibt acts as the controller of the personal data submitted through this form.",
-      lastUpdated: "Last updated: August 15, 2026.",
+        "This policy covers the public Quibt Bot website at quibt.com.br. The site is a set of static pages: there is no form, no sign-up, and no Quibt database behind it. Quibt Bot itself is open-source software you install and run on your own machine.",
+      lastUpdated: "Last updated: August 28, 2026.",
       sections: [
         {
-          title: "1. Data we collect",
-          body: "When you join the waitlist, we collect your name, email address, role, intended use case, hosting preference, language, consent, and optional X handle. Please do not include sensitive or confidential information in the free-text answer.",
+          title: "1. What we collect",
+          body: "Nothing you type. The site has no form, no login, and no newsletter, so it does not collect your name, your e-mail address, or any other detail about you.",
         },
         {
-          title: "2. Technical data",
-          body: "Vercel and Railway receive ordinary connection data, such as IP address and browser headers, to deliver and secure the site. The Quibt waitlist database does not store your IP address in plain text; it keeps temporary keyed fingerprints for abuse prevention.",
+          title: "2. Technical data of the visit",
+          body: "The hosting provider that serves these pages (Vercel) receives ordinary connection data, such as IP address, date, and browser headers, to deliver and protect the site. Those are the provider's server logs. Quibt keeps no visitor database of its own.",
         },
         {
-          title: "3. Why we use the data",
-          body: "We use your submission only to organize early access, understand initial use cases, contact you about Quibt, prevent fraud and automated abuse, maintain service security, and meet legal obligations. Waitlist communication is based on your consent; security processing relies on our legitimate interest in protecting the service where permitted by law.",
+          title: "3. What the page loads from third parties",
+          body: "The pages load web fonts from Google Fonts, so your browser asks Google for those files. Download and documentation buttons send you to GitHub. Each of those companies receives that request under its own policy. There is no advertising and no tracking pixel on this site.",
         },
         {
-          title: "4. How we protect it",
-          body: "Personal fields are encrypted by the application with authenticated AES-256-GCM encryption before they are stored. Email deduplication and rate limiting use keyed, non-reversible HMAC fingerprints. Access is restricted to authorized operators, and there is no public API for reading registrations.",
+          title: "4. Cookies",
+          body: "The site sets no cookie of its own and runs no analytics script. Changing the language is a link to another page, not stored data.",
         },
         {
-          title: "5. Service providers and transfers",
-          body: "We use Vercel to deliver the website and Railway to run the API and private database. These providers process data on our behalf and may operate infrastructure outside Brazil under their contractual and legal safeguards. We do not sell your personal data.",
+          title: "5. Your Quibt Bot install",
+          body: "When you install Quibt Bot, the database, the bot files, and your model keys stay on the machine you installed onto. That data never reaches Quibt. If you point the product at another company (a model provider, E2B, Box, or Composio), that relationship and that data are between you and them.",
         },
         {
-          title: "6. Retention",
-          body: "Waitlist registrations are kept for up to 365 days after the latest submission or update, unless you ask us to delete them earlier or a legal obligation requires a different period. Expired anti-abuse records are removed periodically.",
+          title: "6. Why the logs exist",
+          body: "Server logs exist to deliver the pages, keep the site available, and defend it from abuse — our legitimate interest in operating the site. They are kept for the short period the provider applies and are not used to profile anyone.",
         },
         {
           title: "7. Your rights",
-          body: "Subject to applicable law, you may request confirmation of processing, access, correction, deletion, information about sharing, portability where applicable, or withdrawal of consent. We may ask for information needed to verify your identity before acting on a request.",
+          body: "Subject to applicable law, you may ask what data about you exists, ask for a copy, ask for correction, or ask for deletion. Write to caio@liaforschool.com.br. As the site keeps no registration, the answer is normally that nothing exists beyond the provider's short server log.",
         },
         {
           title: "8. Children",
-          body: "The waitlist is intended for people who can validly provide their own information and consent. Do not submit a child's personal data through the form.",
+          body: "The site is informational and asks nobody, at any age, for personal data.",
         },
         {
           title: "9. Changes",
-          body: "We may update this policy as Quibt develops. Material changes will be reflected on this page with a new update date.",
+          body: "We may update this policy as the product develops. A material change is published on this page with a new update date.",
         },
       ],
     },
     terms: {
-      title: "Website and Waitlist Terms",
-      description: "Terms for using the Quibt website and joining its early-access waitlist.",
+      title: "Website Terms",
+      description: "Terms for using the public Quibt Bot website. The software itself is Apache-2.0.",
       intro:
-        "These terms apply to this public website and the Quibt early-access waitlist. The product is still in development, and joining the waitlist is not a purchase or a guarantee of access.",
-      lastUpdated: "Last updated: August 15, 2026.",
+        "These terms apply to this public website. They do not replace the software licence: Quibt Bot is released under Apache-2.0, and that licence governs the code you download, install, and run.",
+      lastUpdated: "Last updated: August 28, 2026.",
       sections: [
         {
-          title: "1. Waitlist status",
-          body: "A registration records your interest only. It does not guarantee selection, a release date, a particular feature, pricing, availability, or continued operation. We may contact participants in stages and may pause or close the waitlist.",
+          title: "1. What this site is",
+          body: "An informational site about an open-source product. It sells nothing, hosts no account, and has no form. It links to the source code and to the release files on GitHub.",
         },
         {
-          title: "2. Your submission",
-          body: "You must provide information you are authorized to share and keep it reasonably accurate. Do not place passwords, API keys, confidential business information, unlawful content, or sensitive personal data in the form.",
+          title: "2. Permitted use",
+          body: "You may read the pages, copy the install command, and download the release files. You may not probe the site for vulnerabilities, interfere with its operation, impersonate another person, or use it unlawfully. To report a security problem, follow SECURITY.md in the repository.",
         },
         {
-          title: "3. Permitted use",
-          body: "You may browse the site and submit one legitimate registration for yourself or your organization. You may not probe for vulnerabilities, bypass rate limits, automate abusive submissions, interfere with the service, impersonate another person, or use the site unlawfully.",
+          title: "3. The software is licensed separately",
+          body: "The code is under Apache-2.0, as published in the repository. It is provided as is, without warranty, to the extent that licence allows. Downloading a build does not create a support contract.",
         },
         {
-          title: "4. No payment on this site",
-          body: "The public website and waitlist do not collect payment information or create a paid subscription. Any future paid service will present its applicable pricing and terms before purchase.",
+          title: "4. You run your own install",
+          body: "When you install Quibt Bot, the server, the bots, and their computers run on infrastructure you choose. That install is yours: the secrets, the access you open, the models you connect, and what the bots do for you.",
         },
         {
-          title: "5. Intellectual property and open source",
-          body: "Quibt names, branding, characters, and website content remain protected by applicable law. If source code or components are publicly released under an open-source license, that license will govern those materials. These terms do not grant access to a private repository or unpublished code.",
+          title: "5. No payment on this site",
+          body: "The site collects no payment data and creates no subscription. Any cost comes from the third parties you choose — the model provider, the sandbox provider, or your own server — and is paid directly to them.",
         },
         {
-          title: "6. Availability and changes",
-          body: "The website and preview information are provided as available and may change during development. To the extent permitted by law, we do not promise uninterrupted access or that previewed features will ship exactly as described.",
+          title: "6. Intellectual property",
+          body: "The Quibt name, the logo, the characters, and the website text remain protected by applicable law, even though the source code is open. The Apache-2.0 licence grants no trademark rights.",
         },
         {
-          title: "7. Liability",
-          body: "Nothing in these terms excludes rights or liabilities that cannot legally be excluded. Subject to that limit, Quibt is not responsible for indirect losses arising only from reliance on preview material or temporary website unavailability.",
+          title: "7. Availability and changes",
+          body: "The site and the release files are provided as available. To the extent permitted by law, we do not promise uninterrupted access, and what is described here may change between releases.",
         },
         {
-          title: "8. Governing law",
+          title: "8. Liability",
+          body: "Nothing here excludes rights or liabilities that cannot legally be excluded. Subject to that limit, Quibt is not responsible for indirect losses arising from reliance on this website's material or from temporary unavailability.",
+        },
+        {
+          title: "9. Governing law",
           body: "Brazilian law governs these terms. Any dispute will be handled by the competent courts determined under applicable consumer and procedural law.",
         },
       ],
     },
   },
+
   "pt-BR": {
     languageName: "Português",
     alternateLanguageName: "English",
@@ -338,91 +343,96 @@ export const COPY = {
     },
     privacy: {
       title: "Política de Privacidade",
-      description: "Como o Quibt coleta, protege, usa e exclui informações da lista de espera.",
+      description: "O que o site do Quibt Bot coleta: sem conta, sem formulário, sem banco de dados.",
       intro:
-        "Esta política se aplica ao site público do Quibt e à lista de espera para acesso antecipado. O Quibt atua como controlador dos dados pessoais enviados pelo formulário.",
-      lastUpdated: "Última atualização: 15 de agosto de 2026.",
+        "Esta política vale para o site público do Quibt Bot, em quibt.com.br. O site é um conjunto de páginas estáticas: não existe formulário, não existe cadastro e não existe banco de dados do Quibt por trás dele. O Quibt Bot é um programa open source que você instala e roda na sua própria máquina.",
+      lastUpdated: "Última atualização: 28 de agosto de 2026.",
       sections: [
         {
-          title: "1. Dados que coletamos",
-          body: "Ao entrar na lista de espera, coletamos nome, e-mail, função, caso de uso pretendido, preferência de hospedagem, idioma, consentimento e, opcionalmente, seu @ no X. Não inclua dados sensíveis ou informações confidenciais na resposta aberta.",
+          title: "1. O que coletamos",
+          body: "Nada que você digite. O site não tem formulário, não tem login e não tem newsletter. Ele não coleta seu nome, seu e-mail nem qualquer outro dado seu.",
         },
         {
-          title: "2. Dados técnicos",
-          body: "Vercel e Railway recebem dados normais de conexão, como endereço IP e cabeçalhos do navegador, para entregar e proteger o site. O banco da lista do Quibt não guarda seu IP em texto puro; ele mantém impressões digitais temporárias e protegidas por chave para prevenir abuso.",
+          title: "2. Dados técnicos da visita",
+          body: "O provedor que entrega estas páginas (Vercel) recebe dados normais de conexão, como endereço IP, data e cabeçalhos do navegador, para entregar e proteger o site. Esses são os registros de servidor do provedor. O Quibt não mantém banco de visitantes.",
         },
         {
-          title: "3. Para que usamos os dados",
-          body: "Usamos seu cadastro apenas para organizar o acesso antecipado, entender casos de uso iniciais, entrar em contato sobre o Quibt, prevenir fraude e abuso automatizado, manter a segurança do serviço e cumprir obrigações legais. A comunicação da lista se baseia no seu consentimento; o processamento de segurança se apoia em nosso legítimo interesse de proteger o serviço, quando permitido por lei.",
+          title: "3. O que a página carrega de terceiros",
+          body: "As páginas carregam fontes do Google Fonts, então o seu navegador pede esses arquivos ao Google. Os botões de download e de documentação levam ao GitHub. Cada uma dessas empresas recebe o pedido segundo a política dela. Não há publicidade nem pixel de rastreio neste site.",
         },
         {
-          title: "4. Como protegemos os dados",
-          body: "Os campos pessoais são criptografados pela aplicação com AES-256-GCM autenticado antes do armazenamento. A deduplicação de e-mail e o rate limit usam impressões digitais HMAC não reversíveis e protegidas por chave. O acesso é restrito a operadores autorizados e não existe API pública para consultar cadastros.",
+          title: "4. Cookies",
+          body: "O site não grava cookie próprio e não roda script de análise. Trocar de idioma é um link para outra página, não um dado guardado.",
         },
         {
-          title: "5. Fornecedores e transferências",
-          body: "Usamos a Vercel para entregar o site e a Railway para executar a API e o banco privado. Esses fornecedores tratam dados em nosso nome e podem operar infraestrutura fora do Brasil de acordo com suas garantias contratuais e legais. Não vendemos seus dados pessoais.",
+          title: "5. A sua instalação do Quibt Bot",
+          body: "Quando você instala o Quibt Bot, o banco de dados, os arquivos dos bots e as suas chaves de modelo ficam na máquina em que você instalou. Esses dados não chegam ao Quibt. Se você apontar o produto para outra empresa (um provedor de modelo, E2B, Box ou Composio), a relação e os dados são entre você e ela.",
         },
         {
-          title: "6. Retenção",
-          body: "Os cadastros ficam guardados por até 365 dias após o envio ou atualização mais recente, salvo se você pedir a exclusão antes ou se uma obrigação legal exigir outro prazo. Registros antiautomatização expirados são removidos periodicamente.",
+          title: "6. Por que os registros existem",
+          body: "Os registros de servidor existem para entregar as páginas, manter o site no ar e defendê-lo de abuso — nosso legítimo interesse em operar o site. Ficam guardados pelo prazo curto que o provedor aplica e não são usados para traçar perfil de ninguém.",
         },
         {
           title: "7. Seus direitos",
-          body: "Nos termos da lei aplicável, você pode pedir confirmação do tratamento, acesso, correção, exclusão, informação sobre compartilhamento, portabilidade quando aplicável ou revogação do consentimento. Podemos solicitar dados necessários para confirmar sua identidade antes de atender ao pedido.",
+          body: "Nos termos da lei aplicável, você pode perguntar quais dados seus existem, pedir cópia, correção ou exclusão. Escreva para caio@liaforschool.com.br. Como o site não guarda cadastro, a resposta normalmente é que não existe nada além do registro curto de servidor do provedor.",
         },
         {
           title: "8. Crianças",
-          body: "A lista é destinada a pessoas capazes de fornecer validamente os próprios dados e consentimento. Não envie dados pessoais de crianças pelo formulário.",
+          body: "O site é informativo e não pede dado pessoal de ninguém, em nenhuma idade.",
         },
         {
           title: "9. Alterações",
-          body: "Podemos atualizar esta política conforme o Quibt evolui. Mudanças relevantes aparecerão nesta página com uma nova data de atualização.",
+          body: "Podemos atualizar esta política conforme o produto evolui. Mudança relevante aparece nesta página com uma nova data de atualização.",
         },
       ],
     },
     terms: {
-      title: "Termos do Site e da Lista de Espera",
-      description: "Termos para usar o site do Quibt e entrar na lista de acesso antecipado.",
+      title: "Termos do Site",
+      description: "Termos para usar o site público do Quibt Bot. O programa em si é Apache-2.0.",
       intro:
-        "Estes termos se aplicam ao site público e à lista de acesso antecipado do Quibt. O produto ainda está em desenvolvimento; entrar na lista não é uma compra nem uma garantia de acesso.",
-      lastUpdated: "Última atualização: 15 de agosto de 2026.",
+        "Estes termos valem para este site público. Eles não substituem a licença do programa: o Quibt Bot é publicado sob Apache-2.0, e é essa licença que rege o código que você baixa, instala e roda.",
+      lastUpdated: "Última atualização: 28 de agosto de 2026.",
       sections: [
         {
-          title: "1. Situação da lista de espera",
-          body: "O cadastro registra apenas seu interesse. Ele não garante seleção, data de lançamento, recurso específico, preço, disponibilidade ou continuidade. Podemos contatar participantes em etapas e pausar ou encerrar a lista.",
+          title: "1. O que é este site",
+          body: "Um site informativo sobre um produto open source. Ele não vende nada, não hospeda conta e não tem formulário. Ele aponta para o código-fonte e para os arquivos de release no GitHub.",
         },
         {
-          title: "2. Seu cadastro",
-          body: "Você deve fornecer somente informações que está autorizado a compartilhar e mantê-las razoavelmente corretas. Não coloque senhas, chaves de API, informações empresariais confidenciais, conteúdo ilegal ou dados pessoais sensíveis no formulário.",
+          title: "2. Uso permitido",
+          body: "Você pode ler as páginas, copiar o comando de instalação e baixar os arquivos de release. Não é permitido procurar vulnerabilidades no site, atrapalhar o funcionamento dele, se passar por outra pessoa ou usá-lo de forma ilegal. Para relatar um problema de segurança, siga o SECURITY.md do repositório.",
         },
         {
-          title: "3. Uso permitido",
-          body: "Você pode navegar no site e enviar um cadastro legítimo para si ou sua organização. Não é permitido procurar vulnerabilidades, contornar rate limits, automatizar cadastros abusivos, interferir no serviço, se passar por outra pessoa ou usar o site de forma ilegal.",
+          title: "3. O programa tem licença própria",
+          body: "O código está sob Apache-2.0, como publicado no repositório. Ele é fornecido no estado em que está, sem garantia, na medida em que a licença permite. Baixar um instalador não cria contrato de suporte.",
         },
         {
-          title: "4. Sem pagamento neste site",
-          body: "O site público e a lista de espera não coletam dados de pagamento nem criam uma assinatura paga. Um eventual serviço pago apresentará preço e termos aplicáveis antes da compra.",
+          title: "4. A instalação é sua",
+          body: "Quando você instala o Quibt Bot, o servidor, os bots e os computadores deles rodam na infraestrutura que você escolheu. Essa instalação é sua: os segredos, os acessos que você abre, os modelos que você conecta e o que os bots fazem por você.",
         },
         {
-          title: "5. Propriedade intelectual e open source",
-          body: "Os nomes, a marca, os personagens e o conteúdo do site Quibt permanecem protegidos pela lei aplicável. Se códigos ou componentes forem publicados sob licença open source, essa licença regerá esses materiais. Estes termos não dão acesso a repositório privado ou código ainda não publicado.",
+          title: "5. Sem pagamento neste site",
+          body: "O site não coleta dado de pagamento e não cria assinatura. Qualquer custo vem dos terceiros que você escolhe — o provedor do modelo, o provedor do computador ou o seu próprio servidor — e é pago direto a eles.",
         },
         {
-          title: "6. Disponibilidade e mudanças",
-          body: "O site e as informações de prévia são fornecidos conforme disponíveis e podem mudar durante o desenvolvimento. Na medida permitida por lei, não prometemos acesso ininterrupto nem que recursos demonstrados serão lançados exatamente como descritos.",
+          title: "6. Propriedade intelectual",
+          body: "O nome Quibt, o logo, os personagens e o texto do site continuam protegidos pela lei aplicável, mesmo com o código aberto. A licença Apache-2.0 não dá direito de marca.",
         },
         {
-          title: "7. Responsabilidade",
-          body: "Nada nestes termos exclui direitos ou responsabilidades que a lei não permita excluir. Respeitado esse limite, o Quibt não responde por perdas indiretas decorrentes apenas da confiança em material de prévia ou de indisponibilidade temporária do site.",
+          title: "7. Disponibilidade e mudanças",
+          body: "O site e os arquivos de release são fornecidos conforme disponíveis. Na medida permitida por lei, não prometemos acesso ininterrupto, e o que está descrito aqui pode mudar de uma release para outra.",
         },
         {
-          title: "8. Lei aplicável",
+          title: "8. Responsabilidade",
+          body: "Nada aqui exclui direitos ou responsabilidades que a lei não permita excluir. Respeitado esse limite, o Quibt não responde por perdas indiretas decorrentes da confiança no material deste site ou de indisponibilidade temporária.",
+        },
+        {
+          title: "9. Lei aplicável",
           body: "A lei brasileira rege estes termos. Eventuais conflitos serão tratados pelos foros competentes definidos pela legislação consumerista e processual aplicável.",
         },
       ],
     },
   },
+
 } as const;
 
 export function copyFor(locale: Locale) {

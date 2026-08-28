@@ -1,5 +1,19 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { loadEnv } from "./env.js";
+
+/** O mesmo arquivo que `docs/self-host.md` manda copiar para `.env` antes do Compose. */
+function publishedExampleEnv(): Record<string, string> {
+  const values: Record<string, string> = {};
+  for (const line of readFileSync(path.resolve(".env.example"), "utf8").split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const separator = trimmed.indexOf("=");
+    if (separator > 0) values[trimmed.slice(0, separator)] = trimmed.slice(separator + 1);
+  }
+  return values;
+}
 
 const base = {
   DATABASE_URL: "postgres://quibt:quibt@127.0.0.1:5433/quibt",
@@ -18,7 +32,7 @@ describe("loadEnv", () => {
   });
 
   it("reports the deployed stack release instead of the API package version", () => {
-    expect(loadEnv({ ...base, QUIBT_STACK_VERSION: "0.2.13" }).release).toBe("0.2.13");
+    expect(loadEnv({ ...base, QUIBT_STACK_VERSION: "0.2.14" }).release).toBe("0.2.14");
   });
 
   it("keeps explicit emulator settings for pnpm verify:fast", () => {
@@ -51,6 +65,61 @@ describe("loadEnv", () => {
         ENCRYPTION_KEY: "real-encryption-key-value",
       }),
     ).toThrow(/BETTER_AUTH_SECRET/);
+  });
+
+  it("throws when production still carries the placeholders published in .env.example", () => {
+    // 37 e 38 caracteres: passavam no comprimento mínimo e a API subia com um segredo
+    // que está no GitHub — dá para forjar o cookie de sessão de qualquer conta.
+    expect(() =>
+      loadEnv({
+        DATABASE_URL: base.DATABASE_URL,
+        NODE_ENV: "production",
+        BETTER_AUTH_SECRET: "replace-with-32-plus-character-secret", // gitleaks:allow
+        ENCRYPTION_KEY: "replace-with-64-char-hex-or-passphrase", // gitleaks:allow
+        SANDBOX_SUPERVISOR_TOKEN: "supervisor-credential-with-enough-length",
+        RESEND_API_KEY: "re_test",
+      }),
+    ).toThrow(/BETTER_AUTH_SECRET/);
+    expect(() =>
+      loadEnv({
+        DATABASE_URL: base.DATABASE_URL,
+        NODE_ENV: "production",
+        BETTER_AUTH_SECRET: "prod-auth-secret-with-enough-length",
+        ENCRYPTION_KEY: "replace-with-64-char-hex-or-passphrase", // gitleaks:allow
+        SANDBOX_SUPERVISOR_TOKEN: "supervisor-credential-with-enough-length",
+        RESEND_API_KEY: "re_test",
+      }),
+    ).toThrow(/ENCRYPTION_KEY/);
+    expect(() =>
+      loadEnv({
+        DATABASE_URL: base.DATABASE_URL,
+        NODE_ENV: "production",
+        BETTER_AUTH_SECRET: "prod-auth-secret-with-enough-length",
+        ENCRYPTION_KEY: "prod-encryption-key-with-enough-length",
+        SANDBOX_SUPERVISOR_TOKEN: "replace-with-32-plus-character-secret", // gitleaks:allow
+        RESEND_API_KEY: "re_test",
+      }),
+    ).toThrow(/SANDBOX_SUPERVISOR_TOKEN/);
+  });
+
+  it("refuses the published .env.example under the production NODE_ENV the Compose pins", () => {
+    expect(() => loadEnv({ ...publishedExampleEnv(), NODE_ENV: "production" })).toThrow(
+      /BETTER_AUTH_SECRET/,
+    );
+  });
+
+  it("boots once the operator replaced every secret docs/self-host.md lists", () => {
+    const env = loadEnv({
+      ...publishedExampleEnv(),
+      NODE_ENV: "production",
+      BETTER_AUTH_SECRET: "prod-auth-secret-with-enough-length",
+      ENCRYPTION_KEY: "prod-encryption-key-with-enough-length",
+      SANDBOX_SUPERVISOR_TOKEN: "supervisor-credential-with-enough-length",
+      BOOTSTRAP_SECRET: "bootstrap-credential-with-enough-length",
+      AUTH_EMAIL_DISABLED: "true",
+    });
+    expect(env.nodeEnv).toBe("production");
+    expect(env.sandboxSupervisorToken).toBe("supervisor-credential-with-enough-length");
   });
 
   it("loads real secrets in production", () => {

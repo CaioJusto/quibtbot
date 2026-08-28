@@ -16,8 +16,24 @@ import {
 
 const webPort = Number(process.env.WEB_PORT ?? 5173);
 
+/**
+ * Espelho de `deriveDomainKey`/`internalProxyProof` de `apps/api/src/app.ts`.
+ *
+ * Este arquivo não pode importar `@quibt/core` nem a API (ver o comentário de
+ * `apps/web/src/build-config.ts`), então a derivação é copiada. Os dois lados precisam
+ * chegar ao MESMO valor: `apps/api/src/domain-keys.test.ts` guarda os rótulos.
+ */
+const SCREEN_CAPABILITY_LABEL = "quibt-bot/screen-capability/v1";
+const INTERNAL_PROXY_LABEL = "quibt-bot/internal-proxy-proof/v1";
+
+function deriveDomainKey(authSecret: string, label: string): string {
+  return createHmac("sha256", authSecret).update(label).digest("base64url");
+}
+
 function internalProxyProof(secret: string): string {
-  return createHmac("sha256", secret).update("quibt-local-browser-proxy-v1").digest("base64url");
+  return createHmac("sha256", deriveDomainKey(secret, INTERNAL_PROXY_LABEL))
+    .update("quibt-local-browser-proxy-v1")
+    .digest("base64url");
 }
 
 function attachNovncProxy(server: ViteDevServer | PreviewServer, secret: string) {
@@ -124,10 +140,13 @@ function attachNovncProxy(server: ViteDevServer | PreviewServer, secret: string)
 export default defineConfig(({ command, mode }) => {
   const rootEnv = loadEnv(mode, path.resolve(import.meta.dirname, "../.."), "");
   const api = process.env.API_PROXY_TARGET ?? rootEnv.API_PROXY_TARGET ?? "http://127.0.0.1:3100";
-  const screenProxySecret = screenProxySecretFor(command, {
+  const authSecret = screenProxySecretFor(command, {
     ...process.env,
     BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET ?? rootEnv.BETTER_AUTH_SECRET,
   });
+  // Uma chave por trabalho: a capacidade da tela e a prova de proxy interno saem de
+  // chaves derivadas, nunca do segredo de sessão cru. A API deriva as mesmas.
+  const screenProxySecret = deriveDomainKey(authSecret, SCREEN_CAPABILITY_LABEL);
   const apiProxy = {
     target: api,
     changeOrigin: true,
@@ -135,7 +154,7 @@ export default defineConfig(({ command, mode }) => {
     // Overwrite any client-supplied value. The API accepts forwarded localhost
     // claims only when they came through this process and carry this proof.
     headers: {
-      "x-quibt-internal-proxy": internalProxyProof(screenProxySecret),
+      "x-quibt-internal-proxy": internalProxyProof(authSecret),
     },
   };
   return {

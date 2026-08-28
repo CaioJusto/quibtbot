@@ -12,6 +12,7 @@ import {
   apiBootComputer,
   type ComposioConnector,
   ComposioKeyMissingError,
+  composioAbortSignal,
   computerRefFromSession,
   DesktopSandboxProvider,
   defaultModelForProvider,
@@ -19,6 +20,7 @@ import {
   type EncryptedSecretStore,
   ensureDesktopScreenUrl,
   failRunsWithoutWorker,
+  isComposioUnknownOutcome,
   isComputerAlreadyStoppedError,
   isComputerUnreachableError,
   lessonCaptureCommand,
@@ -221,9 +223,96 @@ export function controlDenialMessage(reason: ControlDenial): string {
   return "O bot está no controle deste computador.";
 }
 
+/** Tira do texto o que parece segredo antes de ele virar linha de log. */
+function redactLogText(value: string): string {
+  return value
+    .replace(/data:[a-z/+-]+;base64,[A-Za-z0-9+/=]+/gi, "[conteúdo]")
+    .replace(/Bearer\s+\S+/gi, "Bearer [redacted]")
+    .replace(
+      /(senha|password|secret|token|api[_-]?key|authorization|cookie)"?\s*[=:]\s*"?[^\s"',}]+/gi,
+      "$1=[redacted]",
+    )
+    .replace(
+      /\b(sk-[A-Za-z0-9-]+|ak_[A-Za-z0-9]+|ck_[A-Za-z0-9]+|ey[A-Za-z0-9_-]{20,})/g,
+      "[redacted]",
+    )
+    .replace(/\b[A-Za-z0-9+/_-]{40,}={0,2}\b/g, "[redacted]")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * A linha que o servidor grava quando um handler do /rpc quebra, ou `null` quando o erro
+ * é a resposta esperada para o cliente (404, 401, 403…). Antes não ficava rastro nenhum:
+ * a tela via um erro e o servidor não dizia nem qual procedimento tinha quebrado.
+ *
+ * Vai só o procedimento, o tipo do erro e a mensagem já limpa. Nunca cabeçalho, cookie,
+ * corpo da chamada nem segredo — o log do servidor não é lugar de guardar isso.
+ */
+export function rpcErrorLine(path: readonly string[], error: unknown): string | null {
+  if (error instanceof ORPCError && error.status < 500) return null;
+  const procedure = path.length ? path.join(".") : "(desconhecido)";
+  const kind =
+    error instanceof ORPCError
+      ? `${error.name}(${error.code}/${error.status})`
+      : error instanceof Error
+        ? error.name || error.constructor.name
+        : typeof error;
+  const raw = error instanceof Error ? error.message : String(error);
+  const message = redactLogText(raw).slice(0, 300);
+  return `[rpc] ${procedure} falhou: ${kind}${message ? `: ${message}` : ""}`;
+}
+
+/** Grava o erro do handler no log do servidor. Fica fora do handler para poder ser testada. */
+export function logRpcError(
+  path: readonly string[],
+  error: unknown,
+  write: (line: string) => void = console.error,
+): void {
+  const line = rpcErrorLine(path, error);
+  if (line) write(line);
+}
+
 /** A prévia parada da tela, por bot: tirar um print custa ~1 s; quem olha em fila divide o mesmo. */
 const PREVIEW_TTL_MS = 3_000;
+/**
+ * Quantos retratos ficam guardados. Cada um chega a 6 MB em base64 e o mapa nunca
+ * esquecia ninguém: um servidor com muitos bots ia somando retratos de telas que ninguém
+ * olha mais até faltar memória. O teto guarda os últimos vistos; o resto é recapturado.
+ */
+export const PREVIEW_CACHE_MAX = 8;
 const previewCache = new Map<string, { image: string; at: number }>();
+
+/** O retrato ainda válido deste bot, jogando fora o que passou do prazo. */
+function readPreview(botId: string, now: number): { image: string; at: number } | null {
+  const entry = previewCache.get(botId);
+  if (!entry) return null;
+  if (now - entry.at >= PREVIEW_TTL_MS) {
+    previewCache.delete(botId);
+    return null;
+  }
+  return entry;
+}
+
+/** Guarda o retrato novo, apaga os vencidos e despeja o mais velho quando passa do teto. */
+function rememberPreview(botId: string, entry: { image: string; at: number }): void {
+  for (const [id, cached] of previewCache) {
+    if (entry.at - cached.at >= PREVIEW_TTL_MS) previewCache.delete(id);
+  }
+  // Reinserir põe o bot no fim da fila: o Map anda na ordem em que foi escrito.
+  previewCache.delete(botId);
+  previewCache.set(botId, entry);
+  while (previewCache.size > PREVIEW_CACHE_MAX) {
+    const oldest = previewCache.keys().next().value;
+    if (oldest === undefined) break;
+    previewCache.delete(oldest);
+  }
+}
+
+/** Quantos retratos estão guardados agora. Existe para o teste poder olhar o teto. */
+export function previewCacheSize(): number {
+  return previewCache.size;
+}
 /** Lê o PNG em base64 e apaga o arquivo, guardando o código do base64. */
 const PREVIEW_ENCODE_SCRIPT = 'base64 -w0 "$1"; status=$?; rm -f -- "$1"; exit $status';
 
@@ -1553,8 +1642,8 @@ export function createRouter(deps: RouterDeps) {
           return { image: null, capturedAt: null };
         }
         const computer = computerRefFromSession(desktop);
-        const cached = previewCache.get(bot.id);
-        if (cached && Date.now() - cached.at < PREVIEW_TTL_MS) {
+        const cached = readPreview(bot.id, Date.now());
+        if (cached) {
           return {
             image: cached.image,
             capturedAt: new Date(cached.at).toISOString(),
@@ -1592,7 +1681,7 @@ export function createRouter(deps: RouterDeps) {
         if (encoded.code !== 0 || !encoded.stdout.trim()) return { image: null, capturedAt: null };
         const image = `data:image/png;base64,${encoded.stdout.trim()}`;
         const at = Date.now();
-        previewCache.set(bot.id, { image, at });
+        rememberPreview(bot.id, { image, at });
         return { image, capturedAt: new Date(at).toISOString() };
       }),
       screenUrl: authed.computer.screenUrl.handler(async ({ context, input }) => {
@@ -2127,7 +2216,8 @@ export function createRouter(deps: RouterDeps) {
               traceId: "connections.begin",
               workspaceId: context.actor.workspaceId,
               userId: context.actor.userId,
-              signal: new AbortController().signal,
+              // Um Composio lento não pode segurar a requisição para sempre.
+              signal: composioAbortSignal(),
             },
           );
           await deps.prisma.connection.update({
@@ -2143,9 +2233,13 @@ export function createRouter(deps: RouterDeps) {
             authorizationUrl: auth.authorizationUrl,
           };
         } catch (error) {
+          // Prazo estourado numa MUTAÇÃO: o Composio pode ter criado o pedido de conexão.
+          // Marcar "error" convidaria a abrir outro; "pending" deixa o callback (e o
+          // `connections.complete`, que só consulta estado) terminar a reconciliação.
+          const unknown = isComposioUnknownOutcome(error);
           await deps.prisma.connection.update({
             where: { id: row.id },
-            data: { status: "error" },
+            data: { status: unknown ? "pending" : "error" },
           });
           throw new ORPCError("BAD_REQUEST", {
             message: sanitizeComposioError(error),
@@ -2196,7 +2290,7 @@ export function createRouter(deps: RouterDeps) {
             traceId: "connections.revoke",
             workspaceId: context.actor.workspaceId,
             userId: context.actor.userId,
-            signal: new AbortController().signal,
+            signal: composioAbortSignal(),
           });
         }
         await deps.prisma.connection.updateMany({
@@ -2515,14 +2609,16 @@ export async function completeStoredConnection(
     traceId: "connections.complete",
     workspaceId: actor.workspaceId,
     userId: actor.userId,
-    signal: new AbortController().signal,
+    signal: composioAbortSignal(),
   };
   const finished = await deps.composio
     .complete({ state, code }, adapterContext)
     .catch(() => undefined);
   const ready =
     Boolean(finished) ||
-    (await deps.composio.connectionReady(actor.userId, existing.provider).catch(() => false));
+    (await deps.composio
+      .connectionReady(actor.userId, existing.provider, composioAbortSignal())
+      .catch(() => false));
   if (!ready) return;
 
   await deps.prisma.connection.updateMany({
@@ -2578,12 +2674,16 @@ export async function deleteAccountData(deps: RouterDeps, actor: Actor): Promise
           traceId: "account.delete",
           workspaceId: actor.workspaceId,
           userId,
-          signal: new AbortController().signal,
+          signal: composioAbortSignal(),
         }),
       ),
     );
   }
 
+  // Tudo numa transação só, de propósito: apagar meia conta é pior do que não apagar.
+  // Ela cabia mal nos 5 s que o Prisma dava (13,4 s medidos numa conta com histórico); o
+  // prazo agora vem do `createDb` e os índices novos de chave estrangeira derrubaram o
+  // custo da cascata (1466 ms -> 228 ms num bot com 10 mil runs, medido com EXPLAIN ANALYZE).
   await deps.prisma.$transaction(async (tx) => {
     await tx.deploymentSettings.updateMany({
       where: { ownerUserId: userId },
@@ -2761,10 +2861,12 @@ async function snapshot(
       orderBy: { seq: "desc" },
     }),
     deps.prisma.agentHome.findUnique({ where: { botId } }),
-    deps.prisma.bot.update({
-      where: { id: botId },
-      data: { unread: false },
-    }),
+    // A tela relê a conversa a cada 4 s. Marcar como lido o que já está lido era uma
+    // escrita a cada leitura, em toda tela aberta, e ainda empurrava o `updatedAt` do
+    // bot — o que remexia a ordem da lista de bots sem nada ter mudado.
+    bot.unread
+      ? deps.prisma.bot.update({ where: { id: botId }, data: { unread: false } })
+      : undefined,
   ]);
   const run = await reconcileStrandedRun(deps, queued);
   const projected = projectMessages(events);

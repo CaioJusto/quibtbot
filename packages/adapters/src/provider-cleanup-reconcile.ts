@@ -13,6 +13,7 @@ import {
   isBootOrphanRefActive,
   isBootOrphanRow,
   isLifecycleCleanupRow,
+  type LifecycleIntentContext,
   type LifecycleIntentRow,
   lifecycleContextFromRow,
   refFromLifecycleRow,
@@ -20,7 +21,11 @@ import {
   resolveLifecycleCleanupIntent,
   validateLifecycleCleanupIntent,
 } from "./lifecycle-cleanup-intent.js";
-import { destroyBotSessionForRef, shouldPreserveSharedComputer } from "./sandbox-destroy.js";
+import {
+  destroyBotSessionForRef,
+  shouldPreserveSharedComputer,
+  stopSandboxUnlessAlreadyGone,
+} from "./sandbox-destroy.js";
 import {
   claimComputerSessionStartGate,
   type ProviderCleanupAction,
@@ -99,6 +104,42 @@ async function reconcileBootOrphanIntent(
   }
 }
 
+/**
+ * "missing" tem dois donos bem diferentes.
+ *
+ * A linha pode nunca ter tido alvo (campos incompletos), e aí não há trabalho a dar por
+ * terminado. Ou o alvo já SAIU: o processo morreu entre a transação final da exclusão e
+ * `resolveLifecycleCleanupIntent`, então a sessão e o bot já não existem e a validação
+ * passou a devolver "missing" — a intent ficava pendente para sempre, retentada a cada
+ * cinco minutos e sem nada a fazer. Sessão e bot fora = o trabalho terminou.
+ *
+ * Só a ausência dos DOIS conta. A sessão e o bot saem juntos, na mesma transação, depois
+ * do provedor; com o bot vivo a linha sumida é outra história e a intent continua pendente.
+ * Se a consulta do bot não puder ser feita, fica pendente também: presumir "sumiu" fecharia
+ * uma intent viva.
+ */
+async function vanishedLifecycleTarget(
+  prisma: PrismaClient,
+  row: LifecycleIntentRow,
+): Promise<LifecycleIntentContext | null> {
+  const ctx = lifecycleContextFromRow(row);
+  if (!ctx) return null;
+  const session = await prisma.desktopSession.findUnique({
+    where: { botId: ctx.sessionBotId },
+    select: { botId: true },
+  });
+  if (session) return null;
+  try {
+    const bot = await prisma.bot.findUnique({
+      where: { id: ctx.sessionBotId },
+      select: { id: true },
+    });
+    return bot ? null : ctx;
+  } catch {
+    return null;
+  }
+}
+
 async function reconcileLifecycleIntent(
   deps: {
     prisma: PrismaClient;
@@ -110,6 +151,18 @@ async function reconcileLifecycleIntent(
 ): Promise<"resolved" | "pending" | "cancelled"> {
   const validation = await validateLifecycleCleanupIntent(deps.prisma, row);
   if (!validation.ok) {
+    if (validation.reason === "missing") {
+      const vanished = await vanishedLifecycleTarget(deps.prisma, row);
+      if (vanished) {
+        await resolveLifecycleCleanupIntent(deps.prisma, {
+          workspaceId: row.workspaceId,
+          sessionBotId: vanished.sessionBotId,
+          lifecycleAction: vanished.lifecycleAction,
+          lifecycleToken: vanished.lifecycleToken,
+        });
+        return "resolved";
+      }
+    }
     if (validation.reason === "reactivated" || validation.reason === "stale") {
       await cancelLifecycleCleanupIntent(deps.prisma, {
         workspaceId: row.workspaceId,
@@ -146,11 +199,11 @@ async function reconcileLifecycleIntent(
           if (!(await validateLifecycleCleanupIntent(deps.prisma, row)).ok) {
             throw new Error("lost suspend claim");
           }
-          await deps.sandbox.stop(ref, adapterCtx);
+          await stopSandboxUnlessAlreadyGone(deps.sandbox, ref, adapterCtx);
         });
         if (!gated.ok) return "pending";
       } else {
-        await deps.sandbox.stop(ref, adapterCtx);
+        await stopSandboxUnlessAlreadyGone(deps.sandbox, ref, adapterCtx);
       }
       const finalized = await finalizeLifecycleStopAfterProvider(deps.prisma, {
         sessionBotId: ctx.sessionBotId,

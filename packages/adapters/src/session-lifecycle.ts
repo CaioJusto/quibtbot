@@ -266,6 +266,33 @@ export async function validateDesktopDeleteClaim(
   return "lost";
 }
 
+/**
+ * Renova a marca de exclusão enquanto ela está em uso.
+ *
+ * Apagar o histórico pesado em lotes pode passar de DESKTOP_DELETE_STALE_MS. Sem renovar,
+ * `recoverStaleDesktopDelete` devolveria a sessão a "running" no meio do trabalho e o
+ * dono da marca perderia a corrida contra si mesmo.
+ */
+export async function renewDesktopDeleteClaim(
+  prisma: PrismaClient,
+  botId: string,
+  token: string,
+  now = new Date(),
+): Promise<boolean> {
+  const renewed = await prisma.desktopSession.updateMany({
+    where: { botId, state: "deleting", bootClaimToken: token },
+    data: { bootClaimedAt: now },
+  });
+  return renewed.count === 1;
+}
+
+/**
+ * Encerra a exclusão devolvendo a sessão a "stopped" e SOLTANDO a marca.
+ *
+ * Cuidado: quem solta a marca perde a retomada. A exclusão de bot não usa isto — ela
+ * segura o estado "deleting" e o token até a remoção final da linha
+ * (`bot-destroy-finalize.ts`), para que uma falha no meio possa ser retomada.
+ */
 export async function finalizeDesktopDelete(
   prisma: PrismaClient,
   botId: string,

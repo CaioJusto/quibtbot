@@ -7,6 +7,8 @@ import {
   EVENT_PAGE_SIZE,
   eventsAfter,
   followThreadEvents,
+  NOTIFY_PAYLOAD_MAX_BYTES,
+  publishLiveProgress,
 } from "./events.js";
 
 class FakeClient extends EventEmitter {
@@ -220,5 +222,81 @@ describe("followThreadEvents", () => {
     await consumer;
     expect(seen).toEqual([0, 1, 2]);
     await notifier.close();
+  });
+});
+
+/**
+ * Postgres refuses a NOTIFY payload of 8000 bytes or more, so a long answer used to raise
+ * 22023 in the middle of the stream and the run died with it.
+ */
+describe("publishLiveProgress", () => {
+  function fakePrisma() {
+    const sent: string[] = [];
+    const prisma = {
+      $executeRaw: vi.fn(async (_sql: TemplateStringsArray, payload: string) => {
+        sent.push(payload);
+        return 1;
+      }),
+    } as unknown as PrismaClient;
+    return { prisma, sent };
+  }
+
+  const envelope = {
+    workspaceId: "ws-1",
+    threadId: "thread-1",
+    botId: "bot-1",
+    runId: "run-1",
+  };
+
+  it("cuts an ASCII answer above 9 KB to fit the NOTIFY limit", async () => {
+    const { prisma, sent } = fakePrisma();
+    const text = "a".repeat(9_000);
+    await publishLiveProgress(prisma, {
+      ...envelope,
+      payload: { text, streaming: true },
+    });
+    expect(sent).toHaveLength(1);
+    expect(Buffer.byteLength(sent[0]!, "utf8")).toBeLessThan(NOTIFY_PAYLOAD_MAX_BYTES + 1);
+    const parsed = JSON.parse(sent[0]!) as {
+      type: string;
+      payload: { text: string; streaming: boolean; truncated?: boolean };
+    };
+    expect(parsed.type).toBe("thread.progress");
+    expect(parsed.payload.truncated).toBe(true);
+    expect(parsed.payload.streaming).toBe(true);
+    expect(text.startsWith(parsed.payload.text.replace(/…$/, ""))).toBe(true);
+  });
+
+  it("cuts a multibyte answer above 9 KB without splitting a character", async () => {
+    const { prisma, sent } = fakePrisma();
+    // Accents (2 bytes), an emoji (4 bytes) and a newline (escaped by JSON): counting
+    // characters would still overflow the byte limit.
+    const text = "ação é ótimo 🙂\n".repeat(600);
+    expect(Buffer.byteLength(text, "utf8")).toBeGreaterThan(9_000);
+    await publishLiveProgress(prisma, { ...envelope, payload: { text } });
+    expect(sent).toHaveLength(1);
+    expect(Buffer.byteLength(sent[0]!, "utf8")).toBeLessThan(NOTIFY_PAYLOAD_MAX_BYTES + 1);
+    const parsed = JSON.parse(sent[0]!) as { payload: { text: string } };
+    // No U+FFFD: the cut landed on a code point boundary.
+    expect(parsed.payload.text).not.toContain("\uFFFD");
+    expect(text.startsWith(parsed.payload.text.replace(/…$/, ""))).toBe(true);
+  });
+
+  it("sends a short tick untouched", async () => {
+    const { prisma, sent } = fakePrisma();
+    await publishLiveProgress(prisma, { ...envelope, payload: { text: "olá 🙂" } });
+    const parsed = JSON.parse(sent[0]!) as { payload: { text: string; truncated?: boolean } };
+    expect(parsed.payload).toEqual({ text: "olá 🙂" });
+  });
+
+  it("never lets a failed live tick kill the turn", async () => {
+    const prisma = {
+      $executeRaw: vi.fn(async () => {
+        throw new Error("payload string too long");
+      }),
+    } as unknown as PrismaClient;
+    await expect(
+      publishLiveProgress(prisma, { ...envelope, payload: { text: "oi" } }),
+    ).resolves.toBeUndefined();
   });
 });

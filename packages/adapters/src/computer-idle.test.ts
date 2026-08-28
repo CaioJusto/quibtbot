@@ -334,6 +334,16 @@ describe("sleepComputerIfIdle", () => {
     },
   );
 
+  it("Box: a mensagem real de 404 também conclui o stop ocioso", async () => {
+    const { prisma, sandbox, stop, desktop } = makeIdleHarness("box");
+    stop.mockRejectedValueOnce(
+      new Error("box api POST /boxes/box-a/stop failed: 404 box not found"),
+    );
+    await sleepComputerIfIdle({ prisma, sandbox }, "bot-a");
+    expect(desktop.state).toBe("suspended");
+    expect(desktop.bootClaimToken).toBeNull();
+  });
+
   it("keeps suspending claim and pending stop intent when provider stop fails", async () => {
     const { prisma, sandbox, stop, desktop, orphanCreate } = makeIdleHarness("box");
     stop.mockRejectedValueOnce(new Error("stop failed"));

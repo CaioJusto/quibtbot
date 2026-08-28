@@ -25,7 +25,7 @@ const outsider: Actor = {
   isDeploymentOwner: false,
 };
 
-function harness() {
+function harness(options: { unread?: boolean } = {}) {
   const now = new Date("2026-08-26T12:00:00Z");
   const conversation = {
     id: "conversation-1",
@@ -42,6 +42,7 @@ function harness() {
     thread: { id: "thread-1" },
     desktopSession: null,
     activeConversationId: conversation.id,
+    unread: options.unread ?? false,
   };
   const group = {
     id: "group-1",
@@ -75,6 +76,7 @@ function harness() {
     ]),
   );
   const messageQueries: Array<Record<string, unknown>> = [];
+  const botUpdates: Array<Record<string, unknown>> = [];
   const botScopes: Array<Record<string, unknown>> = [];
   const groupScopes: Array<Record<string, unknown>> = [];
 
@@ -89,7 +91,11 @@ function harness() {
           : null;
       },
       findUnique: async () => ({ activeConversationId: conversation.id }),
-      update: async () => bot,
+      update: async (args: { data: Record<string, unknown> }) => {
+        botUpdates.push(args.data);
+        bot.unread = false;
+        return bot;
+      },
     },
     botGroup: {
       findFirst: async (args: { where: Record<string, unknown> }) => {
@@ -148,6 +154,7 @@ function harness() {
   return {
     router: createRouter(deps),
     messageQueries,
+    botUpdates,
     botScopes,
     groupScopes,
   };
@@ -226,5 +233,27 @@ describe("server history pagination", () => {
       workspaceId: outsider.workspaceId,
       userId: outsider.userId,
     });
+  });
+});
+
+describe("unread flag on read", () => {
+  // A tela chama threads/get a cada 4 s. Antes, cada chamada escrevia no bot.
+  it("does not write when the thread is already read", async () => {
+    const { router, botUpdates } = harness({ unread: false });
+
+    await call(router.threads.get, { botId: "bot-1" }, { context: { actor: owner } });
+    await call(router.threads.get, { botId: "bot-1" }, { context: { actor: owner } });
+
+    expect(botUpdates).toEqual([]);
+  });
+
+  it("clears the unread mark once, on the read that finds it", async () => {
+    const { router, botUpdates } = harness({ unread: true });
+
+    await call(router.threads.get, { botId: "bot-1" }, { context: { actor: owner } });
+    expect(botUpdates).toEqual([{ unread: false }]);
+
+    await call(router.threads.get, { botId: "bot-1" }, { context: { actor: owner } });
+    expect(botUpdates).toHaveLength(1);
   });
 });

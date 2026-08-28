@@ -1,3 +1,8 @@
+import { lookup as dnsLookup } from "node:dns/promises";
+import { isIP } from "node:net";
+import { isPrivateMcpAddress, type ResolveHost } from "./mcp-http.js";
+import { createGuardedFetch, type ProbeNetworkPolicy } from "./pinned-fetch.js";
+
 /**
  * Sondagem da credencial do modelo antes de gravar.
  *
@@ -22,8 +27,23 @@
  *
  * Qualquer membro do workspace chama `models.connect`, e a URL local é dele. Para a API
  * não virar um oráculo de portas internas: nada de seguir redirect, o status numérico
- * não volta para a tela, e só um corpo com a cara do Ollama / de um servidor
- * OpenAI-compatible conta como "confirmado".
+ * não volta para a tela, e uma porta fechada, um serviço estranho e um corpo sem cara de
+ * modelo terminam todos na MESMA frase — o que responde não vaza pela mensagem.
+ *
+ * Onde a sonda pode bater ({@link isAllowedModelEndpoint}) é uma política própria, e não
+ * o guarda público de `mcp-http.ts`: o Ollama e o LM Studio moram em HTTP local, e de
+ * dentro de um container o caminho de volta é `host.docker.internal`. Então:
+ * - passa o loopback literal (127.x, ::1), `localhost` e `host.docker.internal`;
+ * - passa um endereço público (um vLLM no servidor do dono);
+ * - não passa 169.254.169.254 (metadados da nuvem), link-local, 10/8, 172.16/12,
+ *   192.168/16, CGNAT, multicast e o resto do reservado;
+ * - um nome é julgado pelo IP que ele resolve, não pelo texto, e um nome que aponta para
+ *   a rede interna (ou para o loopback, o truque do rebinding) é recusado.
+ *
+ * E a conferência não termina no preflight: quem abre o socket é o `fetch` de
+ * `pinned-fetch.ts`, preso nos IPs aprovados e com o mesmo guarda em cada redirect. Antes
+ * disso o `fetch` global resolvia o nome OUTRA VEZ na hora de conectar, e o mesmo nome
+ * podia responder 169.254.169.254 no segundo lookup.
  */
 
 export const MODEL_PROBE_TIMEOUT_MS = 8_000;
@@ -58,7 +78,65 @@ export interface ModelProbeOptions {
    * container, e "Abra o Ollama" para quem já o abriu seria conselho errado.
    */
   insideContainer?: boolean;
+  /** Os testes trocam o DNS; em produção é o `lookup` do Node. */
+  resolveHost?: ResolveHost;
 }
+
+/** Os nomes locais que a documentação promete, e que valem sem consultar o DNS. */
+export const LOCAL_MODEL_HOSTS = ["localhost", DOCKER_HOST_GATEWAY] as const;
+
+const resolveHostDefault: ResolveHost = async (hostname) =>
+  dnsLookup(hostname, { all: true, verbatim: true });
+
+/** Loopback literal: o computador da pessoa quando a API roda fora de container. */
+function isLoopbackAddress(address: string): boolean {
+  const value = address
+    .toLowerCase()
+    .replace(/^\[|\]$/g, "")
+    .replace(/^::ffff:/, "");
+  if (isIP(value) === 4) return value.startsWith("127.");
+  return isIP(value) === 6 && value === "::1";
+}
+
+/**
+ * Para onde `models.connect` pode mandar uma requisição. Só o loopback literal, os nomes
+ * locais documentados e os endereços públicos passam; o resto da rede interna — incluindo
+ * um nome que resolve para dentro dela — é recusado antes de qualquer socket.
+ */
+export async function isAllowedModelEndpoint(
+  base: string,
+  resolver: ResolveHost = resolveHostDefault,
+): Promise<boolean> {
+  let url: URL;
+  try {
+    url = new URL(base);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+  if (url.username || url.password) return false;
+  const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if ((LOCAL_MODEL_HOSTS as readonly string[]).includes(hostname)) return true;
+  if (isIP(hostname)) return isLoopbackAddress(hostname) || !isPrivateMcpAddress(hostname);
+  let addresses: Array<{ address: string }>;
+  try {
+    addresses = await resolver(hostname);
+  } catch {
+    return false;
+  }
+  // Um nome vale pelo IP que ele entrega, e um só endereço interno derruba a lista
+  // inteira: é assim que o rebinding deixa de valer a pena.
+  return addresses.length > 0 && addresses.every(({ address }) => !isPrivateMcpAddress(address));
+}
+
+/**
+ * A mesma política de {@link isAllowedModelEndpoint}, na forma que o socket entende: o
+ * preflight e a conexão não podem divergir, então os dois leem daqui.
+ */
+const MODEL_PROBE_POLICY: ProbeNetworkPolicy = {
+  isTrustedHost: (hostname) => (LOCAL_MODEL_HOSTS as readonly string[]).includes(hostname),
+  isAllowedLiteral: (address) => isLoopbackAddress(address) || !isPrivateMcpAddress(address),
+};
 
 export function isProbedProvider(provider: string): boolean {
   return (PROBED_PROVIDERS as readonly string[]).includes(provider);
@@ -68,7 +146,14 @@ export async function probeModelCredential(
   input: ModelProbeInput,
   options: ModelProbeOptions = {},
 ): Promise<ModelProbeResult> {
-  const fetchImpl = options.fetchImpl ?? fetch;
+  const resolveHost = options.resolveHost ?? resolveHostDefault;
+  // O `fetchImpl` dos testes entra como transporte; sem ele, quem conecta é o socket
+  // preso no IP que a política aprovou.
+  const fetchImpl = createGuardedFetch({
+    policy: MODEL_PROBE_POLICY,
+    resolveHost,
+    transport: options.fetchImpl,
+  });
   const timeoutMs = options.timeoutMs ?? MODEL_PROBE_TIMEOUT_MS;
   const insideContainer = options.insideContainer ?? false;
   const secret = input.apiKey.trim();
@@ -102,6 +187,7 @@ export async function probeModelCredential(
         fetchImpl,
         timeoutMs,
         insideContainer,
+        resolveHost,
         base: ollamaRoot(secret),
         path: "/api/tags",
         looksRight: (body) => Array.isArray((body as { models?: unknown })?.models),
@@ -115,6 +201,7 @@ export async function probeModelCredential(
         fetchImpl,
         timeoutMs,
         insideContainer,
+        resolveHost,
         base: secret,
         path: "/models",
         looksRight: (body) => Array.isArray((body as { data?: unknown })?.data),
@@ -175,6 +262,7 @@ async function probeLocal(input: {
   fetchImpl: typeof fetch;
   timeoutMs: number;
   insideContainer: boolean;
+  resolveHost: ResolveHost;
   base: string;
   path: string;
   looksRight: (body: unknown) => boolean;
@@ -187,29 +275,33 @@ async function probeLocal(input: {
   if (!base) {
     return { ok: false, message: `Cole a URL do servidor do modelo (ex. ${input.example}).` };
   }
+  if (!(await isAllowedModelEndpoint(base, input.resolveHost))) {
+    // Nenhum socket é aberto, e a frase é a mesma para o metadado da nuvem, para a
+    // impressora do escritório e para o nome que aponta para dentro da rede.
+    return {
+      ok: false,
+      message: `${input.name} precisa estar no seu computador ou num endereço público. Use ${input.example} (ou ${DOCKER_HOST_GATEWAY}, se o Quibt roda em Docker).`,
+    };
+  }
+  // Porta fechada, servidor que demora, 3xx, 404 e corpo de outro serviço terminam nesta
+  // frase única: a sonda não descreve o que mora em cada porta.
+  const noAnswer: ModelProbeResult =
+    input.insideContainer && isLoopback(base)
+      ? {
+          ok: false,
+          message: `${input.name} não respondeu em ${base}. O Quibt roda em Docker e não alcança 127.0.0.1 do seu computador; use ${dockerHostUrl(base)}.`,
+        }
+      : { ok: false, message: `${input.name} não respondeu em ${base}. ${input.openIt}` };
   let res: Response;
   try {
     res = await input.fetchImpl(`${base}${input.path}`, {
       redirect: "manual",
       signal: AbortSignal.timeout(input.timeoutMs),
     });
-  } catch (error) {
-    if (input.insideContainer && isLoopback(base) && !isTimeout(error)) {
-      return {
-        ok: false,
-        message: `${input.name} não respondeu em ${base}. O Quibt roda em Docker e não alcança 127.0.0.1 do seu computador; use ${dockerHostUrl(base)}.`,
-      };
-    }
-    return { ok: false, message: `${input.name} não respondeu em ${base}. ${input.openIt}` };
+  } catch {
+    return noAnswer;
   }
-  // Um 3xx (redirect: manual), um 404 ou um corpo de outro serviço caem todos aqui; o
-  // status não volta para a tela, para a sonda não descrever o que mora em cada porta.
-  if (!res.ok || !input.looksRight(await res.json().catch(() => null))) {
-    return {
-      ok: false,
-      message: `Algo respondeu em ${base}, mas não parece ${input.looksLike}. Confira a URL e tente de novo.`,
-    };
-  }
+  if (!res.ok || !input.looksRight(await res.json().catch(() => null))) return noAnswer;
   return { ok: true, probed: true, base, message: `Servidor confirmado em ${base}.` };
 }
 

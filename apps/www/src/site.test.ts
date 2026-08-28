@@ -150,6 +150,35 @@ describe("landing pricing", () => {
     expect(publicSurface).not.toMatch(/waitlist|lista-de-espera|Quibt Cloud/i);
   });
 
+  it("keeps the legal pages free of the waitlist that no longer exists", () => {
+    // As páginas de Privacidade e Termos são texto jurídico: elas não podem descrever um
+    // formulário que o site não tem mais (nome, e-mail, @ no X, banco na Railway). O teste
+    // antigo só olhava a landing, então o texto legal ficou para trás.
+    const i18n = readFileSync(path.join(path.dirname(pages), "i18n.ts"), "utf8");
+    expect(i18n).not.toMatch(/waitlist|lista de espera/i);
+    for (const locale of ["en", "pt-BR"] as const) {
+      for (const page of ["privacy", "terms"] as const) {
+        const content = COPY[locale][page];
+        const text = [
+          content.title,
+          content.description,
+          content.intro,
+          ...content.sections.flatMap((section) => [section.title, section.body]),
+        ].join("\n");
+        expect(text, `${locale}/${page}`).not.toMatch(/waitlist|lista de espera/i);
+        expect(text, `${locale}/${page}`).not.toMatch(/early access|acesso antecipado/i);
+        expect(text, `${locale}/${page}`).not.toMatch(/Railway/i);
+        expect(text, `${locale}/${page}`).not.toMatch(/@ ?no X|X handle/i);
+        expect(text, `${locale}/${page}`).not.toMatch(/quibt cloud/i);
+        // O site é estático: ele não recebe cadastro, e o produto roda na máquina do leitor.
+        expect(text, `${locale}/${page}`).toMatch(
+          /no form|does not collect|não coleta|não existe formulário/i,
+        );
+        expect(text, `${locale}/${page}`).toMatch(/Apache|open[- ]source/i);
+      }
+    }
+  });
+
   it("keeps public CTAs free of hosted pricing and sign-up marketing", () => {
     const landing = readFileSync(path.join(path.dirname(pages), "components", "LandingPage.astro"), "utf8");
     const header = readFileSync(path.join(path.dirname(pages), "components", "Header.astro"), "utf8");

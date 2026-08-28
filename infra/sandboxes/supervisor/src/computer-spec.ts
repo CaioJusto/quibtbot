@@ -161,6 +161,43 @@ export function screenUrlFor(hostPort: string, host = SCREEN_HOST, password?: st
   return password ? `${url}?password=${encodeURIComponent(password)}` : url;
 }
 
+export interface ScreenUrlSources {
+  /** IP do container na rede interna do Docker, quando `SANDBOX_SCREEN_NETWORK=internal`. */
+  internalAddress?: string;
+  /** Porta que o Docker publicou no host para o noVNC desta sessão. */
+  hostPort?: string;
+  /** Porta do noVNC dentro do container (6080 + display − 1). */
+  novncPort: number | string;
+  password?: string;
+}
+
+/**
+ * Qual endereço da tela vai para o cliente.
+ *
+ * Quem alcança a tela nem sempre é quem roda o supervisor. Com a rede interna ligada a URL
+ * era sempre o IP do container (`172.x`), que só vale para containers do mesmo host marcados
+ * `quibt.screen-proxy`; sem ela, era o `127.0.0.1` do host do supervisor. Nos dois casos um
+ * cliente noutro aparelho via tela preta, e `SANDBOX_SCREEN_HOST` — que existe justamente
+ * para dizer "os clientes chegam por aqui" — era ignorado.
+ *
+ * Agora um `SANDBOX_SCREEN_HOST` declarado ganha da rede interna e usa a porta publicada no
+ * host. Ele anda junto com `SANDBOX_SCREEN_BIND_HOST`: sem abrir o bind, não há o que alcançar.
+ */
+export function resolveScreenUrl(
+  sources: ScreenUrlSources,
+  env: { SANDBOX_SCREEN_HOST?: string; SANDBOX_SCREEN_NETWORK?: string } = process.env,
+): string | undefined {
+  const declaredHost = env.SANDBOX_SCREEN_HOST?.trim();
+  if (declaredHost && sources.hostPort) {
+    return screenUrlFor(sources.hostPort, declaredHost, sources.password);
+  }
+  if (env.SANDBOX_SCREEN_NETWORK === "internal" && sources.internalAddress) {
+    return screenUrlFor(String(sources.novncPort), sources.internalAddress, sources.password);
+  }
+  if (sources.hostPort) return screenUrlFor(sources.hostPort, SCREEN_HOST, sources.password);
+  return undefined;
+}
+
 export function xdotoolCommand(input: SandboxInput): string[] {
   if (input.kind === "key") {
     const key = mapKey(input.key);

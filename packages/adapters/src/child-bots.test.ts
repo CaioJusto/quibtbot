@@ -90,6 +90,9 @@ function makeDeleteHarness(
     computer: desktop.computer,
   };
   const sessions = [desktop, siblingDesktop];
+  // Histórico pesado que o expurgo em lotes tem de esvaziar antes da transação final.
+  const history = { run: ["run-1", "run-2"], task: ["task-1"] };
+  const removed = { session: false, bot: false };
   const destroy = vi.fn(async (_ref?: unknown, _ctx?: unknown) => undefined);
   const stop = vi.fn(async (_ref?: unknown, _ctx?: unknown) => undefined);
   const destroyBotSession = vi.fn(
@@ -112,15 +115,32 @@ function makeDeleteHarness(
         workspaceId: "ws-1",
         desktopSession: desktop,
       })),
-      delete: vi.fn(async () => undefined),
+      delete: vi.fn(async () => {
+        removed.bot = true;
+        return undefined;
+      }),
     },
     run: {
       updateMany: vi.fn(async () => ({ count: 0 })),
       count: vi.fn(async () => 0),
+      findMany: vi.fn(async () => history.run.map((id) => ({ id }))),
+      deleteMany: vi.fn(async ({ where }: { where: { id: { in: string[] } } }) => {
+        const ids = where.id.in;
+        history.run = history.run.filter((id) => !ids.includes(id));
+        return { count: ids.length };
+      }),
+    },
+    task: {
+      findMany: vi.fn(async () => history.task.map((id) => ({ id }))),
+      deleteMany: vi.fn(async ({ where }: { where: { id: { in: string[] } } }) => {
+        const ids = where.id.in;
+        history.task = history.task.filter((id) => !ids.includes(id));
+        return { count: ids.length };
+      }),
     },
     desktopSession: {
       findUnique: vi.fn(async ({ where }: { where: { botId?: string } }) => {
-        if (where.botId === "bot-a") return desktop;
+        if (where.botId === "bot-a") return removed.session ? null : desktop;
         return null;
       }),
       findMany: vi.fn(
@@ -182,7 +202,16 @@ function makeDeleteHarness(
           return { count: 1 };
         },
       ),
-      deleteMany: vi.fn(async () => ({ count: 1 })),
+      // Remoção cercada: a linha só sai para quem ainda segura a marca de exclusão.
+      deleteMany: vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
+        if (removed.session) return { count: 0 };
+        if (where.state && where.state !== desktop.state) return { count: 0 };
+        if (where.bootClaimToken !== undefined && where.bootClaimToken !== desktop.bootClaimToken) {
+          return { count: 0 };
+        }
+        removed.session = true;
+        return { count: 1 };
+      }),
       count: vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
         if (where.computerId === "computer-1") {
           return sessions.filter((s) => s.botId !== "bot-a").length;
@@ -219,6 +248,8 @@ function makeDeleteHarness(
     siblingDesktop,
     fixture,
     home,
+    history,
+    removed,
   };
 }
 
@@ -372,13 +403,19 @@ describe("destroyBot provider isolation", () => {
     expect(destroy).toHaveBeenCalled();
   });
 
-  it("keeps providerRef until destroy completes", async () => {
-    const { prisma, sandbox, destroy, desktop, home } = makeDeleteHarness("box");
+  it("keeps the deleting claim and providerRef until the row itself is removed", async () => {
+    const { prisma, sandbox, destroy, desktop, home, history, removed } = makeDeleteHarness("box");
     destroy.mockImplementationOnce(async () => {
       expect(desktop.providerRef).toBe("box-a");
     });
     await destroyBot({ prisma, sandbox, home }, "bot-a", deleteContext());
-    expect(desktop.providerRef).toBeNull();
+    // A marca de exclusão só sai junto com a linha: até lá a intent pendente continua
+    // válida e o retry consegue retomar de onde parou.
+    expect(desktop.providerRef).toBe("box-a");
+    expect(desktop.state).toBe("deleting");
+    expect(removed.session).toBe(true);
+    expect(removed.bot).toBe(true);
+    expect(history).toEqual({ run: [], task: [] });
   });
 
   it("keeps lifecycle destroy intent pending when provider destroy fails", async () => {

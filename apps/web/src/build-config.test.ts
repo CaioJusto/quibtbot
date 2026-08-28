@@ -11,6 +11,31 @@ describe("screenProxySecretFor", () => {
       /BETTER_AUTH_SECRET/,
     );
   });
+
+  it("recusa o placeholder publicado no .env.example", () => {
+    // 37 caracteres: passava no mínimo de 32 e não estava na lista de recusa.
+    expect(() =>
+      screenProxySecretFor("serve", {
+        NODE_ENV: "production",
+        BETTER_AUTH_SECRET: "replace-with-32-plus-character-secret", // gitleaks:allow
+      }),
+    ).toThrow(/BETTER_AUTH_SECRET/);
+    expect(() =>
+      screenProxySecretFor("serve", {
+        NODE_ENV: "production",
+        BETTER_AUTH_SECRET: "dev-secret-change-me-please-32chars",
+      }),
+    ).toThrow(/BETTER_AUTH_SECRET/);
+  });
+
+  it("segue aceitando o exemplo enquanto a máquina é de desenvolvimento", () => {
+    expect(
+      screenProxySecretFor("serve", {
+        NODE_ENV: "development",
+        BETTER_AUTH_SECRET: "replace-with-32-plus-character-secret", // gitleaks:allow
+      }),
+    ).toBe("replace-with-32-plus-character-secret");
+  });
 });
 
 describe("previewAllowedHosts", () => {

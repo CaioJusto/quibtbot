@@ -23,12 +23,22 @@ services:
     env_file:
       - ../../.env
     environment:
+      # O `.env` desta máquina é copiado do `.env.example`, que traz NODE_ENV=development para
+      # o `pnpm dev`. No compose, `env_file` ganharia da imagem e religaria os placeholders de
+      # segredo, a derivação do token do supervisor a partir do segredo de sessão e um CORS que
+      # aceita qualquer localhost com credenciais. `environment` ganha do `env_file`: trava aqui.
+      NODE_ENV: production
       DATA_DIR: /data
       SUPERVISOR_HOST: "0.0.0.0"
       SUPERVISOR_PORT: "7091"
       DOCKER_SOCKET: /var/run/docker.sock
       QUIBT_COMPUTER_IMAGE: quibt/computer:local
       SANDBOX_SCREEN_NETWORK: internal
+    # Sem `ports`: a 7091 manda no Docker deste host, então ela fica na rede interna do
+    # Compose. Quem quer o computador noutra máquina carrega, além do compose de instalação,
+    # o arquivo `docker-compose.supervisor-tls.yml`, que põe um Caddy com TLS na frente —
+    # nunca a porta crua. Ele mora à parte porque o Compose interpola o arquivo inteiro ao
+    # carregar, mesmo com o profile desligado.
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ../../data:/data
@@ -52,6 +62,8 @@ services:
     env_file:
       - ../../.env
     environment:
+      # Ver o comentário do supervisor: um NODE_ENV antigo no `.env` não pode rebaixar a API.
+      NODE_ENV: production
       DATABASE_URL: postgres://quibt:quibt@postgres:5432/quibt
       DATA_DIR: /data
       ARTIFACTS_DIR: /data/artifacts
@@ -83,6 +95,8 @@ services:
     env_file:
       - ../../.env
     environment:
+      # Ver o comentário do supervisor: o worker roda o mesmo código da API.
+      NODE_ENV: production
       DATABASE_URL: postgres://quibt:quibt@postgres:5432/quibt
       DATA_DIR: /data
       ARTIFACTS_DIR: /data/artifacts
@@ -106,6 +120,8 @@ services:
       dockerfile: infra/compose/Dockerfile
     command: ["pnpm", "--filter", "@quibt/web", "preview", "--host", "0.0.0.0", "--port", "5173"]
     environment:
+      # O `vite preview` também decide pelo NODE_ENV se aceita um segredo de exemplo.
+      NODE_ENV: production
       API_PROXY_TARGET: http://api:3100
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
     labels:

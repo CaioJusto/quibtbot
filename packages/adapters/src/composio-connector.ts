@@ -8,13 +8,59 @@ import type {
   ConnectorTool,
 } from "@quibt/adapter-kit";
 import {
+  COMPOSIO_PAGE_TIMEOUT_MS,
+  COMPOSIO_PAGES_BUDGET_MS,
+  COMPOSIO_REQUEST_TIMEOUT_MS,
+  ComposioTimeoutError,
+  type ComposioUnknownOutcomeError,
   composioToolkitDirectory,
+  isComposioUnknownOutcome,
   mergeCatalogWithConnected,
   type ToolkitDirectoryEntry,
+  withComposioDeadline,
+  withComposioMutationDeadline,
 } from "./composio-catalog-cache.js";
 import { DestinationEmulator } from "./destination-emulator.js";
 
 type ComposioSession = Awaited<ReturnType<Composio["create"]>>;
+
+/**
+ * Buraco de tipagem do SDK: o objeto devolvido por `composio.create()` é um
+ * `ToolRouterSession`, cujo `execute`/`authorize` aceita `requestOptions` com `signal`
+ * (@composio/core 0.16 cancela o fetch de verdade). O tipo público `Session`, porém,
+ * declara os dois métodos SEM esse último parâmetro. Estes moldes são a ponte, e ficam
+ * aqui, à vista, para o dia em que o SDK corrigir a declaração.
+ */
+type SessionRequestOptions = { signal?: AbortSignal };
+
+function executeWithSignal(
+  session: ComposioSession,
+  tool: string,
+  args: Record<string, unknown>,
+  signal: AbortSignal,
+): ReturnType<ComposioSession["execute"]> {
+  const execute = session.execute as unknown as (
+    toolSlug: string,
+    args?: Record<string, unknown>,
+    options?: undefined,
+    requestOptions?: SessionRequestOptions,
+  ) => ReturnType<ComposioSession["execute"]>;
+  return execute.call(session, tool, args, undefined, { signal });
+}
+
+function authorizeWithSignal(
+  session: ComposioSession,
+  provider: string,
+  options: { callbackUrl: string },
+  signal: AbortSignal,
+): ReturnType<ComposioSession["authorize"]> {
+  const authorize = session.authorize as unknown as (
+    toolkit: string,
+    options?: { callbackUrl?: string },
+    requestOptions?: SessionRequestOptions,
+  ) => ReturnType<ComposioSession["authorize"]>;
+  return authorize.call(session, provider, options, { signal });
+}
 
 export function isComposioEnabled(apiKey: string | undefined): boolean {
   return Boolean(apiKey) && !process.env.VITEST;
@@ -110,14 +156,34 @@ export function filterCatalog(items: ComposioCatalogItem[], query: string): Comp
   );
 }
 
+/**
+ * Varre as páginas do Composio com dois tetos: cada página tem prazo, e a varredura
+ * inteira tem um orçamento de parede. Estourou, o erro sobe — meio catálogo guardado por
+ * uma hora seria pior que uma tentativa nova depois da janela de espera.
+ */
 export async function collectPages<T>(
   fetchPage: (cursor?: string) => Promise<{ items: T[]; cursor?: string }>,
-  maxPages = 200,
+  options: {
+    maxPages?: number;
+    pageTimeoutMs?: number;
+    budgetMs?: number;
+    signal?: AbortSignal;
+    now?: () => number;
+  } = {},
 ): Promise<T[]> {
+  const maxPages = options.maxPages ?? 200;
+  const now = options.now ?? Date.now;
+  const pageTimeoutMs = options.pageTimeoutMs ?? COMPOSIO_PAGE_TIMEOUT_MS;
+  const deadline = now() + (options.budgetMs ?? COMPOSIO_PAGES_BUDGET_MS);
   const items: T[] = [];
   let cursor: string | undefined;
   for (let page = 0; page < maxPages; page += 1) {
-    const result = await fetchPage(cursor);
+    const left = deadline - now();
+    if (left <= 0) throw new ComposioTimeoutError("catálogo");
+    const result = await withComposioDeadline(fetchPage(cursor), "catálogo", {
+      timeoutMs: Math.min(pageTimeoutMs, left),
+      signal: options.signal,
+    });
     items.push(...result.items);
     if (!result.cursor) break;
     cursor = result.cursor;
@@ -195,42 +261,98 @@ export class ComposioConnector implements ConnectorProvider, ConnectionAuthProvi
     };
   }
 
-  async sessionFor(userId: string): Promise<ComposioSession> {
+  /**
+   * O prazo das LEITURAS (catálogo, apps, ferramentas, sessão). Corta a espera e devolve o
+   * turno; a promessa órfã morre com o processo. Ler de novo não muda nada lá fora, então
+   * estourar aqui é {@link ComposioTimeoutError} — quem chamou pode repetir.
+   */
+  private deadline<T>(
+    work: Promise<T>,
+    label: string,
+    signal?: AbortSignal,
+    timeoutMs = COMPOSIO_REQUEST_TIMEOUT_MS,
+  ): Promise<T> {
+    return withComposioDeadline(work, label, { signal, timeoutMs });
+  }
+
+  /**
+   * O prazo das MUTAÇÕES (executar ferramenta, autorizar, revogar). Passa o `signal` do
+   * SDK para dentro, então o pedido é cancelado de verdade; estourou, o resultado é
+   * DESCONHECIDO ({@link ComposioUnknownOutcomeError}) e ninguém repete sozinho.
+   */
+  private mutationDeadline<T>(
+    start: (signal: AbortSignal) => Promise<T>,
+    label: string,
+    signal?: AbortSignal,
+    options: { reconcileKey?: string; timeoutMs?: number } = {},
+  ): Promise<T> {
+    return withComposioMutationDeadline(start, label, {
+      signal,
+      timeoutMs: options.timeoutMs ?? COMPOSIO_REQUEST_TIMEOUT_MS,
+      reconcileKey: options.reconcileKey,
+    });
+  }
+
+  async sessionFor(userId: string, signal?: AbortSignal): Promise<ComposioSession> {
     const composio = await this.sdk();
     const existing = this.catalogSessions.get(userId);
     if (existing) {
       try {
-        return await composio.sessions.use(existing);
+        // Uma sessão reaproveitada tem meio prazo: se ela pendura, ainda dá tempo de
+        // abrir uma nova dentro da paciência de quem chamou.
+        return await this.deadline(
+          composio.sessions.use(existing),
+          "sessão",
+          signal,
+          COMPOSIO_REQUEST_TIMEOUT_MS / 2,
+        );
       } catch {
         this.catalogSessions.delete(userId);
       }
     }
-    const session = await composio.create(userId, {
-      manageConnections: false,
-      sandbox: { enable: false },
-    });
+    const session = await this.deadline(
+      composio.create(userId, {
+        manageConnections: false,
+        sandbox: { enable: false },
+      }),
+      "sessão",
+      signal,
+    );
     setBounded(this.catalogSessions, userId, session.sessionId);
     return session;
   }
 
-  async sessionForExecute(userId: string, toolkits: string[]): Promise<ComposioSession> {
+  async sessionForExecute(
+    userId: string,
+    toolkits: string[],
+    signal?: AbortSignal,
+  ): Promise<ComposioSession> {
     const key = executeSessionKey(toolkits);
-    if (!key) return this.sessionFor(userId);
+    if (!key) return this.sessionFor(userId, signal);
     const composio = await this.sdk();
     const existing = this.executeSessions.get(userId);
     if (existing?.key === key) {
       try {
-        return await composio.sessions.use(existing.sessionId);
+        return await this.deadline(
+          composio.sessions.use(existing.sessionId),
+          "sessão",
+          signal,
+          COMPOSIO_REQUEST_TIMEOUT_MS / 2,
+        );
       } catch {
         this.executeSessions.delete(userId);
       }
     }
-    const session = await composio.create(userId, {
-      manageConnections: false,
-      sandbox: { enable: false },
-      toolkits: key.split(","),
-      sessionPreset: "direct_tools",
-    });
+    const session = await this.deadline(
+      composio.create(userId, {
+        manageConnections: false,
+        sandbox: { enable: false },
+        toolkits: key.split(","),
+        sessionPreset: "direct_tools",
+      }),
+      "sessão",
+      signal,
+    );
     setBounded(this.executeSessions, userId, { sessionId: session.sessionId, key });
     return session;
   }
@@ -273,18 +395,34 @@ export class ComposioConnector implements ConnectorProvider, ConnectionAuthProvi
   async discoverTools(context: AdapterContext): Promise<ConnectorTool[]> {
     const toolkits = context.connectedProviders ?? [];
     if (toolkits.length === 0) return [];
-    const session = await this.sessionForExecute(context.userId, toolkits);
-    const raw = await session.tools();
+    const session = await this.sessionForExecute(context.userId, toolkits, context.signal);
+    const raw = await this.deadline(session.tools(), "ferramentas", context.signal);
     return asConnectorTools(raw);
   }
 
+  /**
+   * Executar uma ferramenta é MUTAÇÃO: manda e-mail, manda mensagem, cria registro.
+   *
+   * Por isso o prazo aqui não é "expirou, tenta de novo". O pedido é cancelado de verdade
+   * (o SDK aceita `signal`), mas cancelar o fetch não desfaz o que o servidor já fez — e o
+   * SDK não tem chave de idempotência nem consulta do estado da execução (o `logId` só vem
+   * na resposta que não chegou). Então o prazo estourado vira um RESULTADO explícito de
+   * desconhecido: quem lê (modelo ou pessoa) vê "pode ter acontecido, não repita", em vez
+   * de um erro que convida a mandar o mesmo e-mail de novo.
+   */
   async *execute(call: ConnectorCall, context: AdapterContext): AsyncIterable<ConnectorEvent> {
     try {
       const session = await this.sessionForExecute(
         context.userId,
         context.connectedProviders ?? [],
+        context.signal,
       );
-      const result = await session.execute(call.tool, call.args ?? {});
+      const result = await this.mutationDeadline(
+        (signal) => executeWithSignal(session, call.tool, call.args ?? {}, signal),
+        call.tool,
+        context.signal,
+        { reconcileKey: call.executionId },
+      );
       if (result.error) {
         yield { type: "error", message: sanitizeComposioError(result.error) };
         return;
@@ -298,6 +436,13 @@ export class ComposioConnector implements ConnectorProvider, ConnectionAuthProvi
         },
       };
     } catch (error) {
+      if (isComposioUnknownOutcome(error)) {
+        yield { type: "log", message: error.message };
+        yield { type: "result", data: unknownOutcomeResult(call, error) };
+        return;
+      }
+      // Abrir a sessão, montar o pedido: nada disso tocou o app do usuário, então
+      // continua sendo um erro comum — repetir é seguro.
       yield { type: "error", message: sanitizeComposioError(error) };
     }
   }
@@ -306,13 +451,28 @@ export class ComposioConnector implements ConnectorProvider, ConnectionAuthProvi
     request: { provider: string; redirectUrl: string },
     context: AdapterContext,
   ): Promise<{ authorizationUrl: string | null; state: string }> {
-    const session = await this.sessionFor(context.userId);
+    const session = await this.sessionFor(context.userId, context.signal);
     try {
-      const connectionRequest = await session.authorize(request.provider, {
-        callbackUrl: request.redirectUrl,
-      });
+      // Autorizar cria um pedido de conexão no Composio: é mutação. Estourou o prazo, o
+      // pedido pode existir lá — quem chamou não pode abrir outro sozinho.
+      const connectionRequest = await this.mutationDeadline(
+        (signal) =>
+          authorizeWithSignal(
+            session,
+            request.provider,
+            { callbackUrl: request.redirectUrl },
+            signal,
+          ),
+        "conexão",
+        context.signal,
+      );
       if (!connectionRequest.redirectUrl) {
-        await connectionRequest.waitForConnection(20_000).catch(() => undefined);
+        await this.deadline(
+          connectionRequest.waitForConnection(20_000),
+          "conexão",
+          context.signal,
+          COMPOSIO_REQUEST_TIMEOUT_MS + 2_000,
+        ).catch(() => undefined);
       }
       return {
         authorizationUrl: connectionRequest.redirectUrl ?? null,
@@ -322,13 +482,16 @@ export class ComposioConnector implements ConnectorProvider, ConnectionAuthProvi
       if (isNoAuthToolkitError(error)) {
         return { authorizationUrl: null, state: request.provider };
       }
+      // O desconhecido sobe com a classe original: quem chamou precisa saber que isto
+      // não é "falhou, tente de novo".
+      if (isComposioUnknownOutcome(error)) throw error;
       throw new Error(sanitizeComposioError(error));
     }
   }
 
-  async connectionReady(userId: string, slug: string): Promise<boolean> {
-    const session = await this.sessionFor(userId);
-    const page = await session.toolkits({ search: slug, limit: 50 });
+  async connectionReady(userId: string, slug: string, signal?: AbortSignal): Promise<boolean> {
+    const session = await this.sessionFor(userId, signal);
+    const page = await this.deadline(session.toolkits({ search: slug, limit: 50 }), "apps", signal);
     const match = page.items.find((item) => item.slug === slug);
     if (!match) return false;
     return Boolean(match.connection?.isActive) || Boolean(match.isNoAuth);
@@ -342,27 +505,61 @@ export class ComposioConnector implements ConnectorProvider, ConnectionAuthProvi
    * exchanges the provider `code` server side, so the SDK exposes no place to
    * hand it back; all we can do is wait for the account to flip to active.
    * The wait is short on purpose: callers poll `connections.complete`.
+   *
+   * Esperar a conta virar ativa é CONSULTA DE ESTADO, não mutação: nada é criado aqui, e
+   * perguntar de novo não tem efeito no app do usuário. Por isso o prazo continua sendo o
+   * de leitura — este é o caminho que já reconcilia o resultado do {@link begin}.
    */
   async complete(
     request: { state: string; code?: string },
     _context: AdapterContext,
   ): Promise<{ connectionRef: string }> {
     if (!request.state) throw new Error("Conexão sem referência do provedor.");
-    const account = await (await this.sdk()).connectedAccounts.waitForConnection(
-      request.state,
-      COMPLETE_WAIT_MS,
+    const account = await this.deadline(
+      (await this.sdk()).connectedAccounts.waitForConnection(request.state, COMPLETE_WAIT_MS),
+      "conexão",
+      _context.signal,
+      COMPLETE_WAIT_MS + 2_000,
     );
     return { connectionRef: account.id || request.state };
   }
 
+  /**
+   * Revogar é mutação, mas de efeito idempotente: o fim desejado é "a conta não existe".
+   * Ainda assim, o prazo estourado não vira "tenta de novo" cego — primeiro consultamos o
+   * estado. Sumiu, acabou. Continua lá, o erro é o de leitura (repetir um delete não
+   * duplica nada). Só quando nem a consulta responde é que o resultado é desconhecido.
+   */
   async revoke(connectionRef: string, context: AdapterContext): Promise<void> {
-    const accountId = await this.connectedAccountId(context.userId, connectionRef);
-    if (accountId) await (await this.sdk()).connectedAccounts.delete(accountId);
+    const accountId = await this.connectedAccountId(context.userId, connectionRef, context.signal);
+    if (!accountId) return;
+    try {
+      await this.mutationDeadline(
+        async (signal) => (await this.sdk()).connectedAccounts.delete(accountId, { signal }),
+        "revogar",
+        context.signal,
+        { reconcileKey: accountId },
+      );
+    } catch (error) {
+      if (!isComposioUnknownOutcome(error)) throw error;
+      const check = await this.connectedAccountId(context.userId, connectionRef).then(
+        (id) => ({ answered: true as const, id }),
+        () => ({ answered: false as const, id: undefined }),
+      );
+      // Nem a consulta respondeu: continua desconhecido.
+      if (!check.answered) throw error;
+      // Ainda conectada: o delete não pegou, e repeti-lo tem o mesmo fim.
+      if (check.id) throw new ComposioTimeoutError("revogar");
+    }
   }
 
-  async connectedAccountId(userId: string, slug: string): Promise<string | undefined> {
-    const session = await this.sessionFor(userId);
-    const toolkits = await session.toolkits({ isConnected: true });
+  async connectedAccountId(
+    userId: string,
+    slug: string,
+    signal?: AbortSignal,
+  ): Promise<string | undefined> {
+    const session = await this.sessionFor(userId, signal);
+    const toolkits = await this.deadline(session.toolkits({ isConnected: true }), "apps", signal);
     return toolkits.items.find((item) => item.slug === slug)?.connection?.connectedAccount?.id;
   }
 
@@ -471,6 +668,49 @@ export function collectLogIds(value: unknown): string[] {
   };
   walk(value);
   return ids;
+}
+
+/** O que marca um resultado de ferramenta como "não sabemos se aconteceu". */
+export const COMPOSIO_UNKNOWN_OUTCOME = "composio_unknown_outcome";
+
+export type ComposioUnknownOutcomeResult = {
+  outcome: typeof COMPOSIO_UNKNOWN_OUTCOME;
+  status: "unknown";
+  /** Explícito para quem lê o JSON: ninguém repete esta chamada sozinho. */
+  retry: false;
+  tool: string;
+  executionId: string;
+  message: string;
+};
+
+/**
+ * O resultado que sai no lugar da resposta que não chegou. É um `result`, não um `error`,
+ * de propósito: um erro convida o modelo (e o retry do job) a mandar o mesmo e-mail de
+ * novo; isto aqui diz o que houve e manda conferir antes.
+ */
+function unknownOutcomeResult(
+  call: ConnectorCall,
+  error: ComposioUnknownOutcomeError,
+): ComposioUnknownOutcomeResult {
+  return {
+    outcome: COMPOSIO_UNKNOWN_OUTCOME,
+    status: "unknown",
+    retry: false,
+    tool: call.tool,
+    executionId: call.executionId ?? "",
+    message: error.message,
+  };
+}
+
+/** Quem consome o resultado de uma ferramenta distingue "desconhecido" de "falhou". */
+export function isComposioUnknownOutcomeResult(
+  value: unknown,
+): value is ComposioUnknownOutcomeResult {
+  return (
+    Boolean(value) &&
+    typeof value === "object" &&
+    (value as { outcome?: unknown }).outcome === COMPOSIO_UNKNOWN_OUTCOME
+  );
 }
 
 export function isNoAuthToolkitError(error: unknown): boolean {

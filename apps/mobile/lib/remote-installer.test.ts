@@ -108,12 +108,12 @@ describe("remote server update", () => {
 
   it("extracts the release and backup while redacting the credential", () => {
     const parsed = parseRemoteUpdateOutput(
-      '[database] succeeded: backup hunter2\n{\n  "release": "0.2.13",\n  "previousRelease": "0.2.8",\n  "backupPath": "/var/lib/quibt/backups/ok"\n}\n',
+      '[database] succeeded: backup hunter2\n{\n  "release": "0.2.14",\n  "previousRelease": "0.2.8",\n  "backupPath": "/var/lib/quibt/backups/ok"\n}\n',
       ["hunter2"],
     );
     expect(parsed).toMatchObject({
       ok: true,
-      release: "0.2.13",
+      release: "0.2.14",
       previousRelease: "0.2.8",
       backupPath: "/var/lib/quibt/backups/ok",
     });
@@ -125,7 +125,7 @@ describe("remote server update", () => {
     const transport = createMockSshTransport({
       release: releaseManifestFixture(),
       installOutput:
-        '[health] succeeded: API ready\n{\n  "release": "0.2.13",\n  "previousRelease": "0.2.8",\n  "backupPath": "/var/lib/quibt/backups/ok"\n}\n',
+        '[health] succeeded: API ready\n{\n  "release": "0.2.14",\n  "previousRelease": "0.2.8",\n  "backupPath": "/var/lib/quibt/backups/ok"\n}\n',
     });
     const identity = await transport.inspectIdentity();
     transport.attachCredential(loadCredential);
@@ -136,7 +136,7 @@ describe("remote server update", () => {
     });
 
     expect(loadCredential).toHaveBeenCalledTimes(1);
-    expect(result).toMatchObject({ ok: true, release: "0.2.13", previousRelease: "0.2.8" });
+    expect(result).toMatchObject({ ok: true, release: "0.2.14", previousRelease: "0.2.8" });
   });
 });
 

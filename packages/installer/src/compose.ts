@@ -1,6 +1,6 @@
 import { PUBLIC_PROFILE } from "./public-access.js";
 
-export const INSTALL_RELEASE = "0.2.13";
+export const INSTALL_RELEASE = "0.2.14";
 
 export interface DesktopSigning {
   mac: { signed: boolean; notarized: boolean };
@@ -15,7 +15,7 @@ export interface DesktopSigning {
  * quando a faz). Site, README e docs escolhem a frase de download por este objeto — nunca
  * chame um build de assinado ou notarizado sem o status da tag dizer isso.
  *
- * v0.2.13: enquanto a nova tag não for substituída por um build notarizado, o
+ * v0.2.14: enquanto a nova tag não for substituída por um build notarizado, o
  * `QuibtBot.dmg` é o build do CI e o `signing-status-mac.json` diz
  * `signed: false, notarized: false`. Na v0.2.10 (e na v0.2.9) o mantenedor substituiu o DMG
  * pelo notarizado e o status dizia `true`.

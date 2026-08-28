@@ -7,8 +7,6 @@ declare module "*.png" {
 
 interface ImportMetaEnv {
   readonly PUBLIC_APP_ORIGIN?: string;
-  readonly PUBLIC_WAITLIST_API_URL?: string;
-  readonly PUBLIC_WAITLIST_URL?: string;
 }
 
 interface ImportMeta {

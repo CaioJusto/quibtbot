@@ -8,12 +8,12 @@ import { controlLeaseLive } from "@quibt/core";
 import type { PrismaClient } from "@quibt/db";
 import { appendEvent, closeComputerUsage } from "@quibt/db";
 import { computerRefFromSession } from "./computer-boot-claim.js";
-import { isComputerAlreadyStoppedError } from "./docker-sandbox.js";
 import {
   recordLifecycleCleanupIntent,
   resolveLifecycleCleanupIntent,
 } from "./lifecycle-cleanup-intent.js";
 import { reconcileProviderCleanupIntent } from "./provider-cleanup-reconcile.js";
+import { stopSandboxUnlessAlreadyGone } from "./sandbox-destroy.js";
 import {
   claimDesktopSuspend,
   cleanupIntentReason,
@@ -118,18 +118,6 @@ async function suspendDesktopSession(
  * claim, o recover devolvia a "running" e o sono tentava de novo — oscilando para sempre
  * num computador que já estava desligado.
  */
-async function stopUnlessAlreadyStopped(
-  sandbox: SandboxProvider,
-  ref: ComputerRef,
-  context: AdapterContext,
-): Promise<void> {
-  try {
-    await sandbox.stop(ref, context);
-  } catch (error) {
-    if (!isComputerAlreadyStoppedError(error)) throw error;
-  }
-}
-
 export async function sleepComputerIfIdle(
   deps: { prisma: PrismaClient; sandbox: SandboxProvider; wakeup?: WakeupDriver },
   botId: string,
@@ -235,13 +223,13 @@ export async function sleepComputerIfIdle(
       if (!(await validateDesktopSuspendClaim(deps.prisma, botId, claim.token))) {
         throw new Error("lost suspend claim");
       }
-      await stopUnlessAlreadyStopped(deps.sandbox, stopRef, ctx);
+      await stopSandboxUnlessAlreadyGone(deps.sandbox, stopRef, ctx);
     });
     if (!gated.ok) {
       throw new Error("shared stop gate unavailable");
     }
   } else {
-    await stopUnlessAlreadyStopped(deps.sandbox, stopRef, ctx);
+    await stopSandboxUnlessAlreadyGone(deps.sandbox, stopRef, ctx);
   }
 
   if (await finalizeDesktopSuspended(deps.prisma, botId, claim.token)) {

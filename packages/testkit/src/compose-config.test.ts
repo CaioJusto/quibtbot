@@ -14,6 +14,14 @@ const desktopServices = composeServices(readComposeFile(desktopComposeFile));
 /** Services that must come back by themselves; `computer` is a one-shot image builder. */
 const LONG_RUNNING = ["postgres", "supervisor", "api", "worker", "web"];
 
+/**
+ * Serviços que rodam código do produto e leem o `.env` da máquina. Um `NODE_ENV=development`
+ * herdado dali religa os placeholders de segredo, faz o token do supervisor voltar a ser
+ * derivado do segredo de sessão e faz o CORS aceitar requisição sem `Origin` e qualquer
+ * `localhost` com credenciais. Em compose, `environment:` ganha do `env_file:`.
+ */
+const STACK_SERVICES = ["supervisor", "api", "worker", "web"];
+
 describe("compose yaml reader", () => {
   it("reads nested maps, scalar lists and flow sequences", () => {
     const parsed = parseComposeYaml(
@@ -80,6 +88,24 @@ describe("compose service policies", () => {
     expect(services.supervisor?.ports).toBeUndefined();
     expect(services.api?.ports).toEqual(["127.0.0.1:3100:3100"]);
     expect(services.web?.ports).toEqual(["127.0.0.1:5173:5173"]);
+  });
+
+  it("pins NODE_ENV=production on every service that reads the machine's .env", () => {
+    for (const name of STACK_SERVICES) {
+      expect(String(services[name]?.environment?.NODE_ENV), `${name} must run in production`).toBe(
+        "production",
+      );
+    }
+  });
+
+  it("keeps production even when an old .env still carries NODE_ENV=development", () => {
+    const rendered = renderWithDocker("NODE_ENV=development\n");
+    if (!rendered) return;
+    for (const name of STACK_SERVICES) {
+      expect(rendered.services[name]?.environment?.NODE_ENV, `${name} must ignore the .env`).toBe(
+        "production",
+      );
+    }
   });
 
   it("matches what docker itself resolves from the file", () => {
@@ -149,6 +175,25 @@ describe("desktop compose service policies", () => {
     expect(desktopServices.web?.ports).toEqual([`\${QUIBT_WEB_BIND_HOST:-127.0.0.1}:5173:5173`]);
   });
 
+  it("pins NODE_ENV=production on every service that reads quibt.env", () => {
+    for (const name of STACK_SERVICES) {
+      expect(
+        String(desktopServices[name]?.environment?.NODE_ENV),
+        `${name} must run in production`,
+      ).toBe("production");
+    }
+  });
+
+  it("keeps production even when an old quibt.env still carries NODE_ENV=development", () => {
+    const rendered = renderDesktopWithDocker(["NODE_ENV=development"]);
+    if (!rendered) return;
+    for (const name of STACK_SERVICES) {
+      expect(rendered.services[name]?.environment?.NODE_ENV, `${name} must ignore quibt.env`).toBe(
+        "production",
+      );
+    }
+  });
+
   it("matches what docker itself resolves from the desktop file", () => {
     const rendered = renderDesktopWithDocker();
     if (!rendered) {
@@ -173,6 +218,7 @@ type RenderedCompose = {
     {
       restart?: string;
       depends_on?: Record<string, { condition?: string }>;
+      environment?: Record<string, string | undefined>;
       ports?: { host_ip?: string }[];
     }
   >;
@@ -182,11 +228,11 @@ type RenderedCompose = {
  * `docker compose config` also proves the file is schema-valid. It runs from a throwaway
  * root with an empty `.env` so it does not depend on the developer's own environment.
  */
-function renderWithDocker(): RenderedCompose | undefined {
-  return renderComposeWithDocker(composeFile, "");
+function renderWithDocker(rootEnv = ""): RenderedCompose | undefined {
+  return renderComposeWithDocker(composeFile, "", rootEnv);
 }
 
-function renderDesktopWithDocker(): RenderedCompose | undefined {
+function renderDesktopWithDocker(extraEnv: string[] = []): RenderedCompose | undefined {
   const dataDir = mkdtempSync(path.join(tmpdir(), "quibt-desktop-data-"));
   const envFile = path.join(dataDir, "quibt.env");
   writeFileSync(
@@ -198,12 +244,18 @@ function renderDesktopWithDocker(): RenderedCompose | undefined {
       `INSTALL_ENV_FILE=${envFile}`,
       "BETTER_AUTH_SECRET=desktop-test-secret",
       "WEB_ORIGIN=http://127.0.0.1:5173",
+      "BETTER_AUTH_URL=http://127.0.0.1:5173",
+      ...extraEnv,
     ].join("\n"),
   );
   return renderComposeWithDocker(desktopComposeFile, envFile);
 }
 
-function renderComposeWithDocker(file: string, envFile: string): RenderedCompose | undefined {
+function renderComposeWithDocker(
+  file: string,
+  envFile: string,
+  rootEnv = "",
+): RenderedCompose | undefined {
   let root: string | undefined;
   try {
     root = mkdtempSync(path.join(tmpdir(), "quibt-compose-"));
@@ -212,17 +264,31 @@ function renderComposeWithDocker(file: string, envFile: string): RenderedCompose
     copyFileSync(file, target);
     const args = ["compose", "-f", path.relative(root, target), "config", "--format", "json"];
     if (envFile) args.splice(3, 0, "--env-file", envFile);
-    else writeFileSync(path.join(root, ".env"), "");
+    else writeFileSync(path.join(root, ".env"), rootEnv);
     const json = execFileSync("docker", args, {
       cwd: root,
       encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
+      stdio: ["ignore", "pipe", "pipe"],
       timeout: 20_000,
     });
     return JSON.parse(json) as RenderedCompose;
-  } catch {
-    return undefined;
+  } catch (error) {
+    // `docker` ausente na máquina é motivo legítimo para pular o caso. Qualquer outra
+    // falha é o compose quebrado de verdade: engolir aqui já deixou um `${VAR:?}`
+    // obrigatório passar despercebido, porque o teste ficava verde sem renderizar nada.
+    if (isDockerMissing(error)) return undefined;
+    const detail =
+      error instanceof Error && "stderr" in error
+        ? String((error as { stderr?: unknown }).stderr ?? "").trim()
+        : String(error);
+    throw new Error(`docker compose config failed for ${path.basename(file)}: ${detail}`);
   } finally {
     if (root) rmSync(root, { recursive: true, force: true });
   }
+}
+
+function isDockerMissing(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const code = (error as { code?: unknown }).code;
+  return code === "ENOENT" || code === "EACCES";
 }

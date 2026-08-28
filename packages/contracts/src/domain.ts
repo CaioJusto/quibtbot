@@ -408,6 +408,75 @@ export const WebhookPublicUrlInput = z
     message: "URL pública de webhooks precisa ser http(s), sem usuário, senha, busca ou fragmento.",
   });
 
+/** Nomes locais que valem sem consultar o DNS: o supervisor deste mesmo computador. */
+const LOOPBACK_SANDBOX_HOSTS = ["localhost", "host.docker.internal"];
+
+function isLoopbackSandboxHost(host: string): boolean {
+  const value = host.replace(/^\[|\]$/g, "").replace(/^::ffff:/, "");
+  if (LOOPBACK_SANDBOX_HOSTS.includes(value)) return true;
+  if (/^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(value)) return true;
+  return value === "::1";
+}
+
+/** Endereço literal que não é da internet: metadado da nuvem, rede de casa, CGNAT, ULA. */
+function isInternalSandboxAddress(host: string): boolean {
+  const value = host.replace(/^\[|\]$/g, "").replace(/^::ffff:/, "");
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(value);
+  if (v4) {
+    const [a = 0, b = 0] = v4.slice(1, 3).map(Number);
+    if (a === 0 || a === 10 || a === 127) return true;
+    if (a === 169 && b === 254) return true; // link-local, e o 169.254.169.254 dos metadados
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
+    if (a >= 224) return true; // multicast e reservado
+    return false;
+  }
+  if (/^[0-9a-f:]+$/i.test(value) && value.includes(":")) {
+    const lower = value.toLowerCase();
+    if (lower === "::" || lower === "::1") return true;
+    return /^f[cd]/.test(lower) || lower.startsWith("fe80");
+  }
+  return false;
+}
+
+/**
+ * Para onde este deploy aceita apontar um supervisor de computador (o caminho "VPS").
+ *
+ * O valor colado aqui recebe o token do supervisor em **todo** boot de bot, e quem manda no
+ * supervisor manda no Docker daquele host. Um `z.string()` cru aceitava `http://` — token em
+ * claro — e qualquer endereço interno, o que transformava "Testar máquina" numa requisição
+ * autenticada que o dono podia apontar para 169.254.169.254 ou para a impressora da rede.
+ *
+ * A política é a do `model-probe`, com um aperto: um supervisor remoto é uma máquina pública,
+ * com nome e certificado, então a faixa privada não passa nem em https. `http` sobra só para o
+ * loopback declarado (o supervisor deste computador, que é o caminho padrão do produto).
+ *
+ * Isto é a checagem síncrona do contrato, que só enxerga o texto. Um NOME que aponta para a
+ * rede interna é recusado no `probeComputer`, que resolve o DNS antes de abrir socket.
+ */
+export function isAllowedSandboxEndpoint(value: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+  if (url.username || url.password) return false;
+  if (url.search || url.hash) return false;
+  const host = url.hostname.toLowerCase();
+  if (!host) return false;
+  if (isLoopbackSandboxHost(host)) return true;
+  if (url.protocol !== "https:") return false;
+  return !isInternalSandboxAddress(host);
+}
+
+export const SandboxEndpointInput = z.string().max(2048).refine(isAllowedSandboxEndpoint, {
+  message:
+    "Endereço do supervisor precisa ser https de um host público (http só em 127.0.0.1). Endereço de rede interna não é aceito.",
+});
+
 export const DeploymentSettingsSchema = z.object({
   ownerUserId: Id.nullable(),
   deploymentClaimed: z.boolean().default(false),

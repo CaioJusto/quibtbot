@@ -276,6 +276,66 @@ async function notifyThreadEvent(
 }
 
 /**
+ * Postgres refuses a NOTIFY payload of 8000 bytes or more (22023, "payload string too long").
+ * Streaming sends the whole answer so far on every tick, so an answer past ~7.8 KB of ASCII —
+ * or ~6.6 KB with accents — used to raise that error inside the run loop and the person lost
+ * the reply. The budget is measured in BYTES of the serialised envelope: characters say
+ * nothing about UTF-8 length or about what JSON escaping adds.
+ */
+export const NOTIFY_PAYLOAD_MAX_BYTES = 7_000;
+/** Shown while the answer streams; the durable message written at the end stays complete. */
+const PROGRESS_TRUNCATION_MARK = "…";
+
+type LiveProgressEnvelope = {
+  workspaceId: string;
+  threadId: string;
+  botId?: string;
+  runId?: string;
+  type: "thread.progress";
+  payload: Record<string, unknown>;
+};
+
+/** Cuts on a code point boundary: half of a multibyte character decodes as garbage. */
+export function truncateUtf8Bytes(text: string, maxBytes: number): string {
+  if (maxBytes <= 0) return "";
+  const bytes = Buffer.from(text, "utf8");
+  if (bytes.byteLength <= maxBytes) return text;
+  let end = maxBytes;
+  // 0b10xxxxxx is a continuation byte, so walk back until the start of a character.
+  while (end > 0 && (bytes[end]! & 0xc0) === 0x80) end -= 1;
+  return bytes.subarray(0, end).toString("utf8");
+}
+
+/**
+ * Serialises a live tick and, when it does not fit, shrinks its `text` until it does. The
+ * measurement is on the serialised JSON because escaping (`\n`, `\"`) also grows the payload;
+ * a tick with nothing trimmable is dropped instead of taking the run down with it.
+ */
+export function fitLiveProgressPayload(
+  envelope: LiveProgressEnvelope,
+  maxBytes: number = NOTIFY_PAYLOAD_MAX_BYTES,
+): string | null {
+  const json = JSON.stringify(envelope);
+  if (Buffer.byteLength(json, "utf8") <= maxBytes) return json;
+  const text = envelope.payload.text;
+  if (typeof text !== "string" || !text) return null;
+  let budget = maxBytes - (Buffer.byteLength(json, "utf8") - Buffer.byteLength(text, "utf8")) - 8;
+  for (let attempt = 0; attempt < 8 && budget > 0; attempt += 1) {
+    const cut = JSON.stringify({
+      ...envelope,
+      payload: {
+        ...envelope.payload,
+        text: `${truncateUtf8Bytes(text, budget)}${PROGRESS_TRUNCATION_MARK}`,
+        truncated: true,
+      },
+    });
+    if (Buffer.byteLength(cut, "utf8") <= maxBytes) return cut;
+    budget -= Math.max(64, Math.ceil(budget / 8));
+  }
+  return null;
+}
+
+/**
  * Streaming writes one cumulative `thread.progress` event per tick; once the run has a
  * durable message and a terminal event they only bloat every future thread load.
  */
@@ -290,14 +350,18 @@ export async function publishLiveProgress(
     payload: Record<string, unknown>;
   },
 ) {
-  await prisma.$executeRaw`SELECT pg_notify('quibt_events', ${JSON.stringify({
+  const payload = fitLiveProgressPayload({
     workspaceId: input.workspaceId,
     threadId: input.threadId,
     botId: input.botId,
     runId: input.runId,
     type: "thread.progress",
     payload: input.payload,
-  })})`;
+  });
+  if (!payload) return;
+  // A live tick is disposable and the answer is not: a NOTIFY that fails (payload size, a
+  // dropped connection) must never become the error the person reads in the chat.
+  await prisma.$executeRaw`SELECT pg_notify('quibt_events', ${payload})`.catch(() => undefined);
 }
 
 export async function pruneProgressEvents(prisma: PrismaClient, runId: string) {

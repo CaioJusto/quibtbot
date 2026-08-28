@@ -1,7 +1,7 @@
 {
   "name": "quibt-bot",
   "private": true,
-  "version": "0.2.13",
+  "version": "0.2.14",
   "homepage": "https://quibt.com.br",
   "license": "Apache-2.0",
   "type": "module",
@@ -35,13 +35,14 @@
     "desktop:pack:mac": "node scripts/pack-desktop.mjs mac",
     "desktop:pack:win": "node scripts/pack-desktop.mjs win",
     "desktop:pack:linux": "node scripts/pack-desktop.mjs linux",
-    "dev:desktop": "node scripts/dev-desktop.mjs"
+    "dev:desktop": "node scripts/dev-desktop.mjs",
+    "dev:chat": "node --env-file-if-exists=.env scripts/dev-chat.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.8",
     "@types/node": "^24.3.0",
     "actionlint": "^2.0.6",
-    "esbuild": "^0.25.9",
+    "esbuild": "^0.28.0",
     "postject": "^1.0.0-alpha.6",
     "tsx": "^4.20.5",
     "turbo": "^2.5.6",
@@ -57,14 +58,7 @@
       "sharp": "0.35.3",
       "uuid": "11.1.1"
     },
-    "auditConfig": {
-      "ignoreGhsas": [
-        "GHSA-w3rx-r6r6-pgpr",
-        "GHSA-5p2g-fcmc-qvqq"
-      ]
-    },
     "patchedDependencies": {
-      "image-size@1.2.1": "patches/image-size@1.2.1.patch",
       "@dylankenneally/react-native-ssh-sftp@1.11.0": "patches/@dylankenneally__react-native-ssh-sftp@1.11.0.patch"
     }
   }

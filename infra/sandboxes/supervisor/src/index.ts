@@ -15,8 +15,8 @@ import {
   containerCreateOptions,
   containerNameForWorkspace,
   MAX_WORKSPACE_SESSIONS,
+  resolveScreenUrl,
   type SandboxInput,
-  screenUrlFor,
   sessionPorts,
   WORKSPACE_RESTART_POLICY,
   workspaceDesktopPath,
@@ -52,8 +52,10 @@ import {
   isWorkspaceSentinel,
   MAX_EXEC_OUTPUT_BYTES,
   novncEnsureCommand,
+  otherWorkspaceSessions,
   parseNovncEnsure,
   parseSessionProbe,
+  parseSessionProbeResult,
   parseSessionStart,
   publicError,
   type ReviveDocker,
@@ -142,6 +144,22 @@ app.use("/computers/*", async (c, next) => {
     return c.json({ error: "unauthorized" }, 401);
   }
   await next();
+});
+
+/**
+ * Sonda do "Testar máquina", com token.
+ *
+ * `/health` responde sem credencial de propósito — é o healthcheck do compose e do
+ * instalador. Por isso o teste da máquina passava com o token errado, o dono salvava
+ * feliz e todo boot falhava 401 depois. Esta rota fica debaixo do guarda de `/computers/*`,
+ * então chegar aqui já é a prova de que o token vale; o corpo só diz se o Docker responde.
+ *
+ * Fica registrada antes de `/computers/:id` para o roteador não entregá-la ao handler de
+ * container. Não devolve imagem nem endpoint do socket: quem sonda quer sim ou não.
+ */
+app.get("/computers/_probe", async (c) => {
+  const daemon = await pingDocker();
+  return c.json({ ok: daemon.ok, model: "workspace" }, daemon.ok ? 200 : 503);
 });
 
 const createComputerSchema = z.object({
@@ -519,10 +537,27 @@ app.delete("/computers/:id", async (c) => {
     }
     // Num container parado nada está vivo: o probe nem roda, e a resposta é "ninguém".
     const probe = running ? await probeSessions(found.container) : new Map<string, number>();
-    if (shouldRemoveSharedContainer(preserveComputer, probe)) {
+    // Apagar um bot não pode levar junto o computador de outro que ainda trabalha. As
+    // duas fontes são as que este processo enxerga mesmo: o que ele lembra de ter aberto
+    // nesta caixa e o que o container respondeu. Uma leitura sem resposta não autoriza
+    // nada — melhor um container de sobra do que a tela de alguém desaparecendo.
+    const others = otherWorkspaceSessions({
+      botId: found.session?.botId ?? c.req.header("x-quibt-bot-id") ?? "",
+      remembered: workspaceBoxes.get(workspaceId)?.displays.keys() ?? [],
+      live: probe?.keys(),
+    });
+    if (shouldRemoveSharedContainer(preserveComputer, others)) {
       await found.container.remove({ force: true }).catch(() => undefined);
       forgetWorkspace(workspaceId, found.container.id);
       await removeComputerNetwork(workspaceId);
+    } else if (!preserveComputer) {
+      console.log(
+        `keeping workspace container ${found.container.id.slice(0, 12)}: ${
+          others === undefined
+            ? "session probe gave no answer"
+            : `still used by ${others.join(", ")}`
+        }`,
+      );
     }
     return c.json({ ok: true, preserveComputer });
   } catch (error) {
@@ -1089,15 +1124,16 @@ async function publishedSessionUrl(
   const password = await sessionVncPassword(container, display);
   for (let i = 0; i < 40; i += 1) {
     const info = i === 0 && initialInfo ? initialInfo : await container.inspect();
-    if (process.env.SANDBOX_SCREEN_NETWORK === "internal") {
-      const networkMode = info.HostConfig.NetworkMode;
-      const address = networkMode
+    const networkMode = info.HostConfig.NetworkMode;
+    const url = resolveScreenUrl({
+      internalAddress: networkMode
         ? info.NetworkSettings?.Networks?.[networkMode]?.IPAddress
-        : undefined;
-      if (address) return screenUrlFor(novnc, address, password);
-    }
-    const hostPort = info.NetworkSettings?.Ports?.[`${novnc}/tcp`]?.[0]?.HostPort;
-    if (hostPort) return screenUrlFor(hostPort, undefined, password);
+        : undefined,
+      hostPort: info.NetworkSettings?.Ports?.[`${novnc}/tcp`]?.[0]?.HostPort,
+      novncPort: novnc,
+      password,
+    });
+    if (url) return url;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error("computer screen port was not published");
@@ -1394,10 +1430,11 @@ async function probeRecordedDisplays(container: Docker.Container) {
 
 /** Lists the sessions the container is really running; `undefined` when the probe failed. */
 async function probeSessions(container: Docker.Container) {
-  // Como o usuário do computador (1000), que é o grupo dono dos desktops. Root não
-  // serve: o container larga todas as capabilities e não atravessa modo de arquivo.
+  // Como o usuário do computador (1000). Root não ajudaria: o container larga todas as
+  // capabilities e não atravessa modo de arquivo. Por isso o probe lê só o que qualquer
+  // uid lê — `/proc` e os nomes das pastas —, e nunca entra na pasta 700 de outra sessão.
   const output = await execIn(container, SESSION_PROBE_COMMAND, "1000:1000").catch(() => undefined);
-  return output === undefined ? undefined : parseSessionProbe(output);
+  return parseSessionProbeResult(output);
 }
 
 function sessionKey(workspaceId: string, botId: string) {

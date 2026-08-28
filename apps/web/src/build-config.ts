@@ -5,6 +5,8 @@
  * on runtimes that do not strip types (and on Vercel if it builds the web app).
  */
 const DEV_AUTH_SECRET_PLACEHOLDER = "dev-secret-change-me-please-32chars";
+/** Mesma regra de `@quibt/core/secrets-guard`, repetida aqui porque o import não é possível. */
+const PUBLISHED_SECRET_PREFIX = "replace-with-";
 const RUNTIME_SECRETS_ERROR =
   "Set BETTER_AUTH_SECRET and ENCRYPTION_KEY to long random strings before starting Quibt Bot outside local development or tests.";
 
@@ -22,7 +24,10 @@ export function screenProxySecretFor(command: "build" | "serve", env: NodeJS.Pro
     if (isDevSecretAllowed(env)) return DEV_AUTH_SECRET_PLACEHOLDER;
     throw new Error(RUNTIME_SECRETS_ERROR);
   }
-  if (!isDevSecretAllowed(env) && value === DEV_AUTH_SECRET_PLACEHOLDER) {
+  if (
+    !isDevSecretAllowed(env) &&
+    (value === DEV_AUTH_SECRET_PLACEHOLDER || value.startsWith(PUBLISHED_SECRET_PREFIX))
+  ) {
     throw new Error(RUNTIME_SECRETS_ERROR);
   }
   if (!isDevSecretAllowed(env) && value.length < 32) {

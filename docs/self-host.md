@@ -26,7 +26,22 @@ when the API needs to stay reachable while your laptop is off.
 
 ## Docker Compose (single machine)
 
-1. Copy `.env.example` to `.env` and set `BETTER_AUTH_SECRET` and `ENCRYPTION_KEY` to long random strings. Quibt Bot refuses placeholder or missing secrets outside `development` / `test` (or when `QUIBT_ALLOW_DEV_SECRETS=1` is set).
+1. Copy `.env.example` to `.env` and replace every published placeholder. The Compose services
+   pin `NODE_ENV=production` themselves (`environment:` wins over `env_file:`), so the
+   `NODE_ENV=development` line the example keeps for `pnpm dev` does **not** reach the stack, and
+   the boot is fail-closed: any value that is missing, shorter than 32 characters, or still starts
+   with `replace-with-` is refused. Generate each one with `openssl rand -hex 32`:
+
+   ```env
+   BETTER_AUTH_SECRET=…        # session cookies
+   ENCRYPTION_KEY=…            # model/plugin keys stored in the database
+   SANDBOX_SUPERVISOR_TOKEN=…  # own credential, different from BETTER_AUTH_SECRET
+   BOOTSTRAP_SECRET=…          # loopback-only first-owner invites
+   ```
+
+   Also pick the mailer: set `RESEND_API_KEY`, or set `AUTH_EMAIL_DISABLED=true` to run without
+   password-reset e-mail (only with `BILLING_ENABLED=false`). `QUIBT_ALLOW_DEV_SECRETS=1` still
+   relaxes all of this on a single development machine; never set it on a server.
 2. Set `OPENROUTER_API_KEY` (and `COMPOSIO_API_KEY` if you want Plugins — or paste the Composio key later in **Plugins → Apps**; the deployment owner's key is stored encrypted with `ENCRYPTION_KEY` and applies to every bot. `COMPOSIO_API_KEY` in the env always wins).
 3. Build the computer image: `pnpm sandbox:build` (Compose also builds it via the `computer` service).
 4. `docker compose -f infra/compose/docker-compose.yml up --build`
@@ -42,7 +57,61 @@ database `quibt`): change `POSTGRES_USER` / `POSTGRES_PASSWORD` together with `D
 and keep Postgres on an internal network when you deploy remotely. A volume created with the old
 local role must be recreated (`pnpm compose:down` deletes it) or the role renamed in that cluster.
 
-The Docker supervisor is not published. It is authenticated and stays on the internal Compose network because access to it is equivalent to control of the Docker host. Production requires its own credential: set the same `SANDBOX_SUPERVISOR_TOKEN` (a long random string, different from `BETTER_AUTH_SECRET`) on the API, worker, and supervisor, or the three services refuse to boot. Outside production an empty value is accepted and each service derives the token from `BETTER_AUTH_SECRET`, so the session secret itself never reaches the supervisor.
+The Docker supervisor is not published. It is authenticated and stays on the internal Compose network because access to it is equivalent to control of the Docker host. Production requires its own credential: set the same `SANDBOX_SUPERVISOR_TOKEN` (a long random string, different from `BETTER_AUTH_SECRET`) on the API, worker, and supervisor, or the three services refuse to boot. The Compose stack always runs as production, so the value must be filled in `.env`. Only outside production — `pnpm dev` on your own machine — an empty value is accepted, and each service then derives the token from `BETTER_AUTH_SECRET`, so the session secret itself never reaches the supervisor.
+
+### Signing in on a LAN or public install
+
+`POST /api/local/session` — the route the local app uses to open the owner's session without a
+password — only exists when the install itself is loopback. On a LAN address or a public origin it
+answers `404` for every client, on purpose: a neighbour on the same Wi-Fi reaches a published API
+port with the same source address as the owner's browser, so an address is never proof of who is at
+the keyboard. Entry on such an install is by password, or by a **pairing code** minted in
+**Settings → Celular** on a device that is already signed in.
+
+On the machine that runs the stack, the desktop app still signs itself in: it proves it holds the
+local `quibt.env` secret with a one-minute, single-use capability. Without that file it sends
+nothing and falls back to the normal sign-in. See [desktop.md](./desktop.md).
+
+### Supervisor on another host (opt-in, `supervisor-tls`)
+
+Port 7091 is not published by any default profile: whoever reaches it controls that host's
+Docker. To let a Quibt deployment use *another* host as the computer, the operator turns the
+profile on **on that computer host**:
+
+```bash
+QUIBT_SUPERVISOR_PUBLIC_HOST=quibt-a1b2c3d4.203.0.113.9.sslip.io \
+  docker compose -f infra/compose/docker-compose.desktop.yml \
+  -f infra/compose/docker-compose.supervisor-tls.yml \
+  --profile supervisor-tls up -d supervisor supervisor-tls
+```
+
+The service lives in its own file on purpose. Compose interpolates every file it loads before it
+looks at `profiles:`, so a required variable in the main file would break `docker compose up` for
+every existing install whose `quibt.env` does not have it. The extra `-f` is the opt-in; the
+profile keeps it off even then. That file is not shipped inside the desktop/CLI installer bundle
+— take it from the repository and keep it next to `quibt.env`.
+
+Caddy terminates TLS for that name and talks to the supervisor over the internal network; the
+supervisor still requires `SANDBOX_SUPERVISOR_TOKEN` on every `/computers` route. It binds
+80/443, the same ports as the site's `public` profile — do not run both on one host.
+
+In the app, paste the **https** endpoint and the same token. The endpoint is checked before it is
+stored: `https` outside loopback, no RFC1918 / CGNAT / link-local literal, no `169.254.169.254`,
+no embedded credentials, and a name that resolves into a private network is refused before any
+socket is opened. **Testar máquina** now calls an authenticated route (`GET /computers/_probe`),
+so a wrong token fails the test instead of failing every later boot.
+
+**The screen does not cross a remote supervisor.** noVNC stays on that host's internal Docker
+network, and the app's `/novnc` proxy only accepts loopback, RFC1918 and `quibt-bot-*` targets,
+so a public supervisor's screen is unreachable. Commands, files and routines work; the screen
+panel stays black. If you want the screen, install the whole stack on that host.
+
+`SANDBOX_SCREEN_HOST` is the host clients use to reach a screen port, and
+`SANDBOX_SCREEN_BIND_HOST` is the interface Docker publishes it on (`127.0.0.1` by default).
+Set both in the supervisor's env file to reach a screen from another device on a **private**
+network. When `SANDBOX_SCREEN_HOST` is set it wins over the internal Docker address. A published
+noVNC port is guarded by an 8-character VNC password alone, so do not bind it to a public
+interface.
 
 ### HTTPS on a VPS, with nobody's domain
 
@@ -74,6 +143,11 @@ WEB_ORIGIN=https://app.example.com
 API_URL=https://app.example.com
 ```
 
+`WEB_ORIGIN` must be the origin the browser actually uses. Putting a third-party proxy in front
+while `WEB_ORIGIN` stays on loopback is a **misconfiguration, not a shortcut**: a proxy on the same
+host reaches the API over a loopback socket, so the deploy still looks local to it and the
+loopback-only rule above stops protecting anything.
+
 Cookies and CORS follow those origins. Registration is closed by default on every path
 (`SIGNUPS_ENABLED=false` in `.env.example`, generated installs, and the database switch): only the
 first owner gets in, through the installer code. To accept more accounts, set `SIGNUPS_ENABLED=true`
@@ -97,9 +171,24 @@ AGENT_RUNTIME=pi          # Keep scripted only for pnpm verify:fast.
 WAKEUP_DRIVER=graphile
 SANDBOX_IDLE_MS=600000    # pause the bot computer after 10 minutes idle
 SANDBOX_COMMAND_TIMEOUT_MS=300000 # stop a shell command after 5 minutes
+DATABASE_TRANSACTION_TIMEOUT_MS=30000 # Prisma interactive transaction deadline
+DATABASE_POOL_MAX=16      # Postgres connections per process (API, worker)
 E2B_API_KEY=              # when SANDBOX_PROVIDER=e2b
 BOX_API_KEY=              # when SANDBOX_PROVIDER=box
 ```
+
+The two database values only matter on a busy or large install:
+
+- `DATABASE_TRANSACTION_TIMEOUT_MS` is how long one Prisma transaction may take (default 30000).
+  Prisma's own default of 5 s was too short to delete a bot or an account with a long history, and
+  the transaction rolled back **after** the computer was already destroyed at the provider. Raise
+  it if your database is large and those deletions still hit the deadline.
+- `DATABASE_POOL_MAX` is how many Postgres connections each process opens (default 16; the `pg`
+  driver ignores `max` in the connection URL, so this is the only way to change it). One
+  connection is held by the wake-up `LISTEN` and a single chat screen can fire up to 7 queries at
+  once. Raise it when many people use the app at the same time and queries start waiting; lower it
+  when your Postgres has a tight `max_connections`, because every API and worker process opens up
+  to this number.
 
 Do not commit `.env`. Never put `COMPOSIO_API_KEY`, OpenRouter keys, or provider tokens in git, logs, or chat.
 
@@ -108,7 +197,7 @@ Do not commit `.env`. Never put `COMPOSIO_API_KEY`, OpenRouter keys, or provider
 The catalog in onboarding and **Settings → Máquina** is the picker. After a tap, the app shows a plain-language guide (what to install, where the key lives, how bots share the computer). That copy is `machineGuideFor()` in `@quibt/core`. The long form is [computers.md](./computers.md); the first-run walkthrough is [onboarding.md](./onboarding.md). `SANDBOX_PROVIDER=desktop` is refused because a host process is not an OS sandbox.
 
 - **Docker** is the trusted single-machine implementation: one resource-limited persistent container and home per workspace, plus one X11/noVNC/Chrome session per bot. With `SANDBOX_SCREEN_NETWORK=internal` — what the Compose stack sets — every workspace computer gets a dedicated Docker network separate from Postgres and the application network; without it the computer runs on Docker's default bridge, so set it on any host that also runs the database. Keep the supervisor private. Public or multi-user deployments should use E2B, Box, or a remote supervisor on a dedicated VPS.
-- **Remote supervisor / BYO VPS** — paste `https://your-vps:7091` and the supervisor token, or follow a catalog recipe (Hetzner, DigitalOcean, generic `curl | bash` / cloud-init). Quibt does not provision or bill the VM.
+- **Remote supervisor / BYO VPS** — the supported way to use a VPS is to install the whole stack there (catalog recipes: Hetzner, DigitalOcean, generic `curl | bash` / cloud-init). Quibt does not provision or bill the VM. Pointing this deployment at a supervisor that runs on *another* host is opt-in on both sides, and it does not carry the screen — see **Supervisor on another host** below.
 - **E2B** keeps its existing one-bot/one-sandbox behavior. Paste `E2B_API_KEY` in the UI (BYOK) or set it in `.env`. Workspace-wide shared files and multi-display sessions are currently the Docker path; they are not emulated by sharing a browser tab in E2B.
 - **Box** (`SANDBOX_PROVIDER=box`, box.ascii.dev) gives each bot a persistent Ubuntu cloud VM with a virtual desktop, billed per second on **your** Box account. Paste `BOX_API_KEY` in the UI. User boxes are created with `noEnv: true`, so operator environment variables and credentials are never copied into them. Boxes are created without provider auto-stop; the `SANDBOX_IDLE_MS` scheduler stops (archives) idle boxes and they resume with their disk intact on the next message or Take control. Take control happens through the interactive noVNC desktop stream.
 - **Desktop provider** is disabled. Running the Electron client does not run model commands on the host.

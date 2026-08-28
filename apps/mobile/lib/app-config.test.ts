@@ -7,9 +7,11 @@ const config = JSON.parse(
   readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../app.json"), "utf8"),
 ) as {
   expo: {
-    android?: { package?: string };
-    ios?: { infoPlist?: Record<string, unknown> };
+    android?: { package?: string; versionCode?: number };
+    ios?: { buildNumber?: string; infoPlist?: Record<string, unknown> };
     plugins?: Array<string | [string, Record<string, unknown>]>;
+    runtimeVersion?: { policy?: string };
+    version?: string;
   };
 };
 
@@ -28,5 +30,12 @@ describe("mobile native app config", () => {
     expect(config.expo.ios?.infoPlist?.NSLocalNetworkUsageDescription).toBe(
       "O Quibt Bot usa a rede local para conectar este iPhone ao computador dos seus bots.",
     );
+  });
+
+  it("isolates OTA updates whenever the native dependency fingerprint changes", () => {
+    expect(config.expo.runtimeVersion).toEqual({ policy: "fingerprint" });
+    expect(config.expo.version).toBe("0.1.2");
+    expect(config.expo.ios?.buildNumber).toBe("3");
+    expect(config.expo.android?.versionCode).toBe(3);
   });
 });

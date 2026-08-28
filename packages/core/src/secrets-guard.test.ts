@@ -7,7 +7,9 @@ import {
   deriveSupervisorToken,
   hmacSha256,
   hmacSha256Hex,
+  isPublishedPlaceholderSecret,
   resolveAuthSecret,
+  resolveBootstrapSecret,
   resolveEncryptionKey,
   resolveSupervisorToken,
   sha256,
@@ -55,6 +57,50 @@ describe("secrets-guard", () => {
     expect(() =>
       resolveSupervisorToken({ NODE_ENV: "production", SANDBOX_SUPERVISOR_TOKEN: "z" }),
     ).toThrow(/long random strings/);
+  });
+
+  it("rejects the placeholders published in .env.example, in every resolver", () => {
+    // Os exemplos do repositório têm 37 e 38 caracteres: passavam no mínimo de 32.
+    const published = "replace-with-32-plus-character-secret";
+    const publishedKey = "replace-with-64-char-hex-or-passphrase"; // gitleaks:allow
+    expect(() =>
+      resolveAuthSecret({ NODE_ENV: "production", BETTER_AUTH_SECRET: published }),
+    ).toThrow(/BETTER_AUTH_SECRET/);
+    expect(() =>
+      resolveEncryptionKey({ NODE_ENV: "production", ENCRYPTION_KEY: publishedKey }),
+    ).toThrow(/ENCRYPTION_KEY/);
+    expect(() =>
+      resolveSupervisorToken({
+        NODE_ENV: "production",
+        BETTER_AUTH_SECRET: "prod-secret-with-enough-entropy-here",
+        SANDBOX_SUPERVISOR_TOKEN: published,
+      }),
+    ).toThrow(/SANDBOX_SUPERVISOR_TOKEN/);
+    expect(() =>
+      resolveBootstrapSecret({
+        NODE_ENV: "production",
+        BETTER_AUTH_SECRET: "prod-secret-with-enough-entropy-here",
+        BOOTSTRAP_SECRET: published,
+      }),
+    ).toThrow(/BOOTSTRAP_SECRET/);
+    expect(isPublishedPlaceholderSecret("replace-with-anything-written-later")).toBe(true);
+    expect(isPublishedPlaceholderSecret("prod-secret-with-enough-entropy-here")).toBe(false);
+  });
+
+  it("keeps the copied .env.example working on a development machine", () => {
+    // `cp .env.example .env` + `pnpm dev` continua igual: só produção recusa.
+    expect(
+      resolveAuthSecret({
+        NODE_ENV: "development",
+        BETTER_AUTH_SECRET: "replace-with-32-plus-character-secret", // gitleaks:allow
+      }),
+    ).toBe("replace-with-32-plus-character-secret");
+    expect(
+      resolveEncryptionKey({
+        NODE_ENV: "development",
+        ENCRYPTION_KEY: "replace-with-64-char-hex-or-passphrase", // gitleaks:allow
+      }),
+    ).toBe("replace-with-64-char-hex-or-passphrase");
   });
 
   it("accepts real secrets in production", () => {

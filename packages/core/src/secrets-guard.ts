@@ -1,6 +1,25 @@
 export const DEV_AUTH_SECRET_PLACEHOLDER = "dev-secret-change-me-please-32chars";
 export const DEV_ENCRYPTION_KEY_PLACEHOLDER = "dev-encryption-key";
 
+/**
+ * Prefixo dos exemplos publicados no `.env.example`
+ * (`replace-with-32-plus-character-secret`, `replace-with-64-char-hex-or-passphrase`).
+ * Eles têm 37 e 38 caracteres, então passavam no comprimento mínimo: quem esquecia de
+ * trocá-los subia em produção com um segredo que está no GitHub — dá para forjar o cookie
+ * de sessão e para abrir as chaves guardadas com o `ENCRYPTION_KEY`. É prefixo, não lista,
+ * para cobrir também qualquer exemplo novo escrito no mesmo padrão.
+ */
+export const PUBLISHED_SECRET_PREFIX = "replace-with-";
+
+/** Um valor que qualquer pessoa lê no repositório não é segredo. */
+export function isPublishedPlaceholderSecret(value: string): boolean {
+  return (
+    value === DEV_AUTH_SECRET_PLACEHOLDER ||
+    value === DEV_ENCRYPTION_KEY_PLACEHOLDER ||
+    value.startsWith(PUBLISHED_SECRET_PREFIX)
+  );
+}
+
 const RUNTIME_SECRETS_ERROR =
   "Set BETTER_AUTH_SECRET and ENCRYPTION_KEY to long random strings before starting Quibt Bot outside local development or tests.";
 const MIN_RUNTIME_SECRET_LENGTH = 32;
@@ -24,7 +43,7 @@ export function resolveAuthSecret(env: NodeJS.ProcessEnv = process.env): string 
     if (isDevSecretAllowed(env)) return DEV_AUTH_SECRET_PLACEHOLDER;
     throw new Error(RUNTIME_SECRETS_ERROR);
   }
-  if (!isDevSecretAllowed(env) && value === DEV_AUTH_SECRET_PLACEHOLDER) {
+  if (!isDevSecretAllowed(env) && isPublishedPlaceholderSecret(value)) {
     throw new Error(RUNTIME_SECRETS_ERROR);
   }
   assertStrongRuntimeSecret(value, env);
@@ -37,7 +56,7 @@ export function resolveEncryptionKey(env: NodeJS.ProcessEnv = process.env): stri
     if (isDevSecretAllowed(env)) return DEV_ENCRYPTION_KEY_PLACEHOLDER;
     throw new Error(RUNTIME_SECRETS_ERROR);
   }
-  if (!isDevSecretAllowed(env) && value === DEV_ENCRYPTION_KEY_PLACEHOLDER) {
+  if (!isDevSecretAllowed(env) && isPublishedPlaceholderSecret(value)) {
     throw new Error(RUNTIME_SECRETS_ERROR);
   }
   assertStrongRuntimeSecret(value, env);
@@ -70,7 +89,7 @@ export function resolveSupervisorToken(env: NodeJS.ProcessEnv = process.env): st
     if (!isDevSecretAllowed(env)) {
       // Um placeholder público ou o próprio segredo de sessão não são
       // credencial própria: aceitá-los é o mesmo buraco por outro caminho.
-      if (token === DEV_AUTH_SECRET_PLACEHOLDER || token === DEV_ENCRYPTION_KEY_PLACEHOLDER) {
+      if (isPublishedPlaceholderSecret(token)) {
         throw new Error(SUPERVISOR_TOKEN_ERROR);
       }
       if (env.BETTER_AUTH_SECRET && token === env.BETTER_AUTH_SECRET) {
@@ -99,7 +118,7 @@ export function resolveBootstrapSecret(env: NodeJS.ProcessEnv = process.env): st
   const secret = env.BOOTSTRAP_SECRET;
   if (secret) {
     if (!isDevSecretAllowed(env)) {
-      if (secret === DEV_AUTH_SECRET_PLACEHOLDER || secret === DEV_ENCRYPTION_KEY_PLACEHOLDER) {
+      if (isPublishedPlaceholderSecret(secret)) {
         throw new Error(BOOTSTRAP_SECRET_ERROR);
       }
       if (env.BETTER_AUTH_SECRET && secret === env.BETTER_AUTH_SECRET) {

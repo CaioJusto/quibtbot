@@ -161,9 +161,18 @@ export function MachineCredentials({
             value={endpoint}
             disabled={disabled}
             onChange={(event) => onEndpoint(event.target.value)}
-            placeholder="https://vps.example:7091"
+            placeholder="https://sua-vps.exemplo"
             className="mt-1 w-full rounded-xl border border-[var(--qb-hairline)] bg-[var(--qb-surface-2)] px-3.5 py-2 text-[13px] text-[var(--qb-ink)] outline-none placeholder:text-[var(--qb-muted-2)] focus:border-[var(--qb-accent)]"
           />
+          {item.family === "remote-supervisor" ? (
+            <span className="mt-1.5 block text-[11px] leading-[1.45] text-[var(--qb-muted-2)]">
+              A porta do supervisor não fica publicada. No outro host, ligue o profile
+              supervisor-tls (docker compose --profile supervisor-tls up -d supervisor
+              supervisor-tls) e cole aqui o endereço https desse nome. Nesse modo a tela não chega:
+              comandos, arquivos e rotinas funcionam, e o painel do computador fica preto. Para ver
+              a tela, instale o Quibt inteiro nessa máquina.
+            </span>
+          ) : null}
         </label>
       ) : null}
       {item.needsKey ? (

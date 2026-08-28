@@ -17,6 +17,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { AUTH_BG, AUTH_FIELD_TEXT } from "../lib/auth-ui";
 import { claimInstallation } from "../lib/bootstrap-pairing";
 import { createBoxInstallTransport, runBoxRemoteInstall } from "../lib/box-install-transport";
+import { loadBoxServerId, saveBoxServerId } from "../lib/box-server-state";
 import {
   COLORS,
   METRICS,
@@ -173,7 +174,10 @@ export default function SetupSshScreen() {
 
     try {
       if (mode === "box") {
+        const savedBoxId = await loadBoxServerId();
         const transport = createBoxInstallTransport({
+          boxId: savedBoxId ?? undefined,
+          onBoxAllocated: saveBoxServerId,
           loadApiKey: async () => {
             if (boxApiKey.trim()) return boxApiKey.trim();
             const stored = await loadInfrastructureCredential("box.ascii.dev");
@@ -341,7 +345,9 @@ export default function SetupSshScreen() {
                   style={AUTH_FIELD_TEXT}
                 />
                 <Text style={styles.hint}>
-                  A chave fica no SecureStore deste aparelho. Ela não é enviada para a API Quibt.
+                  Use somente uma chave criada em box.ascii.dev — não é a chave da Hetzner. Ela fica
+                  no SecureStore deste aparelho e não é enviada para a API Quibt. No trial, o
+                  servidor de teste fica ligado por até 2 horas por vez.
                 </Text>
               </>
             ) : operation === "update" ? (

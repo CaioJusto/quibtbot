@@ -1,0 +1,46 @@
+# TLS para o supervisor, quando o computador dos bots mora noutra máquina.
+#
+# Arquivo SEPARADO de propósito. O Compose interpola o arquivo inteiro ao carregar, antes de
+# olhar `profiles:` — um `${QUIBT_SUPERVISOR_PUBLIC_HOST:?}` dentro do compose principal
+# quebrava `docker compose up` de TODA instalação já existente (o `quibt.env` delas não tem
+# essa variável), mesmo com o profile desligado. Aqui a exigência dura continua valendo, e só
+# alcança quem escolheu carregar este arquivo.
+#
+# Uso, no host que serve de computador:
+#
+#   QUIBT_SUPERVISOR_PUBLIC_HOST=quibt-a1b2c3d4.203.0.113.9.sslip.io \
+#     docker compose -f infra/compose/docker-compose.desktop.yml \
+#     -f infra/compose/docker-compose.supervisor-tls.yml \
+#     --profile supervisor-tls up -d supervisor supervisor-tls
+#
+# A 7091 continua sem ser publicada: quem encara a internet é o Caddy, que termina TLS por um
+# nome público e fala com o supervisor pela rede interna do Compose. O supervisor continua
+# exigindo `SANDBOX_SUPERVISOR_TOKEN` em toda rota `/computers`.
+#
+# Este serviço usa 80/443, as mesmas portas do profile `public` do site. Não ligue os dois na
+# mesma máquina.
+#
+# A tela (noVNC) NÃO passa por aqui: ela continua na rede interna do Docker daquele host.
+# Ver docs/computers.md — supervisor remoto entrega comandos e arquivos, não a tela.
+services:
+  supervisor-tls:
+    # Índice multi-arch, o mesmo do `caddy` do compose principal: um digest de filho amd64
+    # não instala em VPS ARM.
+    image: caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+    profiles: ["supervisor-tls"]
+    command:
+      - caddy
+      - reverse-proxy
+      - --from
+      - ${QUIBT_SUPERVISOR_PUBLIC_HOST:?}
+      - --to
+      - supervisor:7091
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ${DATA_DIR:?}/caddy-supervisor:/data
+    restart: unless-stopped
+    depends_on:
+      supervisor:
+        condition: service_started

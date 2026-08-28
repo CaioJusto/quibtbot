@@ -15,7 +15,7 @@ Escolha um caminho.
 **App de desktop (mais fácil)**
 
 1. Baixe o instalador em [quibt.com.br](https://quibt.com.br) ou nas [Releases do GitHub](https://github.com/CaioJusto/quibtbot/releases/latest):
-   - Mac (Apple silicon): `QuibtBot.dmg` — o arquivo da v0.2.13 é sem assinatura, então o macOS avisa; na primeira vez, clique com o botão direito → Abrir. Mac Intel: ainda sem instalador — só rodando a partir do código-fonte (veja o README).
+   - Mac (Apple silicon): `QuibtBot.dmg` — o arquivo da v0.2.14 é sem assinatura, então o macOS avisa; na primeira vez, clique com o botão direito → Abrir. Mac Intel: ainda sem instalador — só rodando a partir do código-fonte (veja o README).
    - Windows: `QuibtBot-setup.exe` — instalador de teste 64 bits, sem assinatura; o SmartScreen avisa: Mais informações → Executar assim mesmo. Instale o Docker Desktop por conta própria.
    - Linux: `QuibtBot.AppImage` — AppImage x64 de teste, sem assinatura; precisa de libfuse2, marque como executável e instale o Docker (Engine ou Desktop) por conta própria.
 2. Abra o Quibt Bot. Se o stack local ainda não estiver de pé, o app mostra um assistente.
@@ -24,8 +24,8 @@ Escolha um caminho.
 **Por um comando** (Mac ou Linux, sem o app): cole no terminal
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CaioJusto/quibtbot/v0.2.13/scripts/install.sh \
-  | QUIBT_RELEASE=0.2.13 sh
+curl -fsSL https://raw.githubusercontent.com/CaioJusto/quibtbot/v0.2.14/scripts/install.sh \
+  | QUIBT_RELEASE=0.2.14 sh
 ```
 
 Ele baixa o `quibtbot` certo para a sua máquina, confere o SHA-256 publicado e roda `quibtbot install`. No fim imprime o endereço e o código para o celular. Para sair: `quibtbot uninstall` (ou, no app, **Quibt Bot → Desinstalar**).
@@ -35,6 +35,16 @@ Ele baixa o `quibtbot` certo para a sua máquina, confere o SHA-256 publicado e 
 ## 2. Criar a sua conta
 
 Abra o app e toque em **Começar agora**: a primeira conta pede só o seu nome — o código que o instalador mostrou já provou que o computador é seu, então não há e-mail nem senha para inventar. Essa primeira pessoa vira dona do deploy e é quem escolhe a máquina. Para entrar em outro aparelho depois, peça um código em **Conta → Celular**.
+
+**Quem entra sozinho, e quem não entra.** No computador onde o Quibt roda, o app de desktop abre já
+dentro: ele prova que tem o segredo local da instalação (o arquivo `quibt.env`), com uma permissão
+que vale um minuto e serve uma vez só. Se esse arquivo não existir, ou se o app estiver apontado
+para um servidor remoto, ele cai na tela de login normal — de propósito.
+
+Numa instalação de LAN ou de VPS, a entrada automática não existe: todo mundo entra por senha ou por código de pareamento.
+O motivo é simples: um vizinho do mesmo Wi-Fi chega ao servidor com o mesmo endereço do dono, então
+endereço não prova quem está no teclado. No celular e em qualquer outro aparelho da rede, a entrada
+é **sempre** por código.
 
 ## 3. Trazer o modelo
 
@@ -51,6 +61,14 @@ Três jeitos, nesta ordem na tela. Pode pular e configurar depois, mas sem model
 Na assinatura, **Continuar só libera depois que o login termina** — antes disso o botão diz “Entre na assinatura primeiro”. Salvar o provedor sem credencial fazia o bot responder “não tenho um modelo conectado” no primeiro recado. A aba só lista as três assinaturas acima: são as que o app sabe entrar.
 
 A chave é conferida no provedor **antes** de ser guardada. Colada errada, a tela diz “Chave recusada pelo OpenRouter”; sem saldo, “Sem crédito na OpenRouter”; com o Ollama fechado, “O Ollama não respondeu em http://127.0.0.1:11434”. Nada é salvo até o provedor confirmar — e aí aparece “Chave confirmada ✓”.
+
+O modelo local só vale num endereço **deste computador** ou num **endereço público**. Use
+`http://127.0.0.1:11434`, `localhost` ou, se o Quibt roda em Docker, `host.docker.internal`. Um
+endereço de rede privada (192.168.x, 10.x, 172.16–172.31.x) e o endereço de metadados da nuvem
+(169.254.169.254) são recusados antes de qualquer conexão, e a tela diz: “O Ollama precisa estar no
+seu computador ou num endereço público”. Um servidor seu com endereço público (um vLLM, por
+exemplo) continua funcionando. Quando o Quibt não acha o modelo, a resposta é sempre a mesma frase
+— ele não conta quais portas estão abertas na sua rede.
 
 O modelo sugerido evita os que a OpenAI recusa em conta ChatGPT (a família `codex-spark` só responde a quem paga por chave de API). Você troca no seletor de modelo dessa mesma tela.
 

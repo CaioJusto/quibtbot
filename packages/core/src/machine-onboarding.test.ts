@@ -64,6 +64,55 @@ describe("machineGuideFor", () => {
     expect(machineGuideFor("box").botsShare).toMatch(/uma VM por bot/i);
   });
 
+  it("lists every secret the Compose stack refuses to boot without, on the VPS guides", () => {
+    // O Compose fixa NODE_ENV=production e recusa segredo ausente, curto ou ainda começando com
+    // `replace-with-` (packages/core/src/secrets-guard.ts). Um guia que só pede dois segredos
+    // deixa a pessoa com um stack que não sobe.
+    for (const kind of ["remote-supervisor", "vps-hetzner", "vps-digitalocean", "vps-generic"]) {
+      const text = machineGuideFor(kind).steps.join("\n");
+      expect(text, `${kind} must name BETTER_AUTH_SECRET`).toContain("BETTER_AUTH_SECRET");
+      expect(text, `${kind} must name ENCRYPTION_KEY`).toContain("ENCRYPTION_KEY");
+      expect(text, `${kind} must name SANDBOX_SUPERVISOR_TOKEN`).toContain(
+        "SANDBOX_SUPERVISOR_TOKEN",
+      );
+      expect(text, `${kind} must name BOOTSTRAP_SECRET`).toContain("BOOTSTRAP_SECRET");
+      expect(text, `${kind} must offer the mailer choice`).toMatch(
+        /RESEND_API_KEY[^\n]*AUTH_EMAIL_DISABLED/,
+      );
+      expect(text, `${kind} must warn about the published placeholder`).toContain("replace-with-");
+    }
+  });
+
+  it("tells a VPS owner that entry is by password or code, never automatic", () => {
+    // `POST /api/local/session` responde 404 fora de loopback (apps/api/src/app.ts): numa VPS
+    // ninguém entra sozinho.
+    for (const kind of ["remote-supervisor", "vps-hetzner", "vps-digitalocean", "vps-generic"]) {
+      const guide = machineGuideFor(kind);
+      const text = [guide.what, ...guide.youNeed, ...guide.steps].join("\n");
+      expect(text, kind).toMatch(/(entrar|entra)[^\n]{0,140}(código|senha)/i);
+      expect(text, kind).not.toMatch(/entra sozinho|entrada automática (funciona|vale)/i);
+    }
+  });
+
+  it("tells the VPS owner what the remote supervisor really needs, and what it cannot do", () => {
+    // A porta 7091 não é publicada; o operador liga o profile `supervisor-tls` (Caddy, 443) no
+    // host do computador. E a tela não atravessa supervisor remoto hoje.
+    for (const kind of ["remote-supervisor", "vps-hetzner", "vps-digitalocean", "vps-generic"]) {
+      const guide = machineGuideFor(kind);
+      const text = [guide.what, ...guide.youNeed, ...guide.steps, guide.botsShare].join("\n");
+      expect(text, `${kind} must not teach the unpublished port`).not.toMatch(
+        /https?:\/\/[^\s"']*:7091/,
+      );
+      expect(text, `${kind} must name the opt-in profile`).toContain("supervisor-tls");
+      expect(text, `${kind} must say the screen does not cross it`).toMatch(
+        /tela[^\n]{0,160}(não|nao)/i,
+      );
+      expect(text, `${kind} must recommend the whole stack`).toMatch(
+        /stack (inteiro|todo)|instale o Quibt inteiro/i,
+      );
+    }
+  });
+
   it("never lets an E2B or Box guide claim it hosts the Quibt server, only the bot's computer", () => {
     for (const kind of ["e2b", "box"]) {
       const guide = machineGuideFor(kind);

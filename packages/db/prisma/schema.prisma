@@ -141,6 +141,7 @@ model Invitation {
 
   @@index([organizationId])
   @@index([email])
+  @@index([inviterId])
   @@map("invitation")
 }
 
@@ -431,6 +432,8 @@ model Task {
   runs        Run[]
 
   @@index([workspaceId, botId])
+  @@index([botId])
+  @@index([threadId])
   @@map("tasks")
 }
 
@@ -478,6 +481,7 @@ model Run {
   @@index([botId, status])
   @@index([threadId, status])
   @@index([webhookId])
+  @@index([taskId])
   @@map("runs")
 }
 
@@ -504,6 +508,7 @@ model Webhook {
   runs           Run[]
 
   @@index([workspaceId, botId])
+  @@index([botId])
   @@map("webhooks")
 }
 
@@ -567,6 +572,7 @@ model ExternalEffect {
 
   @@unique([idempotencyKey])
   @@index([runId, status])
+  @@index([workspaceId])
   @@map("external_effects")
 }
 
@@ -593,6 +599,8 @@ model Routine {
   @@index([active, nextRunAt])
   @@index([workspaceId, botId])
   @@index([workspaceId, groupId])
+  @@index([botId])
+  @@index([groupId])
   @@map("routines")
 }
 
@@ -648,6 +656,7 @@ model MemoryDocument {
 
   @@unique([workspaceId, scope, botId, path])
   @@index([workspaceId, userId])
+  @@index([botId])
   @@map("memory_documents")
 }
 
@@ -676,6 +685,7 @@ model AgentHome {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  @@index([workspaceId])
   @@map("agent_homes")
 }
 
@@ -690,6 +700,7 @@ model BrowserProfile {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  @@index([workspaceId])
   @@map("browser_profiles")
 }
 
@@ -779,6 +790,7 @@ model Artifact {
   createdAt   DateTime @default(now())
 
   @@index([workspaceId, botId])
+  @@index([botId])
   @@map("artifacts")
 }
 
@@ -802,6 +814,8 @@ model UsageRecord {
 
   @@index([workspaceId, userId, createdAt])
   @@index([workspaceId, paidBy, createdAt])
+  @@index([botId])
+  @@index([runId])
   @@map("usage_records")
 }
 

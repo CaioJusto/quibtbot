@@ -210,52 +210,60 @@ describe("primeira conta sem convite", () => {
         requestClaimsLocalBrowser({
           clientHost,
           peerAddress: "203.0.113.42",
-          forwardedClientIp: undefined,
+          forwardedHops: [],
           proxyProof: undefined,
           authSecret,
+          deployIsLocal: true,
         }),
       ).toBe(false);
     }
   });
 
-  it("aceita localhost direto e exige prova mais IP local atrás do proxy", () => {
+  it("aceita localhost direto e exige prova mais IP de loopback atrás do proxy", () => {
     const authSecret = "test-auth-secret-32-characters-long";
     expect(
       requestClaimsLocalBrowser({
         clientHost: "localhost:5173",
         peerAddress: "127.0.0.1",
-        forwardedClientIp: undefined,
+        forwardedHops: [],
         proxyProof: undefined,
         authSecret,
+        deployIsLocal: true,
       }),
     ).toBe(true);
     expect(
       requestClaimsLocalBrowser({
         clientHost: "localhost:5173",
         peerAddress: "172.20.0.4",
-        forwardedClientIp: "127.0.0.1",
+        forwardedHops: ["127.0.0.1"],
         proxyProof: internalProxyProof(authSecret),
         authSecret,
+        deployIsLocal: true,
       }),
     ).toBe(true);
-    // A private LAN address is not physical-presence proof by itself. The official proxy is
-    // loopback-bound; deployments exposing it to a LAN do not gain local privileges.
+    // A private LAN address is not physical-presence proof by itself: a bridge do Docker
+    // faz o vizinho do Wi-Fi chegar com o mesmo 172.17.0.1 do dono. Ver
+    // `local-session-guard.test.ts` para a lista completa de endereços recusados.
+    for (const hop of ["203.0.113.42", "192.168.1.55", "172.17.0.1"]) {
+      expect(
+        requestClaimsLocalBrowser({
+          clientHost: "localhost:5173",
+          peerAddress: "172.20.0.4",
+          forwardedHops: [hop],
+          proxyProof: internalProxyProof(authSecret),
+          authSecret,
+          deployIsLocal: true,
+        }),
+      ).toBe(false);
+    }
     expect(
       requestClaimsLocalBrowser({
         clientHost: "localhost:5173",
         peerAddress: "172.20.0.4",
-        forwardedClientIp: "203.0.113.42",
-        proxyProof: internalProxyProof(authSecret),
-        authSecret,
-      }),
-    ).toBe(false);
-    expect(
-      requestClaimsLocalBrowser({
-        clientHost: "localhost:5173",
-        peerAddress: "172.20.0.4",
-        forwardedClientIp: "127.0.0.1",
+        forwardedHops: ["127.0.0.1"],
         proxyProof: "forged",
         authSecret,
+        deployIsLocal: true,
       }),
     ).toBe(false);
   });

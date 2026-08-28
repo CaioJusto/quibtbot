@@ -31,8 +31,8 @@ const GENERIC_VPS_SCRIPT = `#!/usr/bin/env bash
 set -euo pipefail
 # Bring-your-own VPS: use the versioned Quibt installer. It verifies the
 # architecture-specific binary checksum and installs Docker through the distro path.
-curl -fsSL https://raw.githubusercontent.com/CaioJusto/quibtbot/v0.2.13/scripts/install.sh \
-  | QUIBT_RELEASE=0.2.13 sh
+curl -fsSL https://raw.githubusercontent.com/CaioJusto/quibtbot/v0.2.14/scripts/install.sh \
+  | QUIBT_RELEASE=0.2.14 sh
 `;
 
 export const MACHINE_CATALOG: MachineCatalogDefinition[] = [
@@ -57,7 +57,7 @@ export const MACHINE_CATALOG: MachineCatalogDefinition[] = [
     needsEndpoint: true,
     needsDocker: false,
     keyLabel: "Token do supervisor",
-    endpointLabel: "URL do supervisor (https://vps:7091)",
+    endpointLabel: "URL https do supervisor (o outro host precisa do profile supervisor-tls)",
     searchable: ["vps", "supervisor", "remoto", "self-host", "ssh", "servidor"],
   },
   {

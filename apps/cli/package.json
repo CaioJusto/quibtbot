@@ -1,13 +1,13 @@
 {
   "name": "@quibt/cli",
-  "version": "0.2.13",
+  "version": "0.2.14",
   "license": "Apache-2.0",
   "type": "module",
   "bin": {
     "quibtbot": "./dist/main.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node scripts/bundle.mjs",
     "check": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run --root ../.. apps/cli packages/installer"
   },

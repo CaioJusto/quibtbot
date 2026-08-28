@@ -40,6 +40,12 @@ import { InstallConcurrencyGate } from "./install-gate.js";
 import { withDesktopRetryHint } from "./install-messages.js";
 import { lanApiUrl } from "./lan.js";
 import {
+  DESKTOP_CAPABILITY_HEADER,
+  desktopAuthSecretFromEnvFile,
+  desktopSessionCapability,
+  isLocalSessionRequest,
+} from "./local-session.js";
+import {
   claimOwnerEnrollment,
   isFirstOwnerSignupRequest,
   type PendingOwnerEnrollment,
@@ -78,7 +84,14 @@ import {
   saveRemoteUrl,
 } from "./remote-url.js";
 import { SshInspectionStore } from "./ssh-inspection-store.js";
-import { isLocalWebUrl, localApiReadyUrl, probeUrl, resolveStack, toComposeMode } from "./stack.js";
+import {
+  envFilePath,
+  isLocalWebUrl,
+  localApiReadyUrl,
+  probeUrl,
+  resolveStack,
+  toComposeMode,
+} from "./stack.js";
 import { disableRemoteAccess, enableRemoteAccess, readRemoteAccess } from "./tailscale.js";
 import { TrustedOriginPolicy } from "./trusted-origins.js";
 import { shouldLoadOfflinePage, windowRevealActions } from "./window-behavior.js";
@@ -698,6 +711,40 @@ function developmentIcon() {
   return existsSync(icon) ? icon : undefined;
 }
 
+/**
+ * "Abrir o app já é entrar" — provando posse do segredo desta instalação.
+ *
+ * A API só aceita o auto-login por rede vindo de loopback estrito. Com a stack em Docker
+ * isso nunca acontece: o dono chega ao container como `172.17.0.1`, igual a qualquer
+ * aparelho do Wi-Fi (a 3100 é publicada em `0.0.0.0` para o QR do celular). Este app, que
+ * administra a instalação, assina uma capacidade curta e de uso único com o segredo do
+ * `quibt.env`. Sem esse arquivo não há cabeçalho: a pessoa entra pela tela de login.
+ */
+function registerLocalSessionCapabilityBridge(win: BrowserWindow): void {
+  const filter = { urls: ["http://*/*", "https://*/*"] };
+  win.webContents.session.webRequest.onBeforeSendHeaders(filter, (details, callback) => {
+    const webUrl = effectiveWebUrl(userDataPath());
+    if (!isLocalSessionRequest(details.url, webUrl)) {
+      callback({ requestHeaders: details.requestHeaders });
+      return;
+    }
+    const secret = desktopAuthSecretFromEnvFile(envFilePath(userDataPath()));
+    if (!secret) {
+      // Falha clara e sem confiança inventada: segue sem cabeçalho, a API responde 404
+      // e o app cai no login normal.
+      console.warn("[quibt] sem BETTER_AUTH_SECRET em quibt.env: sessão local não assinada");
+      callback({ requestHeaders: details.requestHeaders });
+      return;
+    }
+    details.requestHeaders[DESKTOP_CAPABILITY_HEADER] = desktopSessionCapability({
+      authSecret: secret,
+      method: details.method,
+      path: new URL(details.url).pathname,
+    });
+    callback({ requestHeaders: details.requestHeaders });
+  });
+}
+
 function registerOwnerEnrollmentRequestBridge(win: BrowserWindow): void {
   const filter = { urls: ["http://*/*", "https://*/*"] };
   const webRequest = win.webContents.session.webRequest;
@@ -734,6 +781,7 @@ function createWindow() {
     },
   });
   registerOwnerEnrollmentRequestBridge(win);
+  registerLocalSessionCapabilityBridge(win);
   win.webContents.session.setPermissionRequestHandler((wc, permission, callback, details) => {
     const requestingUrl = details.requestingUrl || wc.getURL();
     const local = wc === win.webContents && trustedPolicy.isLocal(requestingUrl);

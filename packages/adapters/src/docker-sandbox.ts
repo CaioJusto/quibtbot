@@ -636,6 +636,9 @@ export class DockerSandboxProvider implements SandboxProvider {
       },
       context.signal,
     );
+    // Deleting is idempotent. Shared-workspace refs can outlive the container when another
+    // bot's final teardown removed it first; that means the requested end state is reached.
+    if (res.status === 404) return;
     if (!res.ok) {
       const detail = await res.text().catch(() => "");
       throw new SupervisorRequestError("destroy", res.status, detail);

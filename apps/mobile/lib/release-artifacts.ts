@@ -5,7 +5,7 @@ import embeddedManifest from "../assets/release-manifest.json";
  * Metro não consegue empacotá-lo para o celular — importar dali quebrava o build do
  * iOS. O teste ao lado confere que este número bate com o do installer.
  */
-export const INSTALL_RELEASE = "0.2.13";
+export const INSTALL_RELEASE = "0.2.14";
 export const PLACEHOLDER_DIGEST = "0".repeat(64);
 export const LINUX_ARTIFACTS = ["quibtbot-linux-x64", "quibtbot-linux-arm64"] as const;
 

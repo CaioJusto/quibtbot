@@ -1,10 +1,9 @@
-# Dependency security patches
+# Dependency patches
 
-`image-size@1.2.1.patch` rejects invalid ICNS entries and ISO media boxes whose
-declared size cannot advance the parser. It mitigates GHSA-w3rx-r6r6-pgpr and
-GHSA-5p2g-fcmc-qvqq while Metro (and therefore the pinned Expo SDK) has no
-upstream release marked as fixed. The matching audit exceptions must be removed
-when Expo/Metro adopts a patched `image-size` release.
+`@dylankenneally__react-native-ssh-sftp@1.11.0.patch` adds verified host-key
+inspection and connection APIs on Android and iOS, and updates the iOS SSH
+runtime used by the native Quibt Bot build.
 
-`packages/testkit/src/dependency-hardening.test.ts` executes both malicious
-zero-length cases in a subprocess with a timeout so a regression fails safely.
+Metro 0.84.5 no longer depends on `image-size`, so the former parser patch and
+its audit exceptions were removed. `packages/testkit/src/dependency-hardening.test.ts`
+keeps that absence as a regression guard.

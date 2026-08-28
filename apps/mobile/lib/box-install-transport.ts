@@ -1,6 +1,7 @@
 import type { InstallerEvent } from "@quibt/installer";
 import {
   BOX_API_BASE_URL,
+  BOX_TRIAL_SERVER_TTL_SECONDS,
   type BoxRecord,
   createServerBoxRequest,
   isServerBoxRecord,
@@ -19,9 +20,104 @@ import {
 } from "./remote-installer.js";
 
 export const BOX_ID_PATTERN = /^bx_[23456789abcdefghjkmnpqrstuvwxyz]{8}$/;
+const TRIAL_ORPHAN_RECOVERY_WINDOW_MS = 30 * 60_000;
+const TRIAL_TTL_DRIFT_MS = 2 * 60_000;
+const ACTIVE_BOX_STATES = new Set([
+  "init",
+  "provisioning",
+  "provisioned",
+  "cloning",
+  "ready",
+  "idle",
+  "running",
+]);
 
 export function isValidBoxId(boxId: string): boolean {
   return BOX_ID_PATTERN.test(boxId);
+}
+
+class BoxApiRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+    readonly detail?: string,
+  ) {
+    super(message);
+    this.name = "BoxApiRequestError";
+  }
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function boxApiErrorFields(body: unknown): { code?: string; detail?: string } {
+  if (!body || typeof body !== "object") return {};
+  const record = body as Record<string, unknown>;
+  const nested =
+    record.error && typeof record.error === "object"
+      ? (record.error as Record<string, unknown>)
+      : undefined;
+  const errorString = nonEmptyString(record.error);
+  const code =
+    nonEmptyString(record.code) ??
+    nonEmptyString(record.errorCode) ??
+    nonEmptyString(nested?.code) ??
+    (errorString?.match(/^[a-z][a-z0-9_]+$/i) ? errorString : undefined);
+  const detail =
+    nonEmptyString(record.message) ??
+    nonEmptyString(record.detail) ??
+    nonEmptyString(nested?.message) ??
+    (errorString !== code ? errorString : undefined);
+  return { code, detail };
+}
+
+function boxApiErrorMessage(status: number, code?: string): string {
+  if (status === 401 || status === 403) {
+    return "A chave da Box foi recusada. Crie uma chave válida em box.ascii.dev; chaves da Hetzner não funcionam neste campo.";
+  }
+  if (code === "trial_auto_stop_required") {
+    return "O trial da Box exige desligamento automático de no máximo 2 horas.";
+  }
+  if (status === 402) {
+    return "A conta Box está sem saldo ou precisa concluir a configuração de cobrança.";
+  }
+  if (status === 429) {
+    return "A Box atingiu o limite temporário de criação de máquinas. Aguarde um pouco e tente novamente.";
+  }
+  return `A Box recusou a solicitação (HTTP ${status})${code ? `. Código: ${code}` : ""}.`;
+}
+
+function isTrialAutoStopError(error: unknown): error is BoxApiRequestError {
+  if (!(error instanceof BoxApiRequestError)) return false;
+  if (error.code === "trial_auto_stop_required") return true;
+  const detail = error.detail?.toLowerCase() ?? "";
+  return (
+    detail.includes("trial") &&
+    (detail.includes("auto-stop") || detail.includes("auto stop") || detail.includes("ttl"))
+  );
+}
+
+function isNotFoundError(error: unknown): error is BoxApiRequestError {
+  return error instanceof BoxApiRequestError && error.status === 404;
+}
+
+function isRecoverableTrialServerCandidate(box: BoxRecord, now = Date.now()): boolean {
+  if (!ACTIVE_BOX_STATES.has(box.state)) return false;
+  if (box.name === SERVER_BOX_NAME) return true;
+  if (!box.name?.startsWith("Box ")) return false;
+
+  const createdAt = Date.parse(box.createdAt ?? "");
+  const archiveAfter = Date.parse(box.archiveAfter ?? "");
+  if (!Number.isFinite(createdAt) || !Number.isFinite(archiveAfter)) return false;
+  const age = now - createdAt;
+  const ttl = archiveAfter - createdAt;
+  return (
+    age >= 0 &&
+    age <= TRIAL_ORPHAN_RECOVERY_WINDOW_MS &&
+    Math.abs(ttl - BOX_TRIAL_SERVER_TTL_SECONDS * 1_000) <= TRIAL_TTL_DRIFT_MS
+  );
 }
 
 async function boxRequest<T>(
@@ -42,7 +138,14 @@ async function boxRequest<T>(
     signal: options.signal,
   });
   if (!response.ok) {
-    throw new Error(`Box API ${method} ${path} failed (${response.status})`);
+    const body = await response.json().catch(() => undefined);
+    const fields = boxApiErrorFields(body);
+    throw new BoxApiRequestError(
+      boxApiErrorMessage(response.status, fields.code),
+      response.status,
+      fields.code,
+      fields.detail,
+    );
   }
   return (await response.json()) as T;
 }
@@ -61,10 +164,13 @@ async function waitForBoxReady(
       fetchImpl,
       signal,
     });
-    if (!isServerBoxRecord(body.box)) {
-      throw new Error("The selected Box is not a Quibt server VM.");
+    if (body.box.id !== boxId) {
+      throw new Error("A Box respondeu com um identificador diferente do solicitado.");
     }
     if (["ready", "idle", "running"].includes(body.box.state)) return body.box;
+    if (body.box.state === "error") {
+      throw new Error("A Box não conseguiu preparar a máquina. Verifique o painel da Box.");
+    }
     if (body.box.state === "archived") {
       await boxRequest(loadApiKey, "POST", `/boxes/${boxId}/resume`, {
         body: {},
@@ -97,12 +203,18 @@ async function allocateServerBoxId(
   boxId: string | undefined,
   fetchImpl: typeof fetch,
   signal?: AbortSignal,
-  onAllocated?: (id: string) => void,
+  onAllocated?: (id: string) => void | Promise<void>,
+  onTrialFallback?: () => void,
 ): Promise<string> {
   if (boxId) {
     if (!isValidBoxId(boxId)) throw new Error("Invalid Box server id.");
-    onAllocated?.(boxId);
-    return boxId;
+    try {
+      await boxRequest(loadApiKey, "GET", `/boxes/${boxId}`, { fetchImpl, signal });
+      await onAllocated?.(boxId);
+      return boxId;
+    } catch (error) {
+      if (!isNotFoundError(error)) throw error;
+    }
   }
 
   const listed = await boxRequest<{ boxes: BoxRecord[] }>(loadApiKey, "GET", "/boxes", {
@@ -111,16 +223,40 @@ async function allocateServerBoxId(
   });
   const existing = listed.boxes.find((box) => isServerBoxRecord(box));
   if (existing) {
-    onAllocated?.(existing.id);
+    await onAllocated?.(existing.id);
     return existing.id;
   }
 
-  const created = await boxRequest<{ box: BoxRecord }>(loadApiKey, "POST", "/boxes", {
-    body: createServerBoxRequest(),
-    fetchImpl,
-    signal,
-  });
-  onAllocated?.(created.box.id);
+  const recoveryCandidates = listed.boxes.filter((box) => isRecoverableTrialServerCandidate(box));
+  const recovered = recoveryCandidates.length === 1 ? recoveryCandidates[0] : undefined;
+  if (recovered) {
+    await onAllocated?.(recovered.id);
+    await configureServerBox(loadApiKey, recovered.id, fetchImpl, signal);
+    return recovered.id;
+  }
+  if (recoveryCandidates.length > 1) {
+    throw new Error(
+      "Encontrei mais de uma Box recente. Abra o painel da Box e mantenha somente a máquina do servidor Quibt antes de tentar novamente.",
+    );
+  }
+
+  let created: { box: BoxRecord };
+  try {
+    created = await boxRequest<{ box: BoxRecord }>(loadApiKey, "POST", "/boxes", {
+      body: createServerBoxRequest(),
+      fetchImpl,
+      signal,
+    });
+  } catch (error) {
+    if (!isTrialAutoStopError(error)) throw error;
+    onTrialFallback?.();
+    created = await boxRequest<{ box: BoxRecord }>(loadApiKey, "POST", "/boxes", {
+      body: createServerBoxRequest(BOX_TRIAL_SERVER_TTL_SECONDS),
+      fetchImpl,
+      signal,
+    });
+  }
+  await onAllocated?.(created.box.id);
   await configureServerBox(loadApiKey, created.box.id, fetchImpl, signal);
   return created.box.id;
 }
@@ -178,7 +314,7 @@ export interface BoxInstallTransportOptions {
   boxId?: string;
   fetch?: typeof fetch;
   release?: EmbeddedReleaseManifest;
-  onBoxAllocated?: (boxId: string) => void;
+  onBoxAllocated?: (boxId: string) => void | Promise<void>;
   signal?: AbortSignal;
 }
 
@@ -235,6 +371,16 @@ export function createBoxInstallTransport(
         fetchImpl,
         options.signal,
         options.onBoxAllocated,
+        () =>
+          emitInstallerEvent(
+            onEvent,
+            {
+              step: "requirements",
+              status: "running",
+              message: "Trial da Box: servidor de teste ativo por até 2 horas",
+            },
+            secrets,
+          ),
       );
 
       const box = await waitForBoxReady(options.loadApiKey, activeBoxId, fetchImpl, options.signal);

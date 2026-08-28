@@ -1,10 +1,68 @@
-import { execFileSync, execSync, spawn } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
 
 const providers = process.argv.includes("--providers");
+
+/**
+ * Onde procurar o pnpm, em ordem. `npm_execpath` é o caminho que o próprio pnpm
+ * exporta quando ele é quem roda este script: chamá-lo com o Node atual dispensa o
+ * PATH e o shim `.cmd` do Windows. Depois vem o PATH e, por último, o corepack.
+ */
+export function pnpmCandidates(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): { command: string; args: string[]; shell: boolean }[] {
+  const candidates: { command: string; args: string[]; shell: boolean }[] = [];
+  const execPath = env.npm_execpath;
+  if (execPath && /\.[cm]?js$/i.test(execPath)) {
+    candidates.push({ command: process.execPath, args: [execPath], shell: false });
+  } else if (execPath) {
+    candidates.push({ command: execPath, args: [], shell: false });
+  }
+  const shell = platform === "win32";
+  candidates.push({ command: "pnpm", args: [], shell });
+  candidates.push({ command: "corepack", args: ["pnpm"], shell });
+  return candidates;
+}
+
+/** A falha tem de dizer o que aconteceu e o que instalar — nunca sair calada. */
+export function missingPnpmMessage(args: string[], error?: Error): string[] {
+  return [
+    `Não deu para rodar "pnpm ${args.join(" ")}": ${error?.message ?? "erro desconhecido"}`,
+    'Instale o pnpm 9 com "npm install -g pnpm@9", ou ligue o corepack com "corepack enable pnpm", e repita.',
+  ];
+}
+
+/**
+ * Chamar o pnpm por execSync dependia do shell achar o binário, e escondia a causa quando não
+ * achava. Aqui a ausência do pnpm é dita com todas as letras, e o passo que falhou
+ * continua parando a verificação.
+ */
+function runPnpm(args: string[], options: { cwd?: string } = {}): void {
+  let lastError: Error | undefined;
+  for (const candidate of pnpmCandidates()) {
+    const result = spawnSync(candidate.command, [...candidate.args, ...args], {
+      stdio: "inherit",
+      env: process.env,
+      shell: candidate.shell,
+      cwd: options.cwd,
+    });
+    if (!result.error) {
+      if (result.status !== 0) {
+        throw new Error(`pnpm ${args.join(" ")} exited ${result.status ?? "sem código"}`);
+      }
+      return;
+    }
+    // Só "não achei o executável" merece a próxima tentativa; o resto é falha de verdade.
+    if (result.error.code !== "ENOENT")
+      throw new Error(missingPnpmMessage(args, result.error).join("\n"));
+    lastError = result.error;
+  }
+  throw new Error(missingPnpmMessage(args, lastError).join("\n"));
+}
 
 async function main() {
   configureContainerRuntime();
@@ -40,14 +98,12 @@ async function main() {
   process.env.SIGNUPS_ENABLED = "true";
   process.env.CI = "1";
 
-  execSync("pnpm --filter @quibt/db generate", { stdio: "inherit", env: process.env });
-  execSync("pnpm --filter @quibt/db exec prisma migrate deploy", {
-    stdio: "inherit",
-    env: process.env,
+  runPnpm(["--filter", "@quibt/db", "generate"]);
+  runPnpm(["--filter", "@quibt/db", "exec", "prisma", "migrate", "deploy"], {
     cwd: path.resolve("packages/db"),
   });
 
-  execSync("pnpm verify:fast", { stdio: "inherit", env: process.env });
+  runPnpm(["verify:fast"]);
 
   // The PostgreSQL tests intentionally exercise first-owner creation and other
   // durable state. E2E validates a brand-new installation, so it must not inherit
@@ -57,9 +113,7 @@ async function main() {
   container = await new PostgreSqlContainer("postgres:16-alpine").start();
   databaseUrl = container.getConnectionUri();
   process.env.DATABASE_URL = databaseUrl;
-  execSync("pnpm --filter @quibt/db exec prisma migrate deploy", {
-    stdio: "inherit",
-    env: process.env,
+  runPnpm(["--filter", "@quibt/db", "exec", "prisma", "migrate", "deploy"], {
     cwd: path.resolve("packages/db"),
   });
 
@@ -75,7 +129,7 @@ async function main() {
       CI: "1",
     };
     delete playwrightEnv.NO_COLOR;
-    await run("pnpm", ["--filter", "@quibt/web", "exec", "playwright", "test"], playwrightEnv);
+    await runPnpmAsync(["--filter", "@quibt/web", "exec", "playwright", "test"], playwrightEnv);
     await writeFile(
       path.join(reportDir, "summary.json"),
       JSON.stringify(
@@ -117,15 +171,35 @@ function configureContainerRuntime() {
   }
 }
 
-function run(command: string, args: string[], env: NodeJS.ProcessEnv) {
-  return new Promise<void>((resolve, reject) => {
-    const child = spawn(command, args, { stdio: "inherit", env, shell: false });
-    child.on("error", reject);
-    child.on("exit", (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`${command} ${args.join(" ")} exited ${code}`));
+/** Igual ao `runPnpm`, para o passo longo (Playwright) que precisa ser assíncrono. */
+function runPnpmAsync(args: string[], env: NodeJS.ProcessEnv) {
+  const candidates = pnpmCandidates();
+  const attempt = (index: number): Promise<void> =>
+    new Promise<void>((resolve, reject) => {
+      const candidate = candidates[index];
+      if (!candidate) {
+        reject(new Error(missingPnpmMessage(args).join("\n")));
+        return;
+      }
+      const child = spawn(candidate.command, [...candidate.args, ...args], {
+        stdio: "inherit",
+        env,
+        shell: candidate.shell,
+      });
+      child.on("error", (error: NodeJS.ErrnoException) => {
+        // Só "não achei o executável" merece a próxima tentativa.
+        if (error.code === "ENOENT" && index + 1 < candidates.length) {
+          attempt(index + 1).then(resolve, reject);
+          return;
+        }
+        reject(new Error(missingPnpmMessage(args, error).join("\n")));
+      });
+      child.on("exit", (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`pnpm ${args.join(" ")} exited ${code}`));
+      });
     });
-  });
+  return attempt(0);
 }
 
 async function waitForHealth(url: string, ms: number) {

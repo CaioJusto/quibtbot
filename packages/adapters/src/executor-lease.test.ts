@@ -1,7 +1,7 @@
 import type { WakeupJob } from "@quibt/adapter-kit";
 import type { PrismaClient } from "@quibt/db";
 import { BillingPolicyError } from "@quibt/db";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRunExecutor } from "./executor.js";
 import { RUN_LEASE_MS } from "./run-lease.js";
 
@@ -48,7 +48,11 @@ function matches(row: RunRow, where: Where): boolean {
   });
 }
 
-function executorFor(rows: RunRow[], peerText?: string, hooks?: { beforeBilling?: () => void }) {
+function executorFor(
+  rows: RunRow[],
+  peerText?: string,
+  hooks?: { beforeBilling?: () => void | Promise<void> },
+) {
   const enqueued: WakeupJob[] = [];
   const prisma = {
     run: {
@@ -130,7 +134,7 @@ function executorFor(rows: RunRow[], peerText?: string, hooks?: { beforeBilling?
     // The turn stops right after the lease so the test never reaches the agent runtime.
     billing: {
       assertWithinPlan: async () => {
-        hooks?.beforeBilling?.();
+        await hooks?.beforeBilling?.();
         throw new BillingPolicyError("tokens", "sem tokens");
       },
     },
@@ -333,5 +337,103 @@ describe("one agent per bot", () => {
     ]);
     await executor.continueRun("run-b", "worker-2");
     expect(prisma.attempt.create).toHaveBeenCalled();
+  });
+});
+
+/**
+ * The lease is acquired before discovery, MCP and the first boot of the computer, and those
+ * can take minutes. While the renewal only started with the stream, any boot longer than
+ * `RUN_LEASE_MS` let the reaper requeue a run that was still booting: a second worker booted
+ * the same bot again, and three of those cycles failed the run.
+ */
+describe("lease during a slow boot", () => {
+  const bootingRun = (overrides: Partial<RunRow> = {}) =>
+    runningRun({
+      status: "queued",
+      leaseOwner: null,
+      leaseFence: 0,
+      leaseExpiresAt: null,
+      startedAt: null,
+      ...overrides,
+    });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("keeps renewing through a boot longer than the lease window, so no second worker starts the same run", async () => {
+    vi.useFakeTimers();
+    let finishBoot!: () => void;
+    const booting = new Promise<void>((resolve) => {
+      finishBoot = resolve;
+    });
+    const { executor, prisma, rows } = executorFor([bootingRun()], undefined, {
+      beforeBilling: () => booting,
+    });
+
+    const turn = executor.continueRun("run-1", "worker-1");
+    // 90 s of boot: past one whole lease window.
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(rows[0]!.leaseExpiresAt!.getTime()).toBeGreaterThan(Date.now());
+
+    // A second worker arrives mid-boot and must find the run still owned.
+    await executor.continueRun("run-1", "worker-2");
+    expect(prisma.attempt.create).toHaveBeenCalledTimes(1);
+    expect(rows[0]!).toMatchObject({ leaseOwner: "worker-1", leaseFence: 1 });
+
+    finishBoot();
+    await turn;
+  });
+
+  it("stops the watcher when the turn ends", async () => {
+    vi.useFakeTimers();
+    const { executor, prisma, rows } = executorFor([bootingRun()]);
+    // The billing stub fails the run, which is the ordinary end of a turn here.
+    await executor.continueRun("run-1", "worker-1");
+    expect(rows[0]!.status).toBe("failed");
+
+    const renewals = prisma.run.updateMany.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(prisma.run.updateMany.mock.calls.length).toBe(renewals);
+  });
+
+  it("stops the watcher when the run parks waiting for a teammate", async () => {
+    vi.useFakeTimers();
+    const checkpoint = JSON.stringify({
+      pendingPeer: {
+        peerRunId: "run-2",
+        botId: "bot-2",
+        botName: "Scout",
+        question: "e ai?",
+        executionId: "exec-1",
+        deadlineAt: new Date(Date.now() + 60_000).toISOString(),
+      },
+    });
+    const { executor, prisma, rows } = executorFor([
+      bootingRun({ checkpoint }),
+      runningRun({ id: "run-2", status: "running", botId: "b2" }),
+    ]);
+
+    await executor.continueRun("run-1", "worker-1");
+    expect(rows[0]!).toMatchObject({ status: "waiting_input" });
+
+    const renewals = prisma.run.updateMany.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(prisma.run.updateMany.mock.calls.length).toBe(renewals);
+  });
+
+  it("stops the watcher when the boot throws", async () => {
+    vi.useFakeTimers();
+    const { executor, prisma } = executorFor([bootingRun()], undefined, {
+      beforeBilling: () => {
+        throw new Error("discovery exploded");
+      },
+    });
+
+    await expect(executor.continueRun("run-1", "worker-1")).rejects.toThrow("discovery exploded");
+
+    const renewals = prisma.run.updateMany.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(prisma.run.updateMany.mock.calls.length).toBe(renewals);
   });
 });

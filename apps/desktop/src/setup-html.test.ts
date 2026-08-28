@@ -15,6 +15,9 @@ describe("desktop setup navigation", () => {
   it("uses the Quibt visual system and keeps form controls accessible", () => {
     expect(setupHtml).toContain('src="./quibt-team.png"');
     expect(setupHtml).toContain("mode-card--primary");
+    expect(setupHtml).toContain('<section class="setup-pane">');
+    expect(setupHtml).toContain("background: transparent;");
+    expect(setupHtml).not.toContain('<section class="card">');
     expect(setupHtml).toContain('input:not([type="checkbox"])');
     expect(setupHtml).toContain(":focus-visible");
     expect(setupHtml).toContain('ok === true ? "ok" : ok === false ? "bad" : "working"');

@@ -16,7 +16,7 @@ Landing buttons point at GitHub Releases. The release attaches only the stable n
 (`DESKTOP_ARTIFACT_NAMES` in `scripts/release-version.mjs`); the version lives in the tag, so the
 URL is `https://github.com/CaioJusto/quibtbot/releases/download/v<version>/<name>`:
 
-- macOS Apple silicon: `QuibtBot.dmg` — on `v0.2.13` this is the CI build, unsigned and not notarized; macOS warns the first time, **right-click → Open**
+- macOS Apple silicon: `QuibtBot.dmg` — on `v0.2.14` this is the CI build, unsigned and not notarized; macOS warns the first time, **right-click → Open**
 - macOS Intel: no installer yet; run from source (`pnpm dev` + `pnpm desktop`)
 - Windows 64-bit: `QuibtBot-setup.exe` — unsigned test installer (one-click NSIS, no admin); SmartScreen warns, choose **More info → Run anyway**; install Docker Desktop yourself
 - Linux x64: `QuibtBot.AppImage` — unsigned test build; needs `libfuse2`, mark it executable and run it; install Docker (Engine or Desktop) yourself
@@ -51,6 +51,13 @@ pnpm dev:desktop
 
 `QUIBT_WEB_URL` (default `http://127.0.0.1:5173`) is the origin the window loads.
 
+Those two secrets are enough for `pnpm dev`, where Compose only starts Postgres. Running the whole
+stack in Compose is different: the services pin `NODE_ENV=production`, so the boot refuses a
+missing secret and any value still starting with `replace-with-`, and it also needs
+`SANDBOX_SUPERVISOR_TOKEN`, `BOOTSTRAP_SECRET`, and either `RESEND_API_KEY` or
+`AUTH_EMAIL_DISABLED=true`. The full list is step 1 of
+[`self-host.md`](./self-host.md). The packaged installer writes all of them for you.
+
 The app icon is the Quibt mascot on the blue field (`apps/desktop/assets/icon.png`, macOS squircle in `icon-macos.png` / `icon.icns`, Windows `icon.ico`), generated from `apps/mobile/assets/icon.png` so every platform ships the same mark. The window is the same signed-in product as the web app: inbox of bots, thread, computer panel, plugins, and account. The desktop chrome uses glass header pills, a growing composer (Enter sends, Shift+Enter newline, Enter while the bot works queues the next message), right-click menus with icons, and shortcuts — `⌘K` / `Ctrl+K` search bots, groups and actions, `⌘N` / `Ctrl+N` new bot, `⌘1–9` jump, `⌘⇧[` / `⌘⇧]` previous/next. `⌘K` works from inside the composer too: arrows move, Enter opens, Esc closes. Characters stay the Quibt mascots.
 
 ## Pack installers
@@ -78,9 +85,9 @@ The bot does **not** click your host desktop. Navigation inside the computer pan
 
 | Platform | Release status                                                                                                                  | What is still missing                                                                                                                                       |
 | -------- | ------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| macOS    | The `v0.2.13` Apple-silicon `QuibtBot.dmg` is the CI build: `signing-status-mac.json` says `signed: false, notarized: false`. The first launch is **right-click → Open**. The `v0.2.12` and `v0.2.11` CI DMGs were also unsigned; the `v0.2.10` and `v0.2.9` DMGs are Developer ID signed, notarized and stapled. | Replace the `v0.2.13` DMG, `signing-status-mac.json` and checksums with the notarized build, then set `DESKTOP_SIGNING.mac` to `true`. Intel (x64) is not published; Apple silicon only. |
+| macOS    | The `v0.2.14` Apple-silicon `QuibtBot.dmg` is the CI build: `signing-status-mac.json` says `signed: false, notarized: false`. The first launch is **right-click → Open**. The `v0.2.12` and `v0.2.11` CI DMGs were also unsigned; the `v0.2.10` and `v0.2.9` DMGs are Developer ID signed, notarized and stapled. | Replace the `v0.2.14` DMG, `signing-status-mac.json` and checksums with the notarized build, then set `DESKTOP_SIGNING.mac` to `true`. Intel (x64) is not published; Apple silicon only. |
 | Windows  | `QuibtBot-setup.exe` is published as an **unsigned test build**; `signing-status-win.json` says `signed: false`. SmartScreen warns: **More info → Run anyway**. | Authenticode certificate. Until it exists, SmartScreen calls the installer an unknown publisher.              |
-| Linux    | `QuibtBot.AppImage` is published as an **unsigned test build**; `v0.2.13` also ships the x64/arm64 `quibtbot` CLI binaries for server installs.   | No store signature. Needs `libfuse2`; mark the download executable before running it; Docker Engine or Desktop is installed by the user. |
+| Linux    | `QuibtBot.AppImage` is published as an **unsigned test build**; `v0.2.14` also ships the x64/arm64 `quibtbot` CLI binaries for server installs.   | No store signature. Needs `libfuse2`; mark the download executable before running it; Docker Engine or Desktop is installed by the user. |
 
 For a maintainer release on macOS, the project-local hooks sign both the app and DMG, submit each
 to Apple, wait for acceptance, and staple the tickets:
@@ -103,6 +110,34 @@ or notarized unless its attached status and Gatekeeper checks confirm it.
 3. **Second launch.** When the stack is installed but stopped (after a reboot, or after quitting Docker), the app does not show the install wizard again: it opens Docker Desktop if needed, downloads any image that disappeared (a “Clean / Purge data”, a `docker system prune -a`) with the same progress bar, runs `docker compose up --wait` itself and shows “Ligando o Quibt Bot…” with the current step, then opens the product. Restarting never installs Docker Desktop and never asks for the Mac password: if Docker Desktop is gone, the screen says so and goes back to install mode with the button and the Docker terms in sight. If it fails for another reason, the real error and a **Tentar de novo** button appear. `quibtbot install` on a machine that is already installed does the same and prints “já instalado e no ar em <URL>”.
 4. Sign up, bring an OpenRouter key, a local Ollama / OpenAI-compatible URL, or a ChatGPT / Copilot / SuperGrok subscription. Pick the machine (Docker, your VPS, E2B, Box) in onboarding or **Settings → Máquina**. Each choice opens a short guide: what to install, where to copy the key, and whether bots share one computer or each get their own. See [onboarding.md](./onboarding.md) and [computers.md](./computers.md).
 5. Connect the phone. **Settings → Celular** shows a QR with the server URL (`quibt://connect?api=…`), and a **Liberar entrada por 2 minutos** button. Press it and the QR also carries a one-time pairing code, so the phone signs in without a password; leave it unpressed and the QR only points the phone at this server, which then asks for the account. The code is minted from the session on this computer, expires in two minutes, works once, and dies when the screen closes. The phone talks to that API — not to the Electron window. On this computer the private QR uses the machine's Tailscale address, so the HTTP hop stays inside the encrypted tailnet; ordinary same-Wi-Fi HTTP is not advertised. **Qualquer rede** puts a user-owned HTTPS origin in the QR instead — a Cloudflare Tunnel or Tailscale Funnel you run yourself, pointed at `http://127.0.0.1:5173` (the Quibt window, which already proxies `/api`, `/rpc` and `/novnc`). Quibt does not host or sell that tunnel; if it is paid, you pay the provider. The laptop still has to stay on. If the Quibt server runs on a VPS, remote supervisor, or Box VM — not on this laptop — the phone keeps working when the laptop is off, without a tunnel.
+
+### How the app signs you in
+
+The window shows the same signed-in product the browser shows, so it needs a session. On the
+machine that runs the stack the app gets one by itself, by proving it holds the local secret — not
+by its position on the network:
+
+- The app reads `BETTER_AUTH_SECRET` from the local `quibt.env`, derives a key used for this one
+  job (label `quibt-bot/desktop-local-session/v1`), and signs a short capability. It travels in the
+  `x-quibt-desktop-session` header, only on `POST /api/local/session`, and only when the window
+  points at a loopback origin.
+- The capability lives for one minute, works once, and is tied to that method and that path. A
+  value copied from disk and replayed later is refused.
+- With no `quibt.env`, or no `BETTER_AUTH_SECRET` inside it, the app sends no header, the API
+  answers `404`, and the app falls back to the normal sign-in screen. That is deliberate: it never
+  invents trust it cannot prove.
+- Pointed at a remote server (`QUIBT_WEB_URL` of a VPS), the app sends nothing derived from this
+  machine's secret. You sign in there like any other client.
+
+The network path stays loopback-only. If the install itself is not loopback — a LAN address or a
+public origin — `POST /api/local/session` does not exist at all (`404`) for every client, and entry
+is by password or by a pairing code minted on a device that is already signed in. A neighbour on
+the same Wi-Fi reaches a published API port with the same source address as the owner's browser, so
+an address on its own is never accepted as proof of who is at the keyboard.
+
+Keys are separated by job. `BETTER_AUTH_SECRET` signs the session cookie only; the bot screen, the
+internal web→API proxy and this desktop capability each use a key derived from it under their own
+label, so a leaked screen URL is not an oracle for the session key.
 
 The desktop app does **not** run model commands as your macOS, Windows, or Linux user unless you explicitly choose the `desktop` sandbox (refused in production). Default local computer is Docker.
 

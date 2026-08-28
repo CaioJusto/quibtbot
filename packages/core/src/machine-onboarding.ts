@@ -60,15 +60,18 @@ const REMOTE_GUIDE: MachineGuide = {
   who: "Quem já tem um servidor, ou quer deixar os bots ligados 24 h sem deixar o computador de casa aberto.",
   youNeed: [
     "Uma VPS Ubuntu 22.04 ou 24.04 na sua conta (a Quibt não vende máquina).",
-    "A URL do supervisor, em geral https://seu-servidor:7091, depois que o script terminar.",
-    "O token do supervisor — a senha longa que você colocou no .env do servidor.",
+    "O caminho que funciona inteiro é instalar o stack todo na VPS (`quibtbot install`): API, worker, banco, supervisor e tela ficam no mesmo servidor, e não há endereço para colar aqui.",
+    "Para usar só o computador noutra máquina, o dono daquele host precisa ligar o profile `supervisor-tls` lá (`docker compose --profile supervisor-tls up -d supervisor supervisor-tls`). A porta do supervisor não é publicada sozinha: quem atende é o Caddy, por https, num nome público.",
+    "Nesse modo a tela não chega: o noVNC fica na rede interna do Docker daquele host. Comandos, arquivos e rotinas funcionam; o painel do computador fica preto.",
+    "O endereço https desse nome e o token do supervisor — a mesma senha longa que está no .env do servidor.",
   ],
   steps: [
     "Crie a VPS na sua conta (Hetzner CX22, Droplet de 2 GB ou equivalente).",
     "Para o celular alcançar a VPS de qualquer lugar, rode o instalador inteiro nela (`quibtbot install`): com 80 e 443 livres ele tira um certificado HTTPS sozinho, num nome sslip.io — sem domínio seu, sem domínio da Quibt.",
     "Escolha a receita do provedor nesta tela, ou rode o script genérico por SSH.",
-    "No servidor, preencha BETTER_AUTH_SECRET, ENCRYPTION_KEY e SANDBOX_SUPERVISOR_TOKEN no .env e suba o Compose.",
+    "No servidor, preencha o .env com BETTER_AUTH_SECRET, ENCRYPTION_KEY, SANDBOX_SUPERVISOR_TOKEN e BOOTSTRAP_SECRET (cada um com `openssl rand -hex 32`), mais RESEND_API_KEY ou AUTH_EMAIL_DISABLED=true. O Compose roda como produção: valor curto ou ainda começando com `replace-with-` faz o serviço recusar subir.",
     "Cole aqui a URL do supervisor e o mesmo token. Toque em Testar e depois em Salvar.",
+    "Para entrar no Quibt que roda na VPS, use senha ou um código de pareamento de um aparelho já conectado: numa instalação que não é deste computador, o Quibt não abre a sessão por conta própria.",
   ],
   botsShare:
     "Igual ao Docker local: um Linux por workspace, um desktop gráfico por bot. Não é uma aba do navegador. A imagem é a mesma; cada bot tem o próprio desktop.",
@@ -140,8 +143,9 @@ const HETZNER_GUIDE: MachineGuide = {
   steps: [
     "Crie uma conta em hetzner.com e um servidor Cloud CX22, Ubuntu 24.04.",
     "Cole o script desta tela no cloud-init, ou entre por SSH e rode o script.",
-    "No servidor, edite /opt/quibt-bot/.env (segredos + SANDBOX_SUPERVISOR_TOKEN) e suba o Compose.",
+    "No servidor, edite /opt/quibt-bot/.env: BETTER_AUTH_SECRET, ENCRYPTION_KEY, SANDBOX_SUPERVISOR_TOKEN e BOOTSTRAP_SECRET, mais RESEND_API_KEY ou AUTH_EMAIL_DISABLED=true. O Compose roda como produção e recusa valor de exemplo (`replace-with-`). Depois suba o Compose.",
     "Volte aqui, cole a URL do supervisor e o token, teste e salve.",
+    "Na VPS você entra por senha ou por código de pareamento — a entrada automática só existe no computador onde o Quibt roda.",
   ],
   signupUrl: "https://docs.hetzner.com/cloud/servers/getting-started/creating-a-server",
   signupLabel: "Como criar um servidor na Hetzner",
@@ -156,8 +160,9 @@ const DIGITALOCEAN_GUIDE: MachineGuide = {
   steps: [
     "Crie um Droplet Ubuntu 24.04 com pelo menos 2 GB de RAM na sua conta DigitalOcean.",
     "Rode o script desta tela no Droplet (SSH ou user-data).",
-    "Preencha o .env e suba o Compose.",
+    "Preencha o .env: BETTER_AUTH_SECRET, ENCRYPTION_KEY, SANDBOX_SUPERVISOR_TOKEN e BOOTSTRAP_SECRET, mais RESEND_API_KEY ou AUTH_EMAIL_DISABLED=true. O Compose roda como produção e recusa os valores `replace-with-` do exemplo. Depois suba o Compose.",
     "Cole a URL do supervisor e o token, teste e salve.",
+    "Para entrar depois, use senha ou código de pareamento: fora do computador local não existe entrada automática.",
   ],
   signupUrl: "https://docs.digitalocean.com/products/droplets/how-to/create/",
   signupLabel: "Como criar um Droplet",
@@ -172,8 +177,9 @@ const GENERIC_VPS_GUIDE: MachineGuide = {
   steps: [
     "Pegue um Ubuntu 22.04 ou 24.04 com IP público (Oracle, Linode, Vultr, o que for).",
     "Rode o script desta tela como root.",
-    "Edite o .env, suba o Compose, abra só a porta do app (443 ou 5173). O supervisor fica interno, com token.",
+    "Edite o .env (BETTER_AUTH_SECRET, ENCRYPTION_KEY, SANDBOX_SUPERVISOR_TOKEN, BOOTSTRAP_SECRET, e RESEND_API_KEY ou AUTH_EMAIL_DISABLED=true; nada de `replace-with-`, porque o Compose roda como produção), suba o Compose, abra só a porta do app (443 ou 5173). O supervisor fica interno, com token.",
     "Cole a URL e o token aqui, teste e salve.",
+    "Você entra nessa instalação por senha ou por código de pareamento; a entrada automática existe só no computador onde o Quibt roda.",
   ],
 };
 

@@ -1,7 +1,8 @@
 import { ORPCError } from "@orpc/server";
+import { COMPOSIO_REQUEST_TIMEOUT_MS } from "@quibt/adapters";
 import type { Actor } from "@quibt/contracts";
 import type { PrismaClient, WebhookReceiveResult } from "@quibt/db";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   capabilitiesForProvider,
   capabilityDigest,
@@ -154,6 +155,35 @@ describe("completeStoredConnection", () => {
         data: { status: "connected", providerRef: "ca-live" },
       },
     ]);
+  });
+
+  it("dá um prazo de verdade ao Composio, em vez de um signal que nunca aborta", async () => {
+    // `new AbortController().signal` nunca aborta: um socket pendurado no Composio prendia
+    // o slot do worker para sempre, com o lease sendo renovado.
+    vi.useFakeTimers();
+    try {
+      const seen: AbortSignal[] = [];
+      const deps = {
+        prisma: { connection: { updateMany: async () => ({ count: 1 }) } },
+        composio: {
+          complete: async (_request: unknown, context: { signal: AbortSignal }) => {
+            seen.push(context.signal);
+            throw new Error("still pending");
+          },
+          connectionReady: async (_userId: string, _slug: string, signal?: AbortSignal) => {
+            if (signal) seen.push(signal);
+            return false;
+          },
+        },
+      } as unknown as Pick<RouterDeps, "prisma" | "composio">;
+      await completeStoredConnection(deps, actor, pending, "secret-code");
+      expect(seen).toHaveLength(2);
+      for (const signal of seen) expect(signal.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(COMPOSIO_REQUEST_TIMEOUT_MS);
+      for (const signal of seen) expect(signal.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps polling fail-closed until Composio reports the toolkit ready", async () => {

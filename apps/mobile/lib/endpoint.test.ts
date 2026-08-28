@@ -137,6 +137,7 @@ describe("mobile custom server UI", () => {
     const dir = path.dirname(fileURLToPath(import.meta.url));
     const enterCode = readFileSync(path.join(dir, "../app/enter-code.tsx"), "utf8");
     const server = readFileSync(path.join(dir, "../app/server.tsx"), "utf8");
+    const setupBox = readFileSync(path.join(dir, "../app/setup-ssh.tsx"), "utf8");
     const welcome = readFileSync(path.join(dir, "../app/welcome.tsx"), "utf8");
     const api = readFileSync(path.join(dir, "api.ts"), "utf8");
     expect(server).toContain("saveApiBase");
@@ -145,12 +146,16 @@ describe("mobile custom server UI", () => {
     expect(welcome).toContain("Ler QR code");
     expect(welcome).toContain("Tenho um código");
     expect(welcome).toContain("Só tenho o celular");
+    expect(welcome).toContain("Instalar no Box ou numa VPS");
+    expect(welcome).toContain('params: { kind: "box" }');
     expect(welcome).toContain('router.push("/scan")');
     expect(welcome).toContain("displayApiHost(apiBase)");
     expect(welcome.indexOf('label="Ler QR code"')).toBeLessThan(
       welcome.indexOf("<View style={styles.paths}>"),
     );
     expect(welcome).not.toContain('label="Criar minha conta"');
+    expect(setupBox).toContain("não é a chave da Hetzner");
+    expect(setupBox).toContain("servidor de teste fica ligado por até 2 horas");
     // Entrar é digitar o código que outro aparelho mostra, e esperar o sim de lá.
     expect(enterCode).toContain("requestSignInWithCode");
     expect(api).toContain("currentApiBase()");

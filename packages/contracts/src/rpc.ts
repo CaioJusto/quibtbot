@@ -27,6 +27,7 @@ import {
   ModelCredentialSchema,
   ModelInputText,
   RoutineSchema,
+  SandboxEndpointInput,
   ThreadSnapshotSchema,
   UpdateBotGroupInput,
   UpdateBotInput,
@@ -81,7 +82,7 @@ export const appContract = {
           signupsEnabled: z.boolean().optional(),
           signupAllowlist: z.array(z.string()).optional(),
           sandboxProvider: z.string().optional(),
-          sandboxEndpoint: z.string().optional(),
+          sandboxEndpoint: SandboxEndpointInput.optional(),
           sandboxApiKey: z.string().optional(),
           /** Composio key pasted by the owner; `null` removes the stored one. */
           composioApiKey: z.string().max(400).nullable().optional(),
@@ -107,7 +108,9 @@ export const appContract = {
       .input(
         z.object({
           kind: z.string(),
-          endpoint: z.string().optional(),
+          // O mesmo `sandboxEndpoint` por outro nome: é este campo que a tela de máquina
+          // grava. Validar só o `deployment.update` deixaria o caminho de verdade aberto.
+          endpoint: SandboxEndpointInput.optional(),
           apiKey: z.string().optional(),
         }),
       )

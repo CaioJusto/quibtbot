@@ -38,6 +38,23 @@ describe("computer catalog", () => {
     }
   });
 
+  it("never promises a bare supervisor port the Compose does not publish", () => {
+    // A 7091 não é publicada por profile nenhum (infra/compose/docker-compose.desktop.yml).
+    // Com o profile `supervisor-tls` quem atende é o Caddy, em 443, pelo nome público — então
+    // um rótulo que manda colar `https://vps:7091` ensina um endereço que não existe.
+    for (const entry of MACHINE_CATALOG) {
+      const text = [entry.title, entry.body, entry.endpointLabel, entry.recipe?.hint]
+        .filter(Boolean)
+        .join("\n");
+      expect(text, `${entry.kind} points at the unpublished port`).not.toMatch(
+        /https?:\/\/[^\s"']*:7091/,
+      );
+    }
+    const remote = MACHINE_CATALOG.find((entry) => entry.kind === "remote-supervisor");
+    expect(remote?.endpointLabel).toMatch(/https/i);
+    expect(remote?.endpointLabel).toMatch(/supervisor-tls/);
+  });
+
   it("marks readiness from keys and endpoints, not from the recipe id", () => {
     expect(machineIsReady("e2b", {})).toBe(false);
     expect(machineIsReady("e2b", { e2bApiKey: "key" })).toBe(true);

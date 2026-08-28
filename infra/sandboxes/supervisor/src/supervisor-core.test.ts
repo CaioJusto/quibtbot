@@ -23,7 +23,6 @@ import {
   HOME_REPAIR_COMMAND,
   HOME_WRITABLE_PROBE,
   hardenDesktopRoot,
-  hasLiveSessions,
   homeIsWritable,
   homePreparationMarker,
   isAuthorizedSupervisorRequest,
@@ -32,8 +31,10 @@ import {
   isDockerUnreachable,
   isWorkspaceSentinel,
   novncEnsureCommand,
+  otherWorkspaceSessions,
   parseNovncEnsure,
   parseSessionProbe,
+  parseSessionProbeResult,
   parseSessionStart,
   publicError,
   type ReviveDocker,
@@ -43,6 +44,7 @@ import {
   reviveStoppedContainer,
   SESSION_DISPLAY_RECORD_DIR,
   SESSION_PROBE_COMMAND,
+  SESSION_PROBE_MARKER,
   SESSION_RECORDED_PROBE_COMMAND,
   SupervisorError,
   sandboxTimeoutCommand,
@@ -152,14 +154,68 @@ describe("workspace home preparation", () => {
 
 describe("shared container teardown", () => {
   it("skips container removal when preserveComputer is true", () => {
-    expect(shouldRemoveSharedContainer(true, new Map())).toBe(false);
-    expect(shouldRemoveSharedContainer(true, new Map([["bot-a", 1]]))).toBe(false);
+    expect(shouldRemoveSharedContainer(true, [])).toBe(false);
+    expect(shouldRemoveSharedContainer(true, ["bot-a"])).toBe(false);
   });
 
   it("removes the container only when preserveComputer is false and no sessions remain", () => {
-    expect(shouldRemoveSharedContainer(false, new Map())).toBe(true);
+    expect(shouldRemoveSharedContainer(false, [])).toBe(true);
     expect(shouldRemoveSharedContainer(false, undefined)).toBe(false);
-    expect(shouldRemoveSharedContainer(false, new Map([["bot-b", 2]]))).toBe(false);
+    expect(shouldRemoveSharedContainer(false, ["bot-b"])).toBe(false);
+  });
+
+  /**
+   * Dois bots na mesma caixa: apagar um não pode levar o computador do outro. É o caso que
+   * acontecia de verdade — o probe voltava vazio por falta de permissão, o supervisor lia
+   * "não tem mais ninguém" e removia o container por cima do bot-b, que estava vivo.
+   */
+  it("apagar um bot preserva a caixa do outro, mesmo com o probe cego", () => {
+    const remembered = new Map([
+      ["bot-a", 1],
+      ["bot-b", 2],
+    ]);
+    // bot-a saiu: a sessão dele foi encerrada e esquecida antes da decisão.
+    remembered.delete("bot-a");
+
+    // Probe cego (sem resposta): não se apaga nada sem prova.
+    expect(
+      shouldRemoveSharedContainer(
+        false,
+        otherWorkspaceSessions({ botId: "bot-a", remembered: remembered.keys(), live: undefined }),
+      ),
+    ).toBe(false);
+
+    // Probe respondeu vazio, mas a memória do supervisor ainda tem o bot-b: fica de pé.
+    const others = otherWorkspaceSessions({
+      botId: "bot-a",
+      remembered: remembered.keys(),
+      live: [],
+    });
+    expect(others).toEqual(["bot-b"]);
+    expect(shouldRemoveSharedContainer(false, others)).toBe(false);
+
+    // Depois de um restart do supervisor a memória está vazia; quem segura é o probe.
+    expect(otherWorkspaceSessions({ botId: "bot-a", remembered: [], live: ["bot-b"] })).toEqual([
+      "bot-b",
+    ]);
+
+    // Só quando as duas fontes concordam que a caixa está vazia é que ela é removida.
+    expect(
+      shouldRemoveSharedContainer(
+        false,
+        otherWorkspaceSessions({ botId: "bot-a", remembered: [], live: ["bot-a"] }),
+      ),
+    ).toBe(true);
+  });
+
+  it("uma sobra do sentinela não é bot e não prende a caixa para sempre", () => {
+    expect(
+      otherWorkspaceSessions({
+        botId: "bot-a",
+        remembered: [],
+        live: [WORKSPACE_SESSION_SENTINEL],
+      }),
+    ).toEqual([]);
   });
 });
 
@@ -257,7 +313,6 @@ describe("religar um container parado", () => {
 describe("session probe", () => {
   it("lists live sessions from the container instead of trusting process memory", () => {
     expect(SESSION_PROBE_COMMAND[0]).toBe("bash");
-    expect(SESSION_PROBE_COMMAND[2]).toContain("session.pid");
     const probe = parseSessionProbe("bot-a 1\nbot-b 4\n\nbroken\nbot-c 999\n");
     expect([...probe]).toEqual([
       ["bot-a", 1],
@@ -265,10 +320,83 @@ describe("session probe", () => {
     ]);
   });
 
-  it("treats a failed probe as busy so a live workspace container is never destroyed", () => {
-    expect(hasLiveSessions(undefined)).toBe(true);
-    expect(hasLiveSessions(new Map([["bot-a", 1]]))).toBe(true);
-    expect(hasLiveSessions(new Map())).toBe(false);
+  it("uma leitura sem a marca final é 'não sei', nunca 'não tem mais ninguém'", () => {
+    expect(parseSessionProbeResult(undefined)).toBeUndefined();
+    // Exec que morreu no meio: saída plausível, sem o fim do script.
+    expect(parseSessionProbeResult("bot-a 1\n")).toBeUndefined();
+    expect(parseSessionProbeResult(`${SESSION_PROBE_MARKER}\n`)?.size).toBe(0);
+    expect([...(parseSessionProbeResult(`bot-a 1\n${SESSION_PROBE_MARKER}\n`) ?? [])]).toEqual([
+      ["bot-a", 1],
+    ]);
+  });
+
+  /**
+   * O probe roda de verdade, em bash, contra uma caixa de mentira isolada: duas pastas de
+   * bot que ele NÃO consegue abrir (era exatamente o caso em produção, onde a pasta é 700
+   * de outro uid) e um `/proc` com dois Xvfb vivos. O probe antigo devolvia vazio aqui, e
+   * o supervisor apagava o container compartilhado por cima de quem estava trabalhando.
+   */
+  it("enxerga as duas telas mesmo sem conseguir abrir a pasta de nenhuma delas", async () => {
+    const { execFileSync } = await import("node:child_process");
+    const { mkdtempSync, mkdirSync, writeFileSync, chmodSync, readdirSync } = await import(
+      "node:fs"
+    );
+    const { tmpdir } = await import("node:os");
+    const path = await import("node:path");
+
+    const box = mkdtempSync(path.join(tmpdir(), "quibt-probe-"));
+    const desktops = path.join(box, "desktops");
+    const proc = path.join(box, "proc");
+    mkdirSync(path.join(desktops, ".displays"), { recursive: true });
+    for (const bot of ["bot-a", "bot-b", "bot-sem-lembranca"]) {
+      mkdirSync(path.join(desktops, bot));
+    }
+    writeFileSync(path.join(desktops, ".displays", "bot-a"), "1");
+    writeFileSync(path.join(desktops, ".displays", "bot-b"), "2");
+    const writeProcess = (pid: number, comm: string, argv: string[]) => {
+      const dir = path.join(proc, String(pid));
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(path.join(dir, "comm"), `${comm}\n`);
+      writeFileSync(path.join(dir, "cmdline"), `${argv.join("\0")}\0`);
+    };
+    writeProcess(11, "Xvfb", ["Xvfb", ":1", "-screen", "0", "1280x800x24"]);
+    writeProcess(22, "Xvfb", ["Xvfb", ":2", "-screen", "0", "1280x800x24"]);
+    writeProcess(33, "Xvfb", ["Xvfb", ":3", "-screen", "0", "1280x800x24"]);
+    writeProcess(44, "chromium", ["chromium", "--no-sandbox"]);
+    // A pasta de cada bot é dele e de mais ninguém: aqui, fechada até para quem lê.
+    for (const bot of readdirSync(desktops)) {
+      if (bot !== ".displays") chmodSync(path.join(desktops, bot), 0o000);
+    }
+
+    const run = () =>
+      execFileSync("bash", ["-lc", SESSION_PROBE_COMMAND[2] ?? ""], {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          QUIBT_DESKTOPS_ROOT: desktops,
+          QUIBT_PROC_ROOT: proc,
+          // O dono da pasta seria `10000+display`; num teste sem root, o uid de quem roda
+          // é o único disponível, então a base é deslocada para ele valer display 3.
+          QUIBT_SESSION_UID_BASE: String((process.getuid?.() ?? 3) - 3),
+        },
+      });
+
+    // bot-a e bot-b saem da lembrança gravada; o terceiro, sem lembrança nenhuma, sai do
+    // dono da pasta dele — nenhum dos três precisou ser aberto.
+    const probe = parseSessionProbeResult(run());
+    expect(probe && [...probe]).toEqual([
+      ["bot-a", 1],
+      ["bot-b", 2],
+      ["bot-sem-lembranca", 3],
+    ]);
+
+    // Uma tela viva de dono desconhecido também é uma tela: ela segura a caixa de pé.
+    writeProcess(55, "Xvfb", ["Xvfb", ":5"]);
+    expect([...(parseSessionProbeResult(run()) ?? [])]).toContainEqual(["display-5", 5]);
+
+    for (const bot of readdirSync(desktops)) {
+      if (bot !== ".displays") chmodSync(path.join(desktops, bot), 0o700);
+    }
   });
 });
 
@@ -752,7 +880,8 @@ describe("display estável por bot depois de religar", () => {
     // Ao contrário do probe de sessões vivas, este não olha `session.pid`.
     expect(script).not.toContain("session.pid");
     // O ponto no nome esconde a pasta do glob `*/` que procura sessões vivas.
-    expect(SESSION_PROBE_COMMAND[2] ?? "").toContain("/quibt-desktops/*/");
+    expect(SESSION_PROBE_COMMAND[2] ?? "").toContain('"$root"/*/');
+    expect(SESSION_PROBE_COMMAND[2] ?? "").toContain('records="$root/.displays"');
     expect(parseSessionProbe("bot-a 1\nbot-b 2\n")).toEqual(
       new Map([
         ["bot-a", 1],

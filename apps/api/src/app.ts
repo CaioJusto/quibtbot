@@ -1,4 +1,5 @@
 import { createHmac } from "node:crypto";
+import { onError } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
 import type { SandboxProvider, WakeupDriver } from "@quibt/adapter-kit";
 import {
@@ -84,7 +85,7 @@ import {
   clientKey,
   rpcMutationRateLimit,
 } from "./rate-limit.js";
-import { createRouter } from "./router.js";
+import { createRouter, logRpcError } from "./router.js";
 import { screenProxyOrigin } from "./screen-origin.js";
 import { withStreamingHeaders } from "./streaming-response.js";
 import {
@@ -402,12 +403,19 @@ export async function createApp(overrides: CreateAppOverrides = {}): Promise<App
       authUrl: env.authUrl,
       trustedWebOrigins: env.trustedWebOrigins,
       nodeEnv: env.nodeEnv,
-      screenProxySecret: env.authSecret,
+      // Chave própria da tela: o segredo de sessão não assina capacidade de tela.
+      screenProxySecret: screenCapabilityKey(env.authSecret),
       agentRuntime: env.agentRuntime,
       signupsEnabled: env.signupsEnabled,
     },
   });
-  const rpc = new RPCHandler(router);
+  // Um handler que quebra tem de deixar rastro no servidor; o log diz o procedimento e o
+  // erro, sem cabeçalho, cookie, corpo nem segredo.
+  const rpc = new RPCHandler(router, {
+    clientInterceptors: [onError((error, { path }) => logRpcError(path, error))],
+  });
+  /** Nonces já gastos da capacidade do desktop: vivem com esta instância da API. */
+  const desktopCapabilityNonces = new Map<string, number>();
   const app = new Hono();
   app.use(
     "*",
@@ -553,9 +561,30 @@ export async function createApp(overrides: CreateAppOverrides = {}): Promise<App
    * máquina — a mesma prova que criou a conta. Pedir login de novo a cada vez só
    * inventava uma senha para esquecer. De fora (VPS, celular, outra máquina na
    * rede), nada disso vale: lá a entrada é por código, com aprovação.
+   *
+   * Três travas, nesta ordem (ver `requestClaimsLocalBrowser`):
+   * 1. a porta só existe quando `WEB_ORIGIN` e `BETTER_AUTH_URL` são loopback —
+   *    configuração do servidor, que nenhum cliente escolhe;
+   * 2. `x-forwarded-host` não é lido: o cliente o escolhe quando o proxy da frente
+   *    não o sobrescreve, e era com ele que a LAN inteira virava dono;
+   * 3. atrás do proxy do próprio web, a prova HMAC mais uma cadeia de encaminhamento
+   *    só de loopback. Faixa privada não vale: pela ponte do Docker o vizinho do
+   *    Wi-Fi chega com o mesmo endereço do dono.
    */
   app.post("/api/local/session", async (c) => {
-    if (!clientReachedLoopback(c, env.authSecret)) return c.json({ error: "Not found" }, 404);
+    // Dois caminhos, e só dois: rede (loopback estrito) ou posse do segredo local, que é
+    // como o app do desktop entra quando a stack roda em Docker. Ver `desktopSessionKey`.
+    const capability = c.req.header(DESKTOP_CAPABILITY_HEADER);
+    const provenDesktop = capability
+      ? consumeDesktopSessionCapability(capability, {
+          authSecret: env.authSecret,
+          method: c.req.method,
+          path: requestPathname(c.req.url),
+          used: desktopCapabilityNonces,
+        })
+      : false;
+    if (!provenDesktop && !clientReachedLoopback(c, env))
+      return c.json({ error: "Not found" }, 404);
     const existing = await auth.api.getSession({
       headers: sessionHeaders(c.req.raw),
     });
@@ -1033,11 +1062,22 @@ function webhookEndpointIdParam(c: Context): string {
   return c.req.param("endpointId") ?? "";
 }
 
-/** Só o próprio computador: nada de confiar em cabeçalho, que o cliente escolhe. */
+/**
+ * Só o próprio computador: nada de confiar em cabeçalho, que o cliente escolhe.
+ *
+ * Loopback é a faixa inteira 127.0.0.0/8 mais `::1` — endereços que a placa de rede
+ * nunca leva para fora. Faixa privada (10/8, 172.16/12, 192.168/16), link-local
+ * (169.254/16) e CGNAT (100.64/10) são a rede de outra pessoa e ficam de fora.
+ */
 export function isLoopbackAddress(address: string | undefined): boolean {
   if (!address) return false;
-  const plain = address.replace(/^::ffff:/, "").trim();
-  return plain === "127.0.0.1" || plain === "::1" || plain === "localhost";
+  const plain = address
+    .replace(/^::ffff:/, "")
+    .trim()
+    .toLowerCase();
+  const bare = plain.startsWith("[") ? plain.slice(1, plain.indexOf("]")) : plain;
+  if (bare === "::1" || bare === "localhost") return true;
+  return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(bare);
 }
 
 /** Minting bootstrap invites trusts only the transport socket, never forwarded headers. */
@@ -1119,36 +1159,188 @@ export function loopbackClientHost(host: string | undefined | null): boolean {
   const value = (host ?? "").split(",")[0]?.trim().toLowerCase() ?? "";
   if (!value) return false;
   const name = value.startsWith("[") ? value.slice(0, value.indexOf("]") + 1) : value.split(":")[0];
-  return name === "127.0.0.1" || name === "localhost" || name === "[::1]" || name === "::1";
+  return isLoopbackAddress(name);
+}
+
+/**
+ * Uma chave, um trabalho.
+ *
+ * O `BETTER_AUTH_SECRET` assina o cookie de sessão. A capacidade da tela e a prova de
+ * proxy interno usam chaves **derivadas** dele com um rótulo próprio, do mesmo jeito que
+ * `resolveSupervisorToken`/`resolveBootstrapSecret` fazem em `packages/core/src/secrets-guard.ts`.
+ * Sem isso, uma URL de tela vazada era um oráculo de HMAC da chave de sessão, e a mesma
+ * chave valia nos três domínios. Trocar um rótulo invalida só aquele domínio — e os dois
+ * lados (quem assina e quem verifica) precisam derivar o MESMO valor.
+ */
+export const SCREEN_CAPABILITY_LABEL = "quibt-bot/screen-capability/v1";
+export const INTERNAL_PROXY_LABEL = "quibt-bot/internal-proxy-proof/v1";
+
+export function deriveDomainKey(authSecret: string, label: string): string {
+  return createHmac("sha256", authSecret).update(label).digest("base64url");
+}
+
+/** Chave que assina a capacidade do proxy de tela (`/novnc/…`). */
+export function screenCapabilityKey(authSecret: string): string {
+  return deriveDomainKey(authSecret, SCREEN_CAPABILITY_LABEL);
+}
+
+/** Chave que assina a prova injetada pelo proxy do web do próprio Quibt. */
+export function internalProxyKey(authSecret: string): string {
+  return deriveDomainKey(authSecret, INTERNAL_PROXY_LABEL);
+}
+
+/**
+ * Capacidade do app do desktop: posse do segredo local, não posição de rede.
+ *
+ * Com a stack em Docker, o navegador do dono chega à API pelo mesmo `172.17.0.1` de
+ * qualquer aparelho do Wi-Fi — a 3100 é publicada em `0.0.0.0` de propósito, para o QR do
+ * celular. Endereço, ali, não separa ninguém. O Electron, porém, administra a instalação:
+ * ele escreve e lê o `quibt.env` (modo 0600) e pode provar que tem o segredo. Quem tem
+ * esse segredo já poderia forjar o cookie assinado de sessão, então a capacidade não
+ * entrega poder novo — ela só evita que o dono fique do lado de fora.
+ *
+ * O valor é `v1.<instante>.<nonce>.<assinatura>`, vale por um minuto, serve uma vez só e
+ * está preso ao método e ao caminho: um cabeçalho estático lido do disco não se reaproveita.
+ */
+export const DESKTOP_SESSION_LABEL = "quibt-bot/desktop-local-session/v1";
+export const DESKTOP_CAPABILITY_HEADER = "x-quibt-desktop-session";
+export const DESKTOP_CAPABILITY_TTL_MS = 60_000;
+/** Relógios do host e do container andam juntos; isto só absorve o arredondamento. */
+const DESKTOP_CAPABILITY_SKEW_MS = 5_000;
+/** Teto do mapa de nonces: um cliente barulhento não pode crescer memória sem fim. */
+const DESKTOP_NONCE_LIMIT = 1_000;
+
+export function desktopSessionKey(authSecret: string): string {
+  return deriveDomainKey(authSecret, DESKTOP_SESSION_LABEL);
+}
+
+export function signDesktopSessionCapability(input: {
+  authSecret: string;
+  method: string;
+  path: string;
+  issuedAt: number;
+  nonce: string;
+}): string {
+  const signature = createHmac("sha256", desktopSessionKey(input.authSecret))
+    .update(`v1:${input.method.toUpperCase()}:${input.path}:${input.issuedAt}:${input.nonce}`)
+    .digest("base64url");
+  return `v1.${input.issuedAt}.${input.nonce}.${signature}`;
+}
+
+/**
+ * Confere e **gasta** a capacidade. `used` guarda os nonces já vistos até o vencimento;
+ * repetir o mesmo cabeçalho não entra duas vezes.
+ */
+export function consumeDesktopSessionCapability(
+  capability: string | undefined,
+  input: {
+    authSecret: string;
+    method: string;
+    path: string;
+    used: Map<string, number>;
+    now?: number;
+  },
+): boolean {
+  const now = input.now ?? Date.now();
+  for (const [nonce, expiresAt] of input.used) {
+    if (expiresAt <= now) input.used.delete(nonce);
+  }
+  const parts = (capability ?? "").split(".");
+  if (parts.length !== 4 || parts[0] !== "v1") return false;
+  const issuedAt = Number(parts[1]);
+  const nonce = parts[2] ?? "";
+  if (!Number.isSafeInteger(issuedAt) || !/^[A-Za-z0-9_-]{1,64}$/.test(nonce)) return false;
+  if (issuedAt > now + DESKTOP_CAPABILITY_SKEW_MS) return false;
+  if (issuedAt <= now - DESKTOP_CAPABILITY_TTL_MS) return false;
+  if (input.used.has(nonce)) return false;
+  const expected = signDesktopSessionCapability({
+    authSecret: input.authSecret,
+    method: input.method,
+    path: input.path,
+    issuedAt,
+    nonce,
+  });
+  if (!isAuthorizedBootstrapSecret(capability ?? "", expected)) return false;
+  if (input.used.size >= DESKTOP_NONCE_LIMIT) {
+    const oldest = input.used.keys().next();
+    if (!oldest.done) input.used.delete(oldest.value);
+  }
+  input.used.set(nonce, issuedAt + DESKTOP_CAPABILITY_TTL_MS);
+  return true;
 }
 
 export function internalProxyProof(secret: string): string {
-  return createHmac("sha256", secret).update("quibt-local-browser-proxy-v1").digest("base64url");
+  return createHmac("sha256", internalProxyKey(secret))
+    .update("quibt-local-browser-proxy-v1")
+    .digest("base64url");
+}
+
+/**
+ * Onde "abrir o app já é entrar" pode existir.
+ *
+ * O auto-login entrega a conta do dono sem credencial nenhuma; ele só faz sentido numa
+ * instalação que fala consigo mesma. `WEB_ORIGIN` e `BETTER_AUTH_URL` são configuração do
+ * servidor — nenhum cliente os escolhe. Se qualquer um dos dois for um endereço que a rede
+ * alcança (IP de LAN, domínio público atrás de TLS de terceiro), a porta simplesmente não
+ * existe: lá a entrada é por código, com aprovação.
+ */
+export function deploymentAllowsLocalSession(env: { webOrigin: string; authUrl: string }): boolean {
+  return [env.webOrigin, env.authUrl].every((origin) => {
+    try {
+      return isLoopbackAddress(new URL(origin).hostname);
+    } catch {
+      return false;
+    }
+  });
+}
+
+/** O caminho pedido, sem query: é a ele que a capacidade do desktop está presa. */
+function requestPathname(url: string): string {
+  try {
+    return new URL(url).pathname;
+  } catch {
+    return url.split("?")[0] ?? url;
+  }
+}
+
+/** Toda a cadeia do `X-Forwarded-For`, na ordem em que os proxies escreveram. */
+export function forwardedHops(value: string | undefined): string[] {
+  return (value ?? "")
+    .split(",")
+    .map((hop) => hop.trim())
+    .filter(Boolean);
 }
 
 export function requestClaimsLocalBrowser(input: {
   clientHost: string | undefined;
   peerAddress: string | undefined;
-  forwardedClientIp: string | undefined;
+  forwardedHops: readonly string[];
   proxyProof: string | undefined;
   authSecret: string;
+  /** `deploymentAllowsLocalSession(env)`: configuração do servidor, não do cliente. */
+  deployIsLocal: boolean;
 }): boolean {
+  if (!input.deployIsLocal) return false;
   if (!loopbackClientHost(input.clientHost)) return false;
 
-  // A direct browser connection has no forwarding headers and the kernel proves
-  // that it came from this machine. Once a proxy is involved, the forwarded IP is
-  // accepted only together with a proof injected by Quibt's own web process.
-  if (isLoopbackAddress(input.peerAddress) && !input.forwardedClientIp) return true;
+  // Sem cabeçalho de encaminhamento não há proxy no caminho: o kernel prova que o socket
+  // nasceu nesta máquina, e isso é o mais perto de "está no teclado" que dá para chegar.
+  if (input.forwardedHops.length === 0) return isLoopbackAddress(input.peerAddress);
+
+  // Com proxy no caminho, quem fala com a API é o web do próprio Quibt (loopback no
+  // `pnpm dev`, rede interna do compose no Docker) e precisa apresentar a prova HMAC.
   if (!isLoopbackAddress(input.peerAddress) && !isPrivatePeer(input.peerAddress ?? "")) {
     return false;
   }
   if (!isAuthorizedBootstrapSecret(input.proxyProof ?? "", internalProxyProof(input.authSecret))) {
     return false;
   }
-  // Docker Desktop/Colima faz o navegador do próprio Mac chegar ao container
-  // por um endereço privado da VM. O web só usa esta exceção quando o Host continua
-  // loopback e a prova HMAC foi injetada pelo proxy do próprio Quibt.
-  return isLoopbackAddress(input.forwardedClientIp) || isPrivatePeer(input.forwardedClientIp ?? "");
+  // A prova só diz "passei pelo web", nunca *quem* chamou o web: ela é injetada em toda
+  // requisição encaminhada. Quem diz isso é a cadeia de IPs, e um endereço privado é a LAN
+  // inteira (ou a ponte do Docker, que faz a rede virar o mesmo 172.17.0.1 do dono). Por
+  // isso vale só loopback, e a cadeia toda: um salto público antes do último significa que
+  // alguém na frente já encaminhou outro cliente.
+  return input.forwardedHops.every((hop) => isLoopbackAddress(hop));
 }
 
 function clientReachedLoopback(
@@ -1156,11 +1348,11 @@ function clientReachedLoopback(
     req: { header(name: string): string | undefined; url: string };
     env?: unknown;
   },
-  authSecret: string,
+  env: { authSecret: string; webOrigin: string; authUrl: string },
 ): boolean {
-  const forwarded = c.req.header("x-forwarded-host");
-  const host = c.req.header("host");
-  let clientHost = forwarded ?? host;
+  // `x-forwarded-host` é escolhido pelo cliente sempre que o proxy da frente não o
+  // sobrescreve — e o do vite repassa o que chegou. Aqui vale só o Host do transporte.
+  let clientHost = c.req.header("host");
   try {
     clientHost ??= new URL(c.req.url).host;
   } catch {
@@ -1171,21 +1363,12 @@ function clientReachedLoopback(
   return requestClaimsLocalBrowser({
     clientHost,
     peerAddress,
-    // Node's proxy appends the actual browser address to X-Forwarded-For. The last
-    // hop is therefore authoritative; X-Real-IP is deliberately ignored here.
-    forwardedClientIp: lastForwardedClientIp(c.req.header("x-forwarded-for")),
+    // A cadeia inteira, não só o último salto: `X-Real-IP` é ignorado de propósito.
+    forwardedHops: forwardedHops(c.req.header("x-forwarded-for")),
     proxyProof: c.req.header("x-quibt-internal-proxy"),
-    authSecret,
+    authSecret: env.authSecret,
+    deployIsLocal: deploymentAllowsLocalSession(env),
   });
-}
-
-function lastForwardedClientIp(value: string | undefined): string | undefined {
-  if (!value) return undefined;
-  const hops = value
-    .split(",")
-    .map((hop) => hop.trim())
-    .filter(Boolean);
-  return hops[hops.length - 1];
 }
 
 export function isPrivatePeer(peer: string): boolean {

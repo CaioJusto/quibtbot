@@ -6,6 +6,7 @@ import {
   containerCreateOptions,
   containerNameFor,
   containerNameForWorkspace,
+  resolveScreenUrl,
   screenUrlFor,
   sessionPorts,
   WORKSPACE_RESTART_POLICY,
@@ -166,5 +167,49 @@ describe("xdotoolCommand — trackpad", () => {
       "300",
       "200",
     ]);
+  });
+});
+
+/**
+ * Quem alcança a tela não é sempre quem roda o supervisor. Numa VPS (ou num supervisor que
+ * mora noutro aparelho da casa), o IP do container e o 127.0.0.1 do próprio host não valem
+ * para o cliente — e `SANDBOX_SCREEN_HOST`, que existe justamente para isso, era ignorado
+ * quando a rede interna estava ligada.
+ */
+describe("resolveScreenUrl", () => {
+  it("usa a porta publicada no host que o operador declarou", () => {
+    const url = resolveScreenUrl(
+      { internalAddress: "172.24.0.4", hostPort: "32866", novncPort: 6080, password: "abc12345" },
+      { SANDBOX_SCREEN_HOST: "192.168.15.7", SANDBOX_SCREEN_NETWORK: "internal" },
+    );
+    expect(url).toBe("http://192.168.15.7:32866/embed.html?password=abc12345");
+  });
+
+  it("sem SANDBOX_SCREEN_HOST, a rede interna continua mandando", () => {
+    const url = resolveScreenUrl(
+      { internalAddress: "172.24.0.4", hostPort: "32866", novncPort: 6080 },
+      { SANDBOX_SCREEN_NETWORK: "internal" },
+    );
+    expect(url).toBe("http://172.24.0.4:6080/embed.html");
+  });
+
+  it("sem rede interna, cai na porta publicada em 127.0.0.1", () => {
+    const url = resolveScreenUrl({ hostPort: "32866", novncPort: 6080 }, {});
+    expect(url).toBe("http://127.0.0.1:32866/embed.html");
+  });
+
+  it("um SANDBOX_SCREEN_HOST em branco não conta como declarado", () => {
+    const url = resolveScreenUrl(
+      { internalAddress: "172.24.0.4", hostPort: "32866", novncPort: 6080 },
+      { SANDBOX_SCREEN_HOST: "  ", SANDBOX_SCREEN_NETWORK: "internal" },
+    );
+    expect(url).toBe("http://172.24.0.4:6080/embed.html");
+  });
+
+  it("devolve nada enquanto a porta não estiver publicada", () => {
+    expect(resolveScreenUrl({ novncPort: 6080 }, { SANDBOX_SCREEN_HOST: "192.168.15.7" })).toBe(
+      undefined,
+    );
+    expect(resolveScreenUrl({ novncPort: 6080 }, {})).toBe(undefined);
   });
 });

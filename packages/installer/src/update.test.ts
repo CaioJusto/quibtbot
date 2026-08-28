@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import { existsSync, mkdtempSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -17,9 +17,9 @@ function validCustomDump(): Buffer {
 }
 
 function seedInstalledState(dataDir: string): void {
-  ensureInstallEnvironment(dataDir, "http://127.0.0.1:5173");
+  const env = ensureInstallEnvironment(dataDir, "http://127.0.0.1:5173");
   saveInstallState(dataDir, {
-    ...initialInstallState("0.2.13", new Date("2026-08-17T00:00:00.000Z")),
+    ...initialInstallState(undefined, new Date("2026-08-17T00:00:00.000Z")),
     completed: [
       "requirements",
       "environment",
@@ -30,6 +30,23 @@ function seedInstalledState(dataDir: string): void {
       "pairing",
     ],
   });
+  // Simula os arquivos que o instalador 0.2.13 gravou. O binário atual só cria/salva
+  // estado da release embutida, mas o caminho de update precisa continuar aceitando um
+  // estado antigo estruturalmente válido para poder migrá-lo.
+  const statePath = path.join(dataDir, "install-state.json");
+  writeFileSync(
+    statePath,
+    readFileSync(statePath, "utf8").replace('"release": "0.2.14"', '"release": "0.2.13"'),
+    { mode: 0o600 },
+  );
+  writeFileSync(
+    env.path,
+    readFileSync(env.path, "utf8").replace(
+      "QUIBT_STACK_VERSION=0.2.14",
+      "QUIBT_STACK_VERSION=0.2.13",
+    ),
+    { mode: 0o600 },
+  );
 }
 
 function imageInspectResponse(reference: string): string {
@@ -97,7 +114,7 @@ describe("runUpdate", () => {
       composeFile: COMPOSE_FILE,
       // A suíte não pode depender do disco livre de quem a roda.
       statfs: async () => ({ bsize: 4096, bavail: 25_000_000 }),
-      targetRelease: "0.2.13",
+      targetRelease: "0.2.14",
       run: makeRunner("success"),
       fetch: async (url) => {
         if (String(url).endsWith("/ready")) {
@@ -122,7 +139,10 @@ describe("runUpdate", () => {
       { reference: "ghcr.io/quibt/quibt-supervisor:0.2.13", id: "sha256:supervisor-old" },
       { reference: "ghcr.io/quibt/quibt-computer:0.2.13", id: "sha256:computer-old" },
     ]);
-    expect(readFileSync(path.join(dataDir, "quibt.env"), "utf8")).toBe(envBefore);
+    expect(envBefore).toContain("QUIBT_STACK_VERSION=0.2.13");
+    expect(readFileSync(path.join(dataDir, "quibt.env"), "utf8")).toContain(
+      "QUIBT_STACK_VERSION=0.2.14",
+    );
   });
 
   it("fails when backup verification does not match a pgcustom dump", async () => {
@@ -154,7 +174,7 @@ describe("runUpdate", () => {
       composeFile: COMPOSE_FILE,
       // A suíte não pode depender do disco livre de quem a roda.
       statfs: async () => ({ bsize: 4096, bavail: 25_000_000 }),
-      targetRelease: "0.2.13",
+      targetRelease: "0.2.14",
       run: makeRunner("up-fail"),
       fetch: async (url) => {
         if (String(url).endsWith("/ready")) {
@@ -181,7 +201,7 @@ describe("runUpdate", () => {
       composeFile: COMPOSE_FILE,
       // A suíte não pode depender do disco livre de quem a roda.
       statfs: async () => ({ bsize: 4096, bavail: 25_000_000 }),
-      targetRelease: "0.2.13",
+      targetRelease: "0.2.14",
       run: makeRunner("migrate-fail"),
       fetch: async (url) => {
         if (String(url).endsWith("/ready")) {
@@ -254,7 +274,7 @@ describe("runUpdate", () => {
       dataDir,
       composeFile: COMPOSE_FILE,
       statfs: async () => ({ bsize: 4096, bavail: 25_000_000 }),
-      targetRelease: "0.2.13",
+      targetRelease: "0.2.14",
       run,
       fetch: async (url) =>
         String(url).endsWith("/ready")
@@ -291,7 +311,7 @@ describe("runUpdate", () => {
       composeFile: COMPOSE_FILE,
       // A suíte não pode depender do disco livre de quem a roda.
       statfs: async () => ({ bsize: 4096, bavail: 25_000_000 }),
-      targetRelease: "0.2.13",
+      targetRelease: "0.2.14",
       run: makeRunner("health-fail"),
       fetch: async () => new Response("down", { status: 503 }),
       clock: { now: () => new Date("2026-08-17T01:00:00.000Z"), sleep: async () => undefined },

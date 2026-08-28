@@ -28,6 +28,10 @@ services:
     env_file:
       - ${INSTALL_ENV_FILE:?}
     environment:
+      # Um `quibt.env` gerado por uma instalação antiga ainda pode trazer NODE_ENV=development,
+      # e o `env_file` ganharia da imagem: placeholders de segredo aceitos, token do supervisor
+      # derivado do segredo de sessão e CORS frouxo. `environment` ganha do `env_file`.
+      NODE_ENV: production
       DATA_DIR: ${DATA_DIR:?}
       SUPERVISOR_HOST: "0.0.0.0"
       SUPERVISOR_PORT: "7091"
@@ -49,6 +53,8 @@ services:
     env_file:
       - ${INSTALL_ENV_FILE:?}
     environment:
+      # Ver o comentário do supervisor: um `quibt.env` antigo não pode rebaixar a API.
+      NODE_ENV: production
       DATABASE_URL: postgres://quibt:${DATABASE_PASSWORD:?}@postgres:5432/quibt
       DATA_DIR: ${DATA_DIR:?}
       # Prints, PDFs e áudios da conversa: o worker grava, a API serve. Sem isto cada um
@@ -82,6 +88,8 @@ services:
     env_file:
       - ${INSTALL_ENV_FILE:?}
     environment:
+      # Ver o comentário do supervisor: o worker roda o mesmo código da API.
+      NODE_ENV: production
       DATABASE_URL: postgres://quibt:${DATABASE_PASSWORD:?}@postgres:5432/quibt
       DATA_DIR: ${DATA_DIR:?}
       # Prints, PDFs e áudios da conversa: o worker grava, a API serve. Sem isto cada um
@@ -107,6 +115,8 @@ services:
     env_file:
       - ${INSTALL_ENV_FILE:?}
     environment:
+      # O `vite preview` também decide pelo NODE_ENV se aceita um segredo de exemplo.
+      NODE_ENV: production
       API_PROXY_TARGET: http://api:3100
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?}
       WEB_ORIGIN: ${WEB_ORIGIN:?}

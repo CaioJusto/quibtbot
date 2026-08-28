@@ -285,6 +285,22 @@ describe("parar o que já está parado", () => {
   });
 });
 
+describe("destruir o que já foi removido", () => {
+  it("404 no destroy é sucesso idempotente para referências do computador compartilhado", async () => {
+    captureFetch(new Response('{"error":"computer not found"}', { status: 404 }));
+    const provider = new DockerSandboxProvider("http://supervisor:7091", "token");
+    await expect(provider.destroy(ref(), context())).resolves.toBeUndefined();
+  });
+
+  it("outras falhas do destroy continuam subindo com o status", async () => {
+    captureFetch(new Response('{"error":"boom"}', { status: 500 }));
+    const provider = new DockerSandboxProvider("http://supervisor:7091", "token");
+    const failure = await provider.destroy(ref(), context()).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(SupervisorRequestError);
+    expect((failure as SupervisorRequestError).status).toBe(500);
+  });
+});
+
 describe("exec num container que estava parado", () => {
   async function drain(provider: DockerSandboxProvider) {
     const events: ProcessEvent[] = [];

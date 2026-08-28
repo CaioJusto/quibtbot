@@ -14,6 +14,7 @@ function read(relPath: string): string {
  */
 const PUBLIC_DOCS: Record<string, string> = {
   "README.md": read("README.md"),
+  "SECURITY.md": read("SECURITY.md"),
   "docs/architecture.md": read("docs/architecture.md"),
   "docs/mobile.md": read("docs/mobile.md"),
   "docs/self-host.md": read("docs/self-host.md"),
@@ -124,6 +125,73 @@ describe("public documentation policy", () => {
       expect(text, relPath).toContain("Onde o Quibt fica ligado?");
       expect(text, relPath).toContain("Onde os bots trabalham?");
     }
+  });
+
+  it("says the local auto-login does not exist on a LAN or public install", () => {
+    // `POST /api/local/session` responde 404 quando o deploy não é loopback (apps/api/src/app.ts).
+    // Quem instala numa VPS ou na LAN entra por login normal / código de pareamento; a doc não
+    // pode prometer "abre já dentro" para essas instalações.
+    const onboarding = PUBLIC_DOCS["docs/onboarding.md"];
+    expect(onboarding).toMatch(/entrada automática|login automático/i);
+    expect(onboarding).toMatch(/(LAN|rede|VPS)[^\n]{0,160}(código|senha)/i);
+  });
+
+  it("warns the self-host guide about the 404 and about WEB_ORIGIN behind a proxy", () => {
+    const selfHost = PUBLIC_DOCS["docs/self-host.md"];
+    expect(selfHost).toContain("/api/local/session");
+    expect(selfHost).toMatch(/404/);
+    expect(selfHost).toMatch(/pairing code/i);
+    // Um proxy de terceiro na frente sem ajustar WEB_ORIGIN é configuração errada, não atalho.
+    expect(selfHost).toMatch(/WEB_ORIGIN[^\n]{0,200}(misconfiguration|not a shortcut)/i);
+  });
+
+  it("lists the whole server secret set in the VPS walkthrough", () => {
+    const computers = PUBLIC_DOCS["docs/computers.md"];
+    for (const name of [
+      "BETTER_AUTH_SECRET",
+      "ENCRYPTION_KEY",
+      "SANDBOX_SUPERVISOR_TOKEN",
+      "BOOTSTRAP_SECRET",
+    ]) {
+      expect(computers, `docs/computers.md must name ${name}`).toContain(name);
+    }
+    expect(computers).toMatch(/RESEND_API_KEY[^\n]*AUTH_EMAIL_DISABLED/);
+    expect(computers).toContain("replace-with-");
+    // Numa VPS ninguém entra sozinho: senha ou código de pareamento.
+    expect(computers).toMatch(/(código de pareamento|por código)/i);
+  });
+
+  it("describes how the desktop app signs itself in, and when it does not", () => {
+    // O app prova posse do segredo local (`x-quibt-desktop-session`, um minuto, uso único).
+    // Sem o `quibt.env`, ou apontado para um servidor remoto, ele cai no login normal.
+    const desktop = PUBLIC_DOCS["docs/desktop.md"];
+    expect(desktop).toContain("x-quibt-desktop-session");
+    expect(desktop).toMatch(/quibt\.env/);
+    expect(desktop).toMatch(/one[- ]use|once/i);
+    expect(desktop).toMatch(/(falls back|volta)[^\n]{0,120}(sign[- ]in|login)/i);
+  });
+
+  it("records the per-domain keys and the fail-closed Compose boot", () => {
+    const security = PUBLIC_DOCS["SECURITY.md"];
+    // A chave de sessão assina só o cookie: tela, proxy interno e sessão local do desktop usam
+    // chaves derivadas por rótulo (apps/api/src/app.ts, `deriveDomainKey`).
+    expect(security).toMatch(/derived|separate/i);
+    expect(security).toMatch(/BETTER_AUTH_SECRET/);
+    expect(security).toMatch(/session cookie/i);
+    // O Compose roda como produção e recusa os segredos de exemplo.
+    expect(security).toContain("replace-with-");
+    expect(security).toMatch(/NODE_ENV=production|as production/i);
+    const readme = PUBLIC_DOCS["README.md"];
+    expect(readme).toMatch(/replace-with-/);
+    expect(readme).toMatch(/loopback/i);
+  });
+
+  it("says a local model URL must be this computer or a public address", () => {
+    // `models.connect` recusa rede privada e metadata (packages/adapters/src/model-probe.ts).
+    const onboarding = PUBLIC_DOCS["docs/onboarding.md"];
+    expect(onboarding).toContain("host.docker.internal");
+    expect(onboarding).toMatch(/endereço público/);
+    expect(onboarding).toMatch(/192\.168|rede privada/);
   });
 
   it("documents the mobile test commands", () => {

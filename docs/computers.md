@@ -80,12 +80,44 @@ segunda janela (nem morre no "No usable sandbox" do Chromium puro em container).
 
 **Para quem:** quer o mesmo Linux do Docker, mas num servidor que não desliga com o notebook.
 
+**O caminho que funciona inteiro: instale o stack todo na VPS.** É o que a receita do catálogo
+faz. API, worker, banco, supervisor e tela ficam no mesmo host, a tela continua na rede interna
+do Docker e o celular fala com a VPS quando o laptop está desligado. Nada para colar.
+
 **O que a pessoa faz**
 
 1. Cria uma VM Ubuntu 22.04/24.04 na **conta dela** (Hetzner CX22, Droplet 2 GB+, ou qualquer VPS). A Quibt não provisiona e não cobra.
 2. Escolhe a receita no catálogo (Hetzner, DigitalOcean, script genérico) e roda o script.
-3. Preenche `BETTER_AUTH_SECRET`, `ENCRYPTION_KEY` e `SANDBOX_SUPERVISOR_TOKEN` no `.env` do servidor e sobe o Compose.
-4. Cola no Quibt a URL (`https://sua-vps:7091`) e o **mesmo** token. Testa. Salva.
+3. Preenche o `.env` do servidor com `BETTER_AUTH_SECRET`, `ENCRYPTION_KEY`, `SANDBOX_SUPERVISOR_TOKEN` e `BOOTSTRAP_SECRET` (cada um com `openssl rand -hex 32`), mais `RESEND_API_KEY` ou `AUTH_EMAIL_DISABLED=true`, e sobe o Compose. O Compose roda como produção: valor faltando, com menos de 32 caracteres ou ainda começando com `replace-with-` faz o serviço recusar subir.
+4. Entra no Quibt dessa VPS por senha ou por código de pareamento. A entrada automática sem senha existe só no computador onde o Quibt roda: numa instalação de rede ou pública, `POST /api/local/session` responde 404 para todo mundo.
+
+**Só o computador noutra máquina (`remote-supervisor`)** — existe, e tem uma condição e um limite:
+
+- A porta `7091` **não é publicada** por padrão, e não deve ser: quem fala com ela manda no
+  Docker daquele host. Para abri-la, o operador carrega um arquivo a mais e liga o profile, no
+  host do computador:
+
+  ```bash
+  QUIBT_SUPERVISOR_PUBLIC_HOST=<nome público> \
+    docker compose -f infra/compose/docker-compose.desktop.yml \
+    -f infra/compose/docker-compose.supervisor-tls.yml \
+    --profile supervisor-tls up -d supervisor supervisor-tls
+  ```
+
+  O arquivo é separado de propósito: o Compose interpola tudo o que carrega, então uma variável
+  obrigatória no compose principal quebraria o `up` de quem nunca pediu TLS. Quem encara a
+  internet é o Caddy, com certificado Let's Encrypt; o supervisor continua exigindo o
+  `SANDBOX_SUPERVISOR_TOKEN` em toda rota `/computers`. Esse serviço usa 80/443 — não o ligue
+  na mesma máquina que serve o site pelo profile `public`.
+- No Quibt, cole o endereço **https** desse nome e o **mesmo** token. "Testar máquina" agora
+  bate numa rota que exige o token: token errado reprova ali, e não no primeiro boot. Endereço
+  `http` fora de `127.0.0.1`, endereço de rede interna e `169.254.169.254` são recusados.
+- **A tela não atravessa um supervisor remoto.** O noVNC fica na rede interna do Docker daquele
+  host, e o proxy `/novnc` do app só alcança a tela quando o app roda no mesmo host (ou na mesma
+  rede privada, com `SANDBOX_SCREEN_HOST`/`SANDBOX_SCREEN_BIND_HOST` definidos lá — ver
+  [docs/self-host.md](./self-host.md)). Com a API no notebook e o supervisor na VPS, os comandos,
+  os arquivos e as rotinas funcionam; o painel da tela fica preto. Se você quer ver a tela,
+  instale o stack inteiro na VPS.
 
 **O que o sistema faz de verdade**
 

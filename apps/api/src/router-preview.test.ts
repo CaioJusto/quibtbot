@@ -2,7 +2,13 @@ import { call } from "@orpc/server";
 import type { Actor } from "@quibt/contracts";
 import type { PrismaClient } from "@quibt/db";
 import { describe, expect, it } from "vitest";
-import { createRouter, previewImagePath, type RouterDeps } from "./router.js";
+import {
+  createRouter,
+  PREVIEW_CACHE_MAX,
+  previewCacheSize,
+  previewImagePath,
+  type RouterDeps,
+} from "./router.js";
 
 const owner: Actor = {
   userId: "user-1",
@@ -129,5 +135,32 @@ describe("computer.preview", () => {
     );
     expect(result).toEqual({ image: null, capturedAt: null });
     expect(executed).toHaveLength(1);
+  });
+});
+
+describe("teto do cache de retratos", () => {
+  /** Um retrato por bot, todos capturados agora, para encher o cache. */
+  async function capture(botId: string) {
+    const { router, executed } = harness(botId, () => ({ stdout: "QUJD", code: 0 }));
+    await call(router.computer.preview, { botId }, { context: { actor: owner } });
+    return executed;
+  }
+
+  it("guarda um número fixo de retratos e esquece o mais velho", async () => {
+    const stamp = `cap-${Date.now()}`;
+    const before = previewCacheSize();
+    const ids = Array.from({ length: PREVIEW_CACHE_MAX + 3 }, (_, i) => `${stamp}-${i}`);
+    for (const id of ids) await capture(id);
+    // Cada entrada chega a 6 MB: sem teto, o mapa crescia com o número de bots.
+    expect(previewCacheSize()).toBeLessThanOrEqual(PREVIEW_CACHE_MAX);
+    expect(previewCacheSize()).toBeLessThanOrEqual(before + PREVIEW_CACHE_MAX);
+
+    // O primeiro bot foi despejado: pedir de novo tira outro retrato em vez de responder do cache.
+    const again = await capture(ids[0]!);
+    expect(again).toHaveLength(2);
+
+    // O último continua guardado: responde sem falar com o computador.
+    const last = await capture(ids.at(-1)!);
+    expect(last).toHaveLength(0);
   });
 });

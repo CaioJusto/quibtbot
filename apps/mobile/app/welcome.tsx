@@ -29,7 +29,7 @@ type Reach = "checking" | "online" | "offline";
  * o que cada caminho faz se explica na tela seguinte, não aqui.
  *
  * - já usa o Quibt num computador → lê o QR que o app do computador mostra;
- * - só tem o celular → informa a VPS, o app instala e a conta é criada aqui mesmo;
+ * - só tem o celular → escolhe Box ou VPS, o app instala e a conta é criada aqui mesmo;
  * - quer instalar num computador → recebe o passo a passo.
  *
  * Ler o QR é sempre o primeiro caminho. Instalação, endereço manual e criação de
@@ -190,11 +190,11 @@ export default function Welcome() {
           <PathRow
             icon="cloud.fill"
             title="Só tenho o celular"
-            hint="Instalar numa VPS daqui"
+            hint="Instalar no Box ou numa VPS"
             onPress={() =>
               router.push({
                 pathname: "/setup-server",
-                params: { kind: "vps" },
+                params: { kind: "box" },
               })
             }
           />

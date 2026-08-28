@@ -452,13 +452,77 @@ export function assertExecArgv(argv: string[]): string[] {
   return argv;
 }
 
-/** Bash probe that lists `<botId> <display>` for every live session in the container. */
+/**
+ * A marca que fecha o probe. Sem ela, a saída vazia não é resposta: é "não sei".
+ *
+ * A saída vazia era ambígua — "ninguém trabalhando aqui" e "não consegui ler" davam a
+ * mesma string. Quem decide apagar o container compartilhado lê as duas de formas
+ * opostas, então o script diz, no fim, que chegou ao fim.
+ */
+export const SESSION_PROBE_MARKER = "quibt-probe-complete";
+
+/**
+ * Quem está com uma tela viva neste container, `<botId> <display>` por linha.
+ *
+ * O probe antigo entrava em `/quibt-desktops/<bot>` para ler `session.pid` e `display`.
+ * Essa pasta é 700 do uid da sessão (`10000+display`) e o probe roda como o uid 1000: ele
+ * não atravessa a pasta de ninguém, e `kill -0` num processo de outro uid dá EPERM. O
+ * script terminava com sucesso e saída vazia — "não há mais sessão" —, e apagar um bot
+ * levava junto o computador de outro que ainda estava vivo. Perda de dados, não estética.
+ *
+ * Agora nada precisa entrar na pasta de outro uid:
+ *  - vivo é o que `/proc` mostra: um Xvfb rodando, com o display no `cmdline` (esses
+ *    arquivos são legíveis por qualquer uid, e não dependem de `kill -0`);
+ *  - de quem é aquele display sai da lembrança em `.displays` (pasta do root, 755) e,
+ *    se ela faltar, do dono da pasta do bot — o uid é `10000+display`, e ler o dono não
+ *    exige entrar na pasta;
+ *  - uma tela viva sem dono conhecido ainda conta como sessão, sob `display-<N>`: uma
+ *    tela que ninguém sabe de quem é não pode virar permissão para destruir a caixa.
+ *
+ * As três raízes vêm do ambiente só para o teste poder montar uma caixa de mentira; em
+ * produção ninguém as define.
+ */
 export const SESSION_PROBE_COMMAND = [
   "bash",
   "-lc",
-  // O pidfile sobrevive ao container (a home é bind mount); num container novo o número
-  // pode ser de outro processo. Só um Xvfb vivo naquele pid conta como sessão.
-  'for d in /quibt-desktops/*/; do [ -f "$d/session.pid" ] || continue; p=$(cat "$d/session.pid" 2>/dev/null); [ -n "$p" ] || continue; kill -0 "$p" 2>/dev/null || continue; [ "$(cat /proc/$p/comm 2>/dev/null)" = Xvfb ] || continue; echo "$(basename "$d") $(cat "$d/display" 2>/dev/null)"; done',
+  [
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: expansão do shell, não do TS
+    'root="${QUIBT_DESKTOPS_ROOT:-/quibt-desktops}"',
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: expansão do shell, não do TS
+    'proc="${QUIBT_PROC_ROOT:-/proc}"',
+    `base="\${QUIBT_SESSION_UID_BASE:-${SESSION_UID_BASE}}"`,
+    // A mesma pasta de SESSION_DISPLAY_RECORD_DIR, relativa à raiz para o teste.
+    'records="$root/.displays"',
+    "owner_of() {",
+    '  for f in "$records"/*; do',
+    '    [ -f "$f" ] || continue',
+    '    [ "$(cat "$f" 2>/dev/null)" = "$1" ] || continue',
+    '    basename "$f"',
+    "    return 0",
+    "  done",
+    '  for d in "$root"/*/; do',
+    '    [ -d "$d" ] || continue',
+    '    bot="$(basename "$d")"',
+    // Com lembrança gravada, ela já mandou acima: o dono da pasta não desempata.
+    '    [ -f "$records/$bot" ] && continue',
+    // Sem `awk` nem `stat`: o dono sai do terceiro campo do `ls -ldn`, e a pasta não
+    // precisa ser aberta para isso — o uid é `10000+display`.
+    '    uid="$(set -- $(ls -ldn "$d" 2>/dev/null); echo "$3")"',
+    '    case "$uid" in ""|*[!0-9]*) continue ;; esac',
+    '    [ "$((uid - base))" = "$1" ] || continue',
+    '    echo "$bot"',
+    "    return 0",
+    "  done",
+    "  return 1",
+    "}",
+    'for p in "$proc"/[0-9]*; do',
+    '  [ "$(cat "$p/comm" 2>/dev/null)" = Xvfb ] || continue',
+    '  display="$(tr "\\0" "\\n" < "$p/cmdline" 2>/dev/null | sed -n "s/^:\\([0-9][0-9]*\\)$/\\1/p" | head -n1)"',
+    '  [ -n "$display" ] || continue',
+    '  echo "$(owner_of "$display" || echo "display-$display") $display"',
+    "done",
+    `echo ${SESSION_PROBE_MARKER}`,
+  ].join("\n"),
 ];
 
 /**
@@ -698,19 +762,56 @@ export function parseSessionProbe(output: string): Map<string, number> {
 }
 
 /**
- * A failed probe must never look like "nobody is working here": the caller uses this to
- * decide whether the shared workspace container can be destroyed.
+ * O que o probe respondeu, ou `undefined` quando ele não respondeu.
+ *
+ * Uma leitura que não chegou ao fim (exec que falhou, shell morto no meio, saída cortada)
+ * não vira "não há mais ninguém": sem a marca final, o supervisor diz que não sabe, e
+ * quem não sabe não apaga o computador de ninguém.
  */
-export function hasLiveSessions(probe: Map<string, number> | undefined): boolean {
-  return probe === undefined || probe.size > 0;
+export function parseSessionProbeResult(
+  output: string | undefined,
+): Map<string, number> | undefined {
+  if (output === undefined || !output.includes(SESSION_PROBE_MARKER)) return undefined;
+  return parseSessionProbe(output);
 }
 
-/** Whether the shared workspace container may be removed after a bot session delete. */
+/**
+ * Quem mais está com uma tela viva nesta caixa, além do bot que está saindo.
+ *
+ * `undefined` significa "não deu para saber" — e nesse caso nada é destruído. As duas
+ * fontes são as que o supervisor enxerga de verdade: a memória dele (as sessões que ele
+ * mesmo abriu neste container) e o probe do container. Basta uma delas apontar outro bot
+ * para a caixa continuar de pé.
+ */
+export function otherWorkspaceSessions(occupancy: {
+  /** O bot cuja sessão acabou de ser encerrada; a dele não conta. */
+  botId: string;
+  /** Sessões que a memória do supervisor guarda para esta caixa. */
+  remembered: Iterable<string>;
+  /** Sessões lidas do container; `undefined` quando a leitura não respondeu. */
+  live: Iterable<string> | undefined;
+}): string[] | undefined {
+  if (occupancy.live === undefined) return undefined;
+  const others = new Set<string>();
+  for (const id of [...occupancy.remembered, ...occupancy.live]) {
+    // O sentinela é o computador do workspace, não a tela de um bot: ele nunca é o dono
+    // de nada que se perca aqui, e uma sobra dele não pode prender a caixa para sempre.
+    if (!id || id === occupancy.botId || isWorkspaceSentinel(id)) continue;
+    others.add(id);
+  }
+  return [...others].sort();
+}
+
+/**
+ * Só se apaga a caixa compartilhada com prova de que ninguém mais mora nela: `others`
+ * vazio, nunca `undefined`. Antes o critério era uma leitura que o processo não tinha
+ * permissão de fazer, e "não consegui ler" passava por "não tem mais ninguém".
+ */
 export function shouldRemoveSharedContainer(
   preserveComputer: boolean,
-  probe: Map<string, number> | undefined,
+  others: string[] | undefined,
 ): boolean {
-  return !preserveComputer && !hasLiveSessions(probe);
+  return !preserveComputer && others !== undefined && others.length === 0;
 }
 
 /** Picks a free display, honouring a caller request only when nobody else holds it. */
