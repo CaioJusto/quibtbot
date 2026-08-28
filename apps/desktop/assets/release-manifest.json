@@ -3,8 +3,8 @@
   "release": "0.2.14",
   "baseUrl": "https://github.com/CaioJusto/quibtbot/releases/download/v0.2.14",
   "digests": {
-    "quibtbot-linux-x64": "a8eaf20e856500b6bfd6d5c5ae9c505394def5e0a05a499b65cbcbcdaf260c4d",
-    "quibtbot-linux-arm64": "e9ccf32178229521259a461b877d319b9f22d55da2b7050feb0d36104bc4e4fc"
+    "quibtbot-linux-x64": "15415f1cc5b82b6f23200df87c813ac2c962fab7908a7e69059af300c65a6963",
+    "quibtbot-linux-arm64": "6dbf23f7a009b7a3d76628d830107d077533074bb84af354306289dcdc2918bf"
   },
   "pipelineStatus": "ready"
 }
