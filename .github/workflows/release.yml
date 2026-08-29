@@ -7,8 +7,7 @@ on:
     tags:
       - "v*"
 permissions:
-  contents: write
-  packages: write
+  contents: read
 concurrency:
   # Never cancel a release mid-publish; a second tag push queues behind this one instead.
   group: release-${{ github.ref }}
@@ -78,6 +77,9 @@ jobs:
   images:
     name: Build and push GHCR images
     needs: validate
+    permissions:
+      contents: read
+      packages: write
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -383,6 +385,8 @@ jobs:
   publish:
     name: Publish draft GitHub Release
     needs: [validate, images, smoke, cli-binaries, desktop-installers, checksums]
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

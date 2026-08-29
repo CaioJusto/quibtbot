@@ -30,7 +30,7 @@ export interface ServerHostOption {
   showAdvancedSetup?: boolean;
 }
 
-const INSTALL_RELEASE = "0.2.16";
+const INSTALL_RELEASE = "0.2.17";
 const RELEASE_BASE = `https://github.com/CaioJusto/quibtbot/releases/download/v${INSTALL_RELEASE}`;
 
 const LOCAL_HOST: ServerHostOption = {

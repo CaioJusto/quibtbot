@@ -64,7 +64,7 @@ describe("runDoctor", () => {
     expect(report.checks.permissions?.ok).toBe(true);
     expect(report.checks.manifest?.ok).toBe(true);
     expect(report.checks.health?.ok).toBe(true);
-    expect(report.release).toBe("0.2.16");
+    expect(report.release).toBe("0.2.17");
     expect(JSON.stringify(report)).not.toContain("BOOTSTRAP_SECRET");
     expect(report.checks.ports?.detail).toMatchObject({ scope: "local-loopback" });
   });

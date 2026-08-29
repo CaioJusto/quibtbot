@@ -248,6 +248,8 @@ export function createProcessRunner(timeoutMs = DEFAULT_PROCESS_TIMEOUT_MS): Pro
         const errChunks: Buffer[] = [];
         let settled = false;
         let idleTimer: NodeJS.Timeout | null = null;
+        const absoluteTimeoutMs = options?.timeoutMs ?? timeoutMs;
+        const absoluteDeadline = Date.now() + absoluteTimeoutMs;
         const finish = (result: ProcessRunResult) => {
           if (settled) return;
           settled = true;
@@ -256,18 +258,23 @@ export function createProcessRunner(timeoutMs = DEFAULT_PROCESS_TIMEOUT_MS): Pro
           resolve(result);
         };
         const killForTimeout = (timedOut: "absolute" | "inactivity") => {
+          // Under heavy load both timers can become runnable before Node gets the event loop
+          // back. Once the absolute deadline has elapsed it is the authoritative reason,
+          // regardless of which timer callback happened to execute first.
+          const timeoutKind =
+            timedOut === "inactivity" && Date.now() >= absoluteDeadline ? "absolute" : timedOut;
           child.kill("SIGTERM");
           finish({
             code: 124,
             stdout: Buffer.concat(chunks).toString("utf8"),
             stderr:
-              timedOut === "inactivity"
+              timeoutKind === "inactivity"
                 ? `process produced no output for ${Math.round((options?.inactivityTimeoutMs ?? 0) / 1000)} s`
                 : "process timed out",
-            timedOut,
+            timedOut: timeoutKind,
           });
         };
-        const timer = setTimeout(() => killForTimeout("absolute"), options?.timeoutMs ?? timeoutMs);
+        const timer = setTimeout(() => killForTimeout("absolute"), absoluteTimeoutMs);
         const armIdleTimer = () => {
           const idleMs = options?.inactivityTimeoutMs;
           if (!idleMs) return;

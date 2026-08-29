@@ -20,9 +20,9 @@ const _VALID_DUMP_PREFIX = "-- PostgreSQL database dump\nSET statement_timeout =
 const plentyOfDisk = async () => ({ bsize: 4096, bavail: 25_000_000 });
 const COMPOSE_IMAGES = [
   "postgres:16@sha256:e17e86066e5ef83e0952a9347f5c792b7ece00972e2aa787a6986f471b3dd3d5",
-  "ghcr.io/quibt/quibt-computer:0.2.16",
-  "ghcr.io/quibt/quibt-supervisor:0.2.16",
-  "ghcr.io/quibt/quibt-stack:0.2.16",
+  "ghcr.io/quibt/quibt-computer:0.2.17",
+  "ghcr.io/quibt/quibt-supervisor:0.2.17",
+  "ghcr.io/quibt/quibt-stack:0.2.17",
 ];
 
 function collectSecrets(envValues: Record<string, string>): string[] {
@@ -118,7 +118,7 @@ describe("runInstall resume", () => {
       path.join(dataDir, "install-state.json"),
       `${JSON.stringify({
         version: 1,
-        release: "0.2.16",
+        release: "0.2.17",
         completed: ["requirements", "environment", "images", "services", "database", "health"],
         updatedAt: "2026-08-17T00:00:00.000Z",
       })}\n`,
@@ -303,7 +303,7 @@ describe("runInstall resume", () => {
       path.join(dataDir, "install-state.json"),
       `${JSON.stringify({
         version: 1,
-        release: "0.2.16",
+        release: "0.2.17",
         completed: ["requirements", "environment", "images", "services", "database", "health"],
         updatedAt: "2026-08-17T00:00:00.000Z",
       })}\n`,
@@ -533,7 +533,7 @@ describe("retomada numa instalação pública", () => {
       path.join(dataDir, "install-state.json"),
       `${JSON.stringify({
         version: 1,
-        release: "0.2.16",
+        release: "0.2.17",
         completed: ["requirements", "environment", "images", "services", "database"],
         updatedAt: "2026-08-17T00:00:00.000Z",
       })}\n`,
@@ -656,7 +656,7 @@ function writeStateBeforeImages(dataDir: string): void {
     path.join(dataDir, "install-state.json"),
     `${JSON.stringify({
       version: 1,
-      release: "0.2.16",
+      release: "0.2.17",
       completed: ["requirements", "environment"],
       updatedAt: "2026-08-17T00:00:00.000Z",
     })}\n`,
@@ -731,14 +731,14 @@ describe("download das imagens com progresso", () => {
       layersTotal: 0,
     });
     expect(progress).toContainEqual({
-      image: "ghcr.io/quibt/quibt-stack:0.2.16",
-      label: "quibt-stack:0.2.16",
+      image: "ghcr.io/quibt/quibt-stack:0.2.17",
+      label: "quibt-stack:0.2.17",
       index: 4,
       count: 4,
       layersDone: 1,
       layersTotal: 2,
     });
-    expect(messages).toContain("Baixando imagem 4 de 4: quibt-stack:0.2.16 — 1/2 camadas");
+    expect(messages).toContain("Baixando imagem 4 de 4: quibt-stack:0.2.17 — 1/2 camadas");
     // O passo continuou e o estado gravou o download.
     expect(loadInstallState(dataDir)?.completed).toContain("images");
   });
@@ -852,7 +852,7 @@ describe("download das imagens com progresso", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(pulled).toEqual(["ghcr.io/quibt/quibt-stack:0.2.16"]);
+    expect(pulled).toEqual(["ghcr.io/quibt/quibt-stack:0.2.17"]);
     const messages = events.map((event) => event.message);
     expect(messages).toContainEqual(
       "Falta 1 imagem de 4 (cerca de 0,4 GB). O resto já está no disco.",
@@ -911,7 +911,7 @@ describe("já instalado = ligar", () => {
       path.join(dataDir, "install-state.json"),
       `${JSON.stringify({
         version: 1,
-        release: "0.2.16",
+        release: "0.2.17",
         completed: [
           "requirements",
           "environment",

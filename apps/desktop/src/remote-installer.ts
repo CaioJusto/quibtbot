@@ -9,6 +9,7 @@ import {
 } from "@quibt/installer";
 import { Client } from "ssh2";
 import {
+  BOX_TRIAL_SERVER_TTL_SECONDS,
   type BoxRecord,
   createServerBoxRequest,
   isServerBoxRecord,
@@ -543,6 +544,69 @@ export function isValidBoxId(boxId: string): boolean {
   return BOX_ID_PATTERN.test(boxId);
 }
 
+class BoxApiRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+    readonly detail?: string,
+  ) {
+    super(message);
+    this.name = "BoxApiRequestError";
+  }
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function boxApiErrorFields(body: unknown): { code?: string; detail?: string } {
+  if (!body || typeof body !== "object") return {};
+  const record = body as Record<string, unknown>;
+  const nested =
+    record.error && typeof record.error === "object"
+      ? (record.error as Record<string, unknown>)
+      : undefined;
+  const errorString = nonEmptyString(record.error);
+  const code =
+    nonEmptyString(record.code) ??
+    nonEmptyString(record.errorCode) ??
+    nonEmptyString(nested?.code) ??
+    (errorString?.match(/^[a-z][a-z0-9_]+$/i) ? errorString : undefined);
+  const detail =
+    nonEmptyString(record.message) ??
+    nonEmptyString(record.detail) ??
+    nonEmptyString(nested?.message) ??
+    (errorString !== code ? errorString : undefined);
+  return { code, detail };
+}
+
+function boxApiErrorMessage(status: number, code?: string): string {
+  if (status === 401 || status === 403) {
+    return "A chave da Box foi recusada. Crie uma chave válida em box.ascii.dev; chaves da Hetzner não funcionam neste campo.";
+  }
+  if (code === "trial_auto_stop_required") {
+    return "O trial da Box exige desligamento automático de no máximo 2 horas.";
+  }
+  if (status === 402) {
+    return "A conta Box está sem saldo ou precisa concluir a configuração de cobrança.";
+  }
+  if (status === 429) {
+    return "A Box atingiu o limite temporário de criação de máquinas. Aguarde um pouco e tente novamente.";
+  }
+  return `A Box recusou a solicitação (HTTP ${status})${code ? `. Código: ${code}` : ""}.`;
+}
+
+function isTrialAutoStopError(error: unknown): error is BoxApiRequestError {
+  if (!(error instanceof BoxApiRequestError)) return false;
+  if (error.code === "trial_auto_stop_required") return true;
+  const detail = error.detail?.toLowerCase() ?? "";
+  return (
+    detail.includes("trial") &&
+    (detail.includes("auto-stop") || detail.includes("auto stop") || detail.includes("ttl"))
+  );
+}
+
 async function boxRequest<T>(
   apiKey: string,
   method: string,
@@ -559,7 +623,14 @@ async function boxRequest<T>(
     signal: options.signal,
   });
   if (!response.ok) {
-    throw new Error(`Box API ${method} ${path} failed (${response.status})`);
+    const body = await response.json().catch(() => undefined);
+    const fields = boxApiErrorFields(body);
+    throw new BoxApiRequestError(
+      boxApiErrorMessage(response.status, fields.code),
+      response.status,
+      fields.code,
+      fields.detail,
+    );
   }
   return (await response.json()) as T;
 }
@@ -610,6 +681,7 @@ async function allocateServerBoxId(
   fetchImpl: typeof fetch,
   signal?: AbortSignal,
   onAllocated?: (boxId: string) => void,
+  onTrialFallback?: () => void,
 ): Promise<string> {
   if (input.boxId) {
     if (!isValidBoxId(input.boxId)) throw new Error("Invalid Box server id.");
@@ -627,11 +699,22 @@ async function allocateServerBoxId(
     return existing.id;
   }
 
-  const created = await boxRequest<{ box: BoxRecord }>(input.apiKey, "POST", "/boxes", {
-    body: createServerBoxRequest(),
-    fetchImpl,
-    signal,
-  });
+  let created: { box: BoxRecord };
+  try {
+    created = await boxRequest<{ box: BoxRecord }>(input.apiKey, "POST", "/boxes", {
+      body: createServerBoxRequest(),
+      fetchImpl,
+      signal,
+    });
+  } catch (error) {
+    if (!isTrialAutoStopError(error)) throw error;
+    onTrialFallback?.();
+    created = await boxRequest<{ box: BoxRecord }>(input.apiKey, "POST", "/boxes", {
+      body: createServerBoxRequest(BOX_TRIAL_SERVER_TTL_SECONDS),
+      fetchImpl,
+      signal,
+    });
+  }
   onAllocated?.(created.box.id);
   await configureServerBox(input.apiKey, created.box.id, fetchImpl, signal);
   return created.box.id;
@@ -642,8 +725,9 @@ async function resolveServerBox(
   fetchImpl: typeof fetch,
   signal?: AbortSignal,
   onAllocated?: (boxId: string) => void,
+  onTrialFallback?: () => void,
 ): Promise<BoxRecord> {
-  const boxId = await allocateServerBoxId(input, fetchImpl, signal, onAllocated);
+  const boxId = await allocateServerBoxId(input, fetchImpl, signal, onAllocated, onTrialFallback);
   return waitForBoxReady(input.apiKey, boxId, fetchImpl, signal);
 }
 
@@ -721,7 +805,17 @@ export async function installOnBox(
   );
   try {
     const release = verifiedRelease(deps);
-    const box = await resolveServerBox(input, fetchImpl, deps?.signal, deps?.onBoxAllocated);
+    const box = await resolveServerBox(input, fetchImpl, deps?.signal, deps?.onBoxAllocated, () =>
+      emitSanitized(
+        onEvent,
+        {
+          step: "requirements",
+          status: "running",
+          message: "Trial da Box: servidor de teste ativo por até 2 horas",
+        },
+        secrets,
+      ),
+    );
     activeBoxId = box.id;
     emitSanitized(
       onEvent,

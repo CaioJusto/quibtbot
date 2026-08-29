@@ -50,9 +50,11 @@ describe("release workflow trigger and permissions", () => {
     expect(workflow.on?.push?.tags).toContain("v*");
   });
 
-  it("grants contents:write and packages:write for GHCR pushes and Release publication", () => {
-    expect(workflow.permissions?.contents).toBe("write");
-    expect(workflow.permissions?.packages).toBe("write");
+  it("scopes write permissions to the jobs that publish packages or the draft release", () => {
+    expect(workflow.permissions?.contents).toBe("read");
+    expect(workflow.permissions?.packages).toBeUndefined();
+    expect(jobs.images?.permissions).toEqual({ contents: "read", packages: "write" });
+    expect(jobs.publish?.permissions).toEqual({ contents: "write" });
   });
 });
 

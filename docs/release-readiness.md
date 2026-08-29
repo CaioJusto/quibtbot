@@ -3,34 +3,37 @@
 This is the evidence ledger for an open-source Quibt Bot release. A green unit suite is not the
 same as a signed installer, a successful VPS install, or a physical-device mobile test.
 
-## Current audit evidence (2026-08-29, `v0.2.9` → `v0.2.16`)
+## Current audit evidence (2026-08-29, `v0.2.9` → `v0.2.17`)
 
 `v0.2.15` stopped in the pre-publication fast suite because the unsigned Mac copy used the word
-"notarizado". No images, installers, draft release, or production deployment were published from
-that tag; `v0.2.16` carries the corrected copy and is the next releasable version.
+"notarizado". `v0.2.16` passed the complete release workflow and produced a private draft, but it
+was deliberately not published: the desktop Box installer did not recognize a valid no-env response
+when `environment` was omitted and did not retry trial accounts with a finite TTL. The Mac notary
+profile is also unavailable. `v0.2.17` carries the Box parity fix and is the next source candidate;
+`v0.2.14` remains the latest public production release.
 
 | Surface | Evidence | What is still required |
 | --- | --- | --- |
-| Source | On the `v0.2.16` candidate: `pnpm lint`, `pnpm check` (21/21), `pnpm build`, and `pnpm verify:fast` (2,775 passed, 93 skipped) are green. The updater now streams `pg_dump`, does not wait on the intentional one-shot computer service, and rolls digest-pinned Compose back through a tag override; focused regression tests cover all three fixes | Keep the released commit and tag identical; repeat the fast suite in GitHub Actions on the tag |
+| Source | On the `v0.2.17` candidate, lint, 21 package checks, 5 builds, `verify:fast` (329 files; 2,776 tests) and full `verify` (341 files; 2,864 tests; Chromium 4/4; both disposable PostgreSQL migration chains) are green. Focused desktop Box tests prove omitted `environment` and the two-hour trial fallback. The process runner now reports the absolute timeout deterministically when both deadlines become runnable under load | Pass branch CI, then keep the eventual released commit and tag identical |
 | Docker computer | The `docker-smoke` CI job builds `quibt/computer:local` on a Linux runner, boots a workspace container and starts a real graphical session. It caught a boot regression on this very tree before release | Runs on `workflow_dispatch` and nightly, not on every push |
 | VPS | The `vps-compose-smoke` CI job installs the published Compose stack on an amd64 runner, applies every migration and waits for API/web readiness | It pulls the **published** images, so it validates a release, never an unreleased commit |
 | Phone → clean VPS, end to end | On `v0.2.10`: `quibtbot install` on a clean Hetzner VPS chose a `sslip.io` name and obtained a Let's Encrypt certificate; a physical iPhone scanned the pairing QR, reached the server over that HTTPS, consumed the bootstrap invite and created the first owner (2026-08-25 18:36 UTC). The web preview host allowlist fix is in this image, so the phone passes the former 403 | Onboarding after sign-up (model → machine → first bot) on the phone is the next manual check |
-| Public HTTPS (no domain) | On a clean Hetzner VPS (Ubuntu 24.04), `quibtbot install` chose `quibt-<id>.<ip>.sslip.io`, Caddy obtained a Let's Encrypt certificate in ~3 s (`issuer=Let's Encrypt`, verified from outside with no TLS exception), and Caddy→web→API answered `/rpc/health` 200. The host allowlist and resume-origin fixes are in the published stack | Repeat the provider-account canary on `v0.2.16` when the Hetzner credential is available |
-| Desktop | **`v0.2.9` / `v0.2.10` / `v0.2.14`:** the Apple-silicon DMG is Developer ID signed, notarized and stapled. **`v0.2.11` / `v0.2.12`:** the CI DMGs are unsigned. **`v0.2.16`:** the workflow first creates an unsigned draft artifact; the attached status is authoritative. Windows and Linux remain unsigned test builds. | Replace the `v0.2.16` Mac draft DMG with the maintainer's notarized build, update its signing status and checksums, then flip `DESKTOP_SIGNING.mac`. Windows needs an Authenticode certificate. Intel Mac is not published. |
-| Mobile | EAS iOS and Android production builds `0.1.2 (6)` finished. The iOS app was installed on physical iPhone `00008150-000825483C40401C`; launch was denied only because the phone was locked. The Android release duplicate-class failure was fixed by removing the obsolete Bouncy Castle dependency, and Gradle duplicate checking passed | Unlock and visibly launch the physical iPhone; finish App Store Connect processing; provide a Quibt-owned Google Play service-account key for the internal-track submission |
-| Publication | The repository is public with a single initial commit. Container images are public and multi-architecture; release artifacts and their SHA-256 files are attached to the tag | Older history lives only in the maintainer's private archive |
+| Public HTTPS (no domain) | On a clean Hetzner VPS (Ubuntu 24.04), `quibtbot install` chose `quibt-<id>.<ip>.sslip.io`, Caddy obtained a Let's Encrypt certificate in ~3 s (`issuer=Let's Encrypt`, verified from outside with no TLS exception), and Caddy→web→API answered `/rpc/health` 200. The host allowlist and resume-origin fixes are in the published stack | Repeat the provider-account canary on `v0.2.17` when the Hetzner credential is available |
+| Desktop | **`v0.2.9` / `v0.2.10` / `v0.2.14`:** the Apple-silicon DMG is Developer ID signed, notarized and stapled. **`v0.2.16`:** the workflow draft is private and its CI Mac artifact is unsigned. **`v0.2.17`:** not tagged yet. Windows and Linux remain unsigned test builds. | Recreate the `quibt-notary` credential for team `9Q372SFRM8`, build and verify the notarized `v0.2.17` DMG, then update its signing status and checksums. Windows needs an Authenticode certificate. Intel Mac is not published. |
+| Mobile | EAS iOS and Android production builds `0.1.2 (6)` finished. The iOS submission `3194620a-28f8-41c7-a483-47a49a41d8c4` finished uploading to App Store Connect. The iOS app was installed on physical iPhone `00008150-000825483C40401C`; launch was denied only because the phone was locked. Android Gradle duplicate checking passed after removing the obsolete Bouncy Castle dependency | Unlock and visibly launch the physical iPhone; verify TestFlight processing; provide a Quibt-owned Google Play service-account key for the internal-track submission |
+| Publication | `v0.2.14` is public production. `v0.2.16` has public image tags and a private GitHub draft, but no public release. `v0.2.17` is only a source candidate | Do not publish or deploy the candidate site/OTA until the release manifest has real CLI hashes and the Mac notary gate passes |
 
 ## Required gates
 
 | Gate | Evidence required | Current state |
 | --- | --- | --- |
-| Source quality | format, lint, TypeScript, `verify:fast`, full `verify` | Green on the final candidate: 339 test files passed, 1 skipped; 2,858 tests passed, 4 skipped; Chromium 4/4; focused PostgreSQL 13/13; installer 189/189; smoke 3/3. |
+| Source quality | format, lint, TypeScript, `verify:fast`, full `verify` | Green locally on the source candidate: 21 package checks; 5 builds; fast 329 files / 2,776 tests; full 341 files / 2,864 tests; Chromium 4/4; both clean PostgreSQL migration chains applied. Branch CI remains the next gate. |
 | Security | Standard repository scan; no unresolved critical finding | Scan is sealed; critical finding is fixed locally, while two documented high architectural limits remain |
-| Supply chain | versioned CLI + checksums; packaged Docker images pinned by digest | CLI sidecars verified; tagged image, CLI, Windows, Linux, and VPS jobs passed before the account-level Actions billing hold |
-| Desktop | macOS Apple-silicon DMG, Windows installer, Linux AppImage; signing status attached; `DESKTOP_SIGNING` matches the attached status | `v0.2.16`: Mac DMG remains pending until the notarized replacement is uploaded; Windows and Linux are explicitly unsigned; Intel is not part of this release |
+| Supply chain | versioned CLI + checksums; packaged Docker images pinned by digest | `v0.2.16` draft CLI sidecars and tagged images were verified; `v0.2.17` has no artifacts yet and its embedded manifests remain fail-closed with zero digests |
+| Desktop | macOS Apple-silicon DMG, Windows installer, Linux AppImage; signing status attached; `DESKTOP_SIGNING` matches the attached status | `v0.2.17` is not tagged; the Apple notary credential must be restored before public release. Windows and Linux are explicitly unsigned; Intel is not part of this release |
 | VPS | install, migration, `/ready`, web `/rpc/health`, first-owner pairing, restart | Release smoke passed; a real provider/account canary remains useful evidence, not a blocker for self-host preview |
 | Mobile | TypeScript/tests plus QR, code, thread, attachment, and computer control on a physical phone | Native iOS/Android builds are finished; production OTA and the visible unlocked-device journey remain pending |
-| Publication | public repository, source tag equals artifact version, checksums and release notes | Publish the tag-generated assets and replace the embedded provisional CLI digests with the real v0.2.16 checksums before the production OTA |
+| Publication | public repository, source tag equals artifact version, checksums and release notes | Keep `v0.2.16` private; tag `v0.2.17` only after source/CI review, then publish its reviewed assets and real manifest hashes before the production OTA |
 
 ## Known architectural limits
 
