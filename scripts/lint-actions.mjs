@@ -9,7 +9,9 @@ const workflowsDir = path.join(root, ".github", "workflows");
 const names = (await readdir(workflowsDir))
   .filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"))
   .sort();
-const lint = await createLinter();
+if (names.length === 0) {
+  throw new Error(`No GitHub Actions workflows found in ${workflowsDir}.`);
+}
 let failures = 0;
 // actionlint's npm/WASM package carries an older built-in runner-label catalog. These are
 // current GitHub-hosted labels used by the release matrix; suppress only this exact stale-
@@ -17,6 +19,9 @@ let failures = 0;
 const currentHostedRunnerLabels = new Set(["macos-14", "ubuntu-24.04-arm"]);
 
 for (const name of names) {
+  // The WASM wrapper retains parser state between invocations and can trap when one
+  // workflow follows another. A fresh linter keeps every file isolated and deterministic.
+  const lint = await createLinter();
   const file = path.join(workflowsDir, name);
   const source = await readFile(file, "utf8");
   for (const result of lint(source, path.relative(root, file))) {

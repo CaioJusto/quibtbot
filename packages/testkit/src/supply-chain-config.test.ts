@@ -189,6 +189,8 @@ describe("workflow supply-chain policy", () => {
     expect(ci).toContain("expo prebuild --platform android --clean --no-install");
     expect(ci).toContain("./gradlew assembleDebug --stacktrace");
     expect(ci).toContain("NODE_ENV: production");
+    expect(ci).toContain('AUTH_EMAIL_DISABLED: "true"');
+    expect(ci).toContain("SANDBOX_SUPERVISOR_TOKEN: ci-e2e-supervisor-token-");
     expect(playwright).toContain('command: "pnpm build && pnpm start"');
   });
 });

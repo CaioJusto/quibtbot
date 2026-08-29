@@ -182,10 +182,16 @@ jobs:
       NODE_ENV: production
       BETTER_AUTH_SECRET: ci-e2e-better-auth-secret-0123456789abcdef
       ENCRYPTION_KEY: ci-e2e-encryption-key-0123456789abcdef0123
+      # O E2E não envia e-mail real. Em produção a API exige uma decisão explícita:
+      # chave Resend ou e-mail desativado (válido aqui porque billing está desligado).
+      AUTH_EMAIL_DISABLED: "true"
       # O primeiro dono entra por convite de uso único: o teste emite o convite pela
       # rota de loopback, e ela só responde com este segredo. Sem ele o e2e para no
       # cadastro, antes de tocar no produto.
       BOOTSTRAP_SECRET: ci-e2e-bootstrap-secret-0123456789abcdef01
+      # Credencial de serviço distinta dos segredos de sessão/bootstrap, como o boot de
+      # produção exige mesmo quando o provider de sandbox do teste é fake.
+      SANDBOX_SUPERVISOR_TOKEN: ci-e2e-supervisor-token-0123456789abcdef012
       API_PORT: "3100"
       WEB_PORT: "5173"
       API_URL: http://127.0.0.1:3100
