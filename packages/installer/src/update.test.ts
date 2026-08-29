@@ -65,6 +65,11 @@ function makeRunner(
     async run(command, args) {
       const joined = [command, ...args].join(" ");
       if (joined.includes("pg_dump")) {
+        // `pg_dump -f -` creates a file literally named `-` in the container on the
+        // supported Postgres image. Omitting `-f` is what streams the custom dump.
+        if (args.slice(args.indexOf("pg_dump") + 1).includes("-f")) {
+          return { code: 0, stdout: "", stderr: "", stdoutBytes: Buffer.alloc(0) };
+        }
         if (mode === "bad-backup") {
           return { code: 0, stdout: "not-a-dump", stderr: "" };
         }

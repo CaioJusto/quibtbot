@@ -185,8 +185,6 @@ export async function runUpdate(deps: UpdateDeps): Promise<UpdateResult> {
       "postgres",
       "pg_dump",
       "-Fc",
-      "-f",
-      "-",
       "-U",
       "quibt",
       "quibt",
