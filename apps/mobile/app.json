@@ -6,7 +6,7 @@
     "scheme": "quibt",
     "version": "0.1.2",
     "orientation": "portrait",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "icon": "./assets/icon.png",
     "runtimeVersion": {
       "policy": "fingerprint"
@@ -67,7 +67,7 @@
           "backgroundColor": "#FCFCFC",
           "dark": {
             "image": "./assets/splash-icon.png",
-            "backgroundColor": "#FCFCFC"
+            "backgroundColor": "#161618"
           }
         }
       ],
@@ -87,6 +87,7 @@
     "ios": {
       "bundleIdentifier": "app.quibt.bot",
       "buildNumber": "3",
+      "userInterfaceStyle": "automatic",
       "supportsTablet": true,
       "icon": "./assets/icon.png",
       "infoPlist": {
@@ -103,6 +104,7 @@
     "android": {
       "package": "app.quibt.bot",
       "versionCode": 3,
+      "userInterfaceStyle": "light",
       "icon": "./assets/icon.png",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",

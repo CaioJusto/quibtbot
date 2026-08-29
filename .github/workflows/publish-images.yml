@@ -22,24 +22,51 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v5
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: CaioJusto
           password: ${{ secrets.GHCR_WRITE_TOKEN }}
       - name: Build and push quibt-stack (amd64)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: infra/compose/Dockerfile
           platforms: linux/amd64
           push: true
+          provenance: mode=max
+          sbom: true
           tags: ghcr.io/quibt/quibt-stack:${{ inputs.version }}-amd64
           build-args: RELEASE_VERSION=${{ inputs.version }}
       - name: Merge multi-arch manifest
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
-          docker buildx imagetools create -t "ghcr.io/quibt/quibt-stack:${{ inputs.version }}" \
-            "ghcr.io/quibt/quibt-stack:${{ inputs.version }}-arm64" \
-            "ghcr.io/quibt/quibt-stack:${{ inputs.version }}-amd64"
+          set -euo pipefail
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid release version: $VERSION" >&2
+            exit 1
+          fi
+          docker buildx imagetools create -t "ghcr.io/quibt/quibt-stack:$VERSION" \
+            "ghcr.io/quibt/quibt-stack:$VERSION-arm64" \
+            "ghcr.io/quibt/quibt-stack:$VERSION-amd64"
+      - name: Verify merged image SBOM and provenance attestations
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid release version: $VERSION" >&2
+            exit 1
+          fi
+          REF="ghcr.io/quibt/quibt-stack:$VERSION"
+          for platform in linux/amd64 linux/arm64; do
+            docker buildx imagetools inspect "$REF" \
+              --format "{{ json (index .SBOM \"$platform\").SPDX }}" \
+              | jq -e 'type == "object" and .SPDXID == "SPDXRef-DOCUMENT"' >/dev/null
+            docker buildx imagetools inspect "$REF" \
+              --format "{{ json (index .Provenance \"$platform\").SLSA }}" \
+              | jq -e 'type == "object" and length > 0' >/dev/null
+          done

@@ -19,7 +19,7 @@
   <a href="https://github.com/CaioJusto/quibtbot/actions/workflows/ci.yml"><img src="https://github.com/CaioJusto/quibtbot/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="Apache-2.0" /></a>
   <a href="package.json"><img src="https://img.shields.io/badge/node-%3E%3D22.19-brightgreen.svg" alt="Node.js >= 22.19" /></a>
-  <a href="package.json"><img src="https://img.shields.io/badge/pnpm-9-F69220.svg" alt="pnpm 9" /></a>
+  <a href="package.json"><img src="https://img.shields.io/badge/pnpm-10.34.5-F69220.svg" alt="pnpm 10.34.5" /></a>
   <a href="https://github.com/CaioJusto/quibtbot/releases/latest"><img src="https://img.shields.io/badge/release-v0.2.14-brightgreen.svg" alt="latest public release v0.2.14" /></a>
 </p>
 
@@ -74,7 +74,8 @@ curl -fsSL "https://raw.githubusercontent.com/CaioJusto/quibtbot/v${release}/scr
 puts it on the PATH and runs `quibtbot install`: it detects Docker (and Compose), generates
 secrets, runs Compose, and prints a URL plus a short code/QR for the mobile app's "Conectar a
 um Quibt existente" flow. The binary carries the Compose manifest inside it, so it also works
-when downloaded by hand:
+without a desktop app. The aggregate checksum manifest is first authenticated against GitHub's
+release metadata, then the selected binary is checked against that manifest:
 
 On mobile, **Scan the computer QR** is always the first action; server address, VPS and local
 installation are secondary paths below it. A packaged desktop install publishes API port `3100`
@@ -88,11 +89,8 @@ laptop. Only a desktop using its local stack offers the LAN / user-owned HTTPS t
 
 ```bash
 release=0.2.14
-curl -fsSL "https://github.com/CaioJusto/quibtbot/releases/download/v${release}/quibtbot-linux-x64" -o /tmp/quibtbot
-curl -fsSL "https://github.com/CaioJusto/quibtbot/releases/download/v${release}/quibtbot-linux-x64.sha256" -o /tmp/quibtbot.sha256
-echo "$(awk '{print $1}' /tmp/quibtbot.sha256)  /tmp/quibtbot" | sha256sum -c -
-chmod +x /tmp/quibtbot
-/tmp/quibtbot install --non-interactive --show-sensitive
+curl -fsSL "https://raw.githubusercontent.com/CaioJusto/quibtbot/v${release}/scripts/install.sh" \
+  | QUIBT_RELEASE="${release}" QUIBT_SHOW_SENSITIVE=1 sh
 ```
 
 See [`docs/self-host.md`](docs/self-host.md) for the VPS/Box walkthroughs.
@@ -131,7 +129,7 @@ pnpm desktop:pack:linux # x64 AppImage → apps/desktop/out/
 
 ## Run locally
 
-**Requirements for source development:** Node.js >= 22.19, pnpm 9, and Docker Desktop or Engine (Postgres + the graphical bot computer). The packaged macOS app detects Docker Desktop, Colima, and Homebrew even when launched from Finder; if no Docker engine exists, it downloads the official architecture-matched Docker Desktop DMG, validates Docker Inc.'s signature and Apple notarization, asks for the macOS administrator password once, opens Docker, and resumes the Quibt installation automatically. The app you open is native to the host; the bot computer is always a Linux desktop (Docker / E2B / Box), not your Mac or Windows session.
+**Requirements for source development:** Node.js >= 22.19, pnpm 10.34.5, and Docker Desktop or Engine (Postgres + the graphical bot computer). The packaged macOS app detects Docker Desktop, Colima, and Homebrew even when launched from Finder; if no Docker engine exists, it downloads the official architecture-matched Docker Desktop DMG, validates Docker Inc.'s signature and Apple notarization, asks for the macOS administrator password once, opens Docker, and resumes the Quibt installation automatically. The app you open is native to the host; the bot computer is always a Linux desktop (Docker / E2B / Box), not your Mac or Windows session.
 
 ```bash
 cp .env.example .env

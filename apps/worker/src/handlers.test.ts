@@ -7,6 +7,7 @@ import { createWakeupHandlers } from "./handlers.js";
 function harness(options?: { reapFails?: boolean }) {
   const enqueued: Array<Record<string, unknown>> = [];
   const released: Array<Record<string, unknown>> = [];
+  let screenRevocations = 0;
   const prisma = {
     run: {
       findMany: vi.fn(async () => {
@@ -17,6 +18,13 @@ function harness(options?: { reapFails?: boolean }) {
     },
     desktopSession: {
       findMany: vi.fn(async () => [{ botId: "bot-1", controlFence: 2 }]),
+      findUnique: vi.fn(async () => ({
+        botId: "bot-1",
+        workspaceId: "ws-1",
+        display: 1,
+        providerRef: "container-1",
+        computer: { kind: "docker", providerRef: "container-1" },
+      })),
       updateMany: vi.fn(async (args: Record<string, unknown>) => {
         released.push(args);
         return { count: 1 };
@@ -46,12 +54,23 @@ function harness(options?: { reapFails?: boolean }) {
   };
   const handlers = createWakeupHandlers({
     prisma,
-    sandbox: {} as never,
+    sandbox: {
+      revokeScreen: async () => {
+        screenRevocations += 1;
+      },
+    } as never,
     wakeup,
     executor,
     workerId: "worker-7",
   });
-  return { handlers, enqueued, executor, prisma, released };
+  return {
+    handlers,
+    enqueued,
+    executor,
+    prisma,
+    released,
+    screenRevocations: () => screenRevocations,
+  };
 }
 
 describe("worker wakeup handlers", () => {
@@ -60,6 +79,7 @@ describe("worker wakeup handlers", () => {
     expect(Object.keys(handlers).sort()).toEqual([
       "computer.sleep",
       "control.reap",
+      "control.screen.revoke",
       "orphan.reconcile",
       "routine.wakeup",
       "run.continue",
@@ -102,7 +122,7 @@ describe("worker wakeup handlers", () => {
 
 describe("control.reap", () => {
   it("gives the computer back to the bot and wakes the run parked on the takeover", async () => {
-    const { handlers, enqueued, released } = harness();
+    const { handlers, enqueued, released, screenRevocations } = harness();
     await handlers["control.reap"]!({ botId: "bot-1" });
     expect(released).toEqual([
       {
@@ -117,7 +137,9 @@ describe("control.reap", () => {
           controlLastInputAt: null,
         },
       },
+      { where: { botId: "bot-1" }, data: { screenUrl: null } },
     ]);
+    expect(screenRevocations()).toBe(1);
     expect(enqueued).toEqual([
       expect.objectContaining({ name: "run.continue", payload: { runId: "run-9" } }),
     ]);

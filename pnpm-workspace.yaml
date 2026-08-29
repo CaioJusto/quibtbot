@@ -2,3 +2,9 @@ packages:
   - "apps/*"
   - "packages/*"
   - "infra/sandboxes/supervisor"
+
+# Do not resolve brand-new registry releases into routine installs until they have had
+# one day of public scrutiny. Exotic nested specs (git/tarball/file) bypass that registry
+# age gate, so reject them when they arrive through a transitive dependency.
+minimumReleaseAge: 1440
+blockExoticSubdeps: true

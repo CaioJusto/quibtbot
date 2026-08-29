@@ -2814,6 +2814,7 @@ export function ShellPage() {
                 <div className="qb-routine__toolbar">
                   <Switch
                     className="qb-grok-switch"
+                    thumbClassName="qb-grok-switch__thumb"
                     checked={routineDraft.active}
                     onCheckedChange={(active) =>
                       setRoutineDraft((current) => ({ ...current, active }))

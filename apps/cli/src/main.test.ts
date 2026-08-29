@@ -377,7 +377,9 @@ describe("runCliAsync", () => {
       `Quibt Bot ${INSTALL_RELEASE} já instalado e no ar em http://127.0.0.1:5173. Para conectar o celular: quibtbot pair`,
     );
     expect(logs.join("\n")).toContain("[services] running: Ligando o Quibt Bot…");
-    expect(commands.some((entry) => entry.includes(" up -d --wait"))).toBe(true);
+    expect(
+      commands.some((entry) => entry.includes(" up -d supervisor api worker web computer")),
+    ).toBe(true);
     expect(commands.some((entry) => entry.startsWith("docker pull"))).toBe(false);
   });
 

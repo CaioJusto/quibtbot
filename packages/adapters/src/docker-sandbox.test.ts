@@ -476,6 +476,21 @@ describe("o display do bot viaja no cabeçalho", () => {
   });
 });
 
+describe("screen revocation", () => {
+  it("asks the supervisor to rotate only this bot's live VNC credential", async () => {
+    const calls = captureFetch(Response.json({ rotated: true }));
+    const provider = new DockerSandboxProvider("http://supervisor.test", "token");
+
+    await provider.revokeScreen!(ref({ display: 3 }), context());
+
+    expect(calls[0]?.url).toBe("http://supervisor.test/computers/container-1/screen/revoke");
+    expect(calls[0]?.init.method).toBe("POST");
+    const headers = calls[0]?.init.headers as Record<string, string>;
+    expect(headers["x-quibt-bot-id"]).toBe("bot-1");
+    expect(headers["x-quibt-display"]).toBe("3");
+  });
+});
+
 describe("mensagens por audiência", () => {
   it("o EAGAIN não entrega 'RLIMIT_NPROC do uid 1000' ao dono, nem com código junto", () => {
     // O revive prefixa a própria frase e marca `computer-stopped`; sem isto a mensagem

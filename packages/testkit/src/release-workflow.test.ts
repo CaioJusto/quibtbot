@@ -53,7 +53,7 @@ describe("release workflow trigger and permissions", () => {
   it("scopes write permissions to the jobs that publish packages or the draft release", () => {
     expect(workflow.permissions?.contents).toBe("read");
     expect(workflow.permissions?.packages).toBeUndefined();
-    expect(jobs.images?.permissions).toEqual({ contents: "read", packages: "write" });
+    expect(jobs.images?.permissions).toEqual({ contents: "read" });
     expect(jobs.publish?.permissions).toEqual({ contents: "write" });
   });
 });

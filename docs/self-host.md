@@ -47,7 +47,7 @@ when the API needs to stay reachable while your laptop is off.
 4. `docker compose -f infra/compose/docker-compose.yml up --build`
 5. Run `pnpm owner:code`, open the web origin (`http://127.0.0.1:5173` by default), and enter the one-use code. Only that explicitly enrolled first account becomes the deployment owner.
 
-Compose runs Postgres, the sandbox supervisor (Docker socket), API, worker, and a Vite preview of the web app. Each workspace gets one sibling Linux container (`quibt/computer:local`); bots in it share the filesystem and installed tools while keeping distinct graphical desktop sessions. The API process does not get an unrestricted Docker socket; the supervisor owns lifecycle.
+Compose runs Postgres, the sandbox supervisor (Docker socket), API, worker, and the dedicated Node production server for the web app. Each workspace gets one sibling Linux container (`quibt/computer:local`); bots in it share the filesystem and installed tools while keeping distinct graphical desktop sessions. The API process does not get an unrestricted Docker socket; the supervisor owns lifecycle.
 
 Postgres and the API are published on **loopback only** (`127.0.0.1:5433` and
 `127.0.0.1:3100` on the host). Remote clients use the web origin on `:5173`, which proxies
@@ -264,7 +264,7 @@ after it the feature works offline. If it fails, the voice note is still sent as
 5. Choose computers: **`SANDBOX_PROVIDER=e2b`** with `E2B_API_KEY` or **`SANDBOX_PROVIDER=box`** with `BOX_API_KEY` for a public or multi-user production service. Each bot keeps one sandbox id (`providerRef`) and a graphical desktop with a browser. Take control, sign in, then release — the bot keeps that session. Idle boxes pause after `SANDBOX_IDLE_MS` (default 10 minutes) and resume on the next message or Take control. Docker remains the local and trusted single-machine default.
 6. A Hetzner CX22 (2 vCPU / 4 GB) is enough for API + worker + Postgres when E2B owns the desktops. 2 GB works for a quiet box; 8 GB is only needed if you also run Docker computers on that same machine.
 7. Set public HTTPS `WEB_ORIGIN` / `BETTER_AUTH_URL` / `API_URL`, secrets, and an OpenRouter (or other Pi) deployment key if you want to skip per-user model keys.
-8. Put the web app behind the same origin as `/api` and `/rpc` (Vite preview proxy, or a reverse proxy). Docker noVNC connections use short-lived signed `/novnc/*` capabilities; do not replace that route with an unrestricted port proxy.
+8. Put the web app behind the same origin as `/api`, `/rpc`, `/files`, and `/hooks` (the bundled Node server already proxies them; an outer reverse proxy may front it). Docker noVNC connections use short-lived signed `/novnc/*` capabilities; do not replace that route with an unrestricted port proxy.
 9. Deploy `apps/www` and point the product origin at your API/web host.
 10. Turn on `SIGNUP_ALLOWLIST` until you want open registration. Users bring an OpenRouter key or a subscription. Keep `BILLING_ENABLED=false`.
 

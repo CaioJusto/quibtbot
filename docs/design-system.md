@@ -90,11 +90,14 @@ Cinco degraus, nada entre eles:
 ## Dívida conhecida
 
 O app Expo (`apps/mobile`) usa estes tokens desde o redesenho do mobile: `COLORS` em
-`apps/mobile/lib/design-system.tsx` é montado a partir de `tokens`, e o app roda claro do
-login à conversa (`userInterfaceStyle: "light"` no `app.json`). A única superfície escura
-que sobrou é a prévia da tela do bot em `apps/mobile/app/computer.tsx` — ela é a máquina de
-verdade, não cromo do app, e por isso tem três tons próprios e nomeados (`SCREEN_BLACK`,
-`SCREEN_INK`, `SCREEN_MUTED`). A câmera do leitor de QR também é escura, pela mesma razão.
+`apps/mobile/lib/design-system.tsx` é montado a partir de `tokens`. No iOS, cada token tem
+versão clara e escura por `DynamicColorIOS`, e a pessoa escolhe Sistema/Claro/Escuro na
+Conta; navegação, splash, sheets e status bar acompanham a mesma escolha. No Android o
+produto permanece explicitamente claro e não mostra um seletor parcial até existir uma
+paleta dinâmica equivalente para todas as telas. A prévia da tela do bot em
+`apps/mobile/app/computer.tsx` continua escura por natureza — ela é a máquina de verdade,
+não cromo do app — e usa tons próprios nomeados (`SCREEN_BLACK`, `SCREEN_INK`,
+`SCREEN_MUTED`). A câmera do leitor de QR também é escura, pela mesma razão.
 
 As cores dos mascotes seguem de fora do sistema, como no web: o preto do Grok em
 `character-picker.tsx` e o dourado do chief of staff na lista são conteúdo, não cromo.
@@ -104,4 +107,3 @@ JSX, não existem mais: as telas de onboarding, plugins, conta, cobrança e máq
 usar os tokens direto. Enquanto eles existiram, qualquer classe escura nova nascia certa por
 acaso — e uma que ficasse de fora da lista, como o `hover:bg-[#161618]` da lista de
 provedores, aparecia como uma barra preta sobre texto escuro.
-

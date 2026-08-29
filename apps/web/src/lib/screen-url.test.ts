@@ -59,6 +59,11 @@ describe("screen capability", () => {
       capability?.target,
     );
   });
+
+  it("keeps a credential fragment while identifying the signed screen", () => {
+    const url = `${signedMode(NOW + 60_000, "control", "sig-a")}#password=vnc_secret`;
+    expect(screenUrlCapability(url)?.target).toContain("#password=vnc_secret");
+  });
 });
 
 describe("decideScreenUrl", () => {

@@ -7,8 +7,10 @@ import {
   containerNameFor,
   containerNameForWorkspace,
   resolveScreenUrl,
+  screenPortPolicyMatches,
   screenUrlFor,
   sessionPorts,
+  shouldPublishScreenPorts,
   WORKSPACE_RESTART_POLICY,
   xdotoolCommand,
 } from "./computer-spec.js";
@@ -75,6 +77,34 @@ describe("graphical computer spec", () => {
     expect(options.HostConfig.AutoRemove).toBe(false);
   });
 
+  it("does not publish noVNC host ports when the screen proxy uses the internal network", () => {
+    const options = containerCreateOptions({
+      name: "quibt-ws-ws",
+      image: COMPUTER_IMAGE,
+      workspaceId: "ws",
+      homePath: "/var/quibt/workspaces/ws/home",
+      desktopPath: "/var/quibt/workspaces/ws/desktops",
+      networkMode: "quibt-computer-ws",
+      publishScreenPorts: false,
+    });
+    expect(options.ExposedPorts).toEqual({});
+    expect(options.HostConfig.PortBindings).toEqual({});
+  });
+
+  it("publishes screen ports only when the topology needs the host path", () => {
+    expect(shouldPublishScreenPorts({ SANDBOX_SCREEN_NETWORK: "internal" })).toBe(false);
+    expect(
+      shouldPublishScreenPorts({
+        SANDBOX_SCREEN_NETWORK: "internal",
+        SANDBOX_SCREEN_HOST: "192.168.15.7",
+      }),
+    ).toBe(true);
+    expect(shouldPublishScreenPorts({})).toBe(true);
+    expect(screenPortPolicyMatches({ "6080/tcp": [{ HostPort: "32768" }] }, true)).toBe(true);
+    expect(screenPortPolicyMatches({ "6080/tcp": [{ HostPort: "32768" }] }, false)).toBe(false);
+    expect(screenPortPolicyMatches({}, false)).toBe(true);
+  });
+
   it("ships a browser desktop, not a fullscreen terminal", () => {
     const root = path.resolve(import.meta.dirname, "../../computer");
     const dockerfile = readFileSync(path.join(root, "Dockerfile"), "utf8");
@@ -82,6 +112,7 @@ describe("graphical computer spec", () => {
     const session = readFileSync(path.join(root, "quibt-session"), "utf8");
     const browser = readFileSync(path.join(root, "quibt-browser"), "utf8");
     const boxChrome = readFileSync(path.join(root, "box-chrome"), "utf8");
+    const embed = readFileSync(path.join(root, "embed.html"), "utf8");
     expect(dockerfile).toMatch(/chromium/);
     expect(start).toMatch(/quibt-session/);
     expect(start).not.toMatch(/windowsize 1280 800/);
@@ -92,10 +123,18 @@ describe("graphical computer spec", () => {
     expect(session).toMatch(/box-chrome save-chrome-session/);
     expect(session).toMatch(/ensure_novnc/);
     expect(session).toMatch(/watch_novnc/);
+    expect(session).toMatch(/rotate_session/);
+    expect(session).toMatch(/start_vnc/);
+    const rotateBody = session.slice(session.indexOf("rotate_session()"));
+    expect(rotateBody.indexOf('stop_process "$dir/watchdog.pid"')).toBeLessThan(
+      rotateBody.indexOf('stop_process "$dir/novnc.pid"'),
+    );
+    expect(rotateBody).toMatch(/ensure_watchdog "\$bot"/);
+    expect(session).toMatch(/quibt-session start\|stop\|status\|repair\|rotate/);
     expect(session).toMatch(/already-running/);
-    expect(session).toMatch(/quibt-session start\|stop\|status\|repair/);
     expect(browser).not.toMatch(/remote-debugging-port/);
     expect(session).toMatch(/-auth "\$XAUTHORITY"/);
+    expect(session).toMatch(/-auth "\$xauthority"/);
     expect(session).toMatch(/-rfbauth "\$vnc_auth"/);
     expect(session).not.toMatch(/-nopw/);
     expect(boxChrome).toMatch(/Default\/Cookies/);
@@ -103,6 +142,10 @@ describe("graphical computer spec", () => {
     expect(boxChrome).not.toMatch(/"Local State"/);
     expect(boxChrome).not.toMatch(/SingletonLock/);
     expect(boxChrome).not.toMatch(/ln -s/);
+    expect(embed).toMatch(/fragmentParams\.get\(name\) \?\? queryParams\.get\(name\)/);
+    expect(embed).toMatch(/credential\("password", ""\)/);
+    expect(embed).toMatch(/const viewOnly = flag\("view_only"\)/);
+    expect(embed).not.toMatch(/document\.location\.href.*window\.location\.hash/);
   });
 
   it("keeps container names stable so a workspace can resume", () => {
@@ -119,8 +162,14 @@ describe("graphical computer spec", () => {
   it("points the screen at the chrome-less noVNC embed", () => {
     expect(screenUrlFor("16080")).toBe("http://127.0.0.1:16080/embed.html");
     expect(screenUrlFor("16080", "127.0.0.1", "secret_1")).toBe(
-      "http://127.0.0.1:16080/embed.html?password=secret_1",
+      "http://127.0.0.1:16080/embed.html#password=secret_1",
     );
+  });
+
+  it("keeps the VNC credential in the browser fragment, outside HTTP requests", () => {
+    const url = new URL(screenUrlFor("16080", "127.0.0.1", "secret_1"));
+    expect(url.searchParams.has("password")).toBe(false);
+    expect(new URLSearchParams(url.hash.slice(1)).get("password")).toBe("secret_1");
   });
 
   it("turns takeover input into xdotool", () => {
@@ -182,7 +231,7 @@ describe("resolveScreenUrl", () => {
       { internalAddress: "172.24.0.4", hostPort: "32866", novncPort: 6080, password: "abc12345" },
       { SANDBOX_SCREEN_HOST: "192.168.15.7", SANDBOX_SCREEN_NETWORK: "internal" },
     );
-    expect(url).toBe("http://192.168.15.7:32866/embed.html?password=abc12345");
+    expect(url).toBe("http://192.168.15.7:32866/embed.html#password=abc12345");
   });
 
   it("sem SANDBOX_SCREEN_HOST, a rede interna continua mandando", () => {

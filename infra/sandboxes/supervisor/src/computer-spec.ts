@@ -30,6 +30,8 @@ export interface ComputerCreateInput {
   homePath: string;
   desktopPath: string;
   networkMode?: string;
+  /** Publish noVNC onto the host only when no internal screen-proxy path exists. */
+  publishScreenPorts?: boolean;
 }
 
 export interface SessionPorts {
@@ -65,19 +67,46 @@ export function sessionPorts(display: number): SessionPorts {
   };
 }
 
-export function sessionPortBindings() {
+export function sessionPortBindings(publishHostPorts = true) {
   const bindings: Record<string, Array<{ HostIp: string; HostPort: string }>> = {};
   const exposed: Record<string, object> = {};
   for (let display = 1; display <= MAX_WORKSPACE_SESSIONS; display += 1) {
     const port = `${sessionPorts(display).novnc}/tcp`;
-    exposed[port] = {};
-    bindings[port] = [{ HostIp: SCREEN_BIND_HOST, HostPort: "0" }];
+    if (publishHostPorts) {
+      exposed[port] = {};
+      bindings[port] = [{ HostIp: SCREEN_BIND_HOST, HostPort: "0" }];
+    }
   }
   return { ExposedPorts: exposed, PortBindings: bindings };
 }
 
+export function screenPortPolicyMatches(
+  bindings: Record<string, unknown> | null | undefined,
+  shouldPublish: boolean,
+): boolean {
+  const published = Object.entries(bindings ?? {}).some(([port, value]) => {
+    const numeric = Number(port.replace(/\/tcp$/, ""));
+    return (
+      numeric >= NOVNC_PORT_BASE &&
+      numeric < NOVNC_PORT_BASE + MAX_WORKSPACE_SESSIONS &&
+      Array.isArray(value) &&
+      value.length > 0
+    );
+  });
+  return published === shouldPublish;
+}
+
+export function shouldPublishScreenPorts(
+  env: { SANDBOX_SCREEN_HOST?: string; SANDBOX_SCREEN_NETWORK?: string } = process.env,
+): boolean {
+  // Compose places the web screen proxy on each workspace's isolated network, so host
+  // publication has no consumer and only creates a path around the signed capability.
+  // A declared external screen host deliberately opts back into the host path.
+  return env.SANDBOX_SCREEN_NETWORK !== "internal" || Boolean(env.SANDBOX_SCREEN_HOST?.trim());
+}
+
 export function containerCreateOptions(input: ComputerCreateInput) {
-  const ports = sessionPortBindings();
+  const ports = sessionPortBindings(input.publishScreenPorts ?? true);
   return {
     Image: input.image,
     name: input.name,
@@ -158,7 +187,10 @@ export function workspaceDesktopPath(dataDir: string, workspaceId: string) {
 
 export function screenUrlFor(hostPort: string, host = SCREEN_HOST, password?: string) {
   const url = `http://${host}:${hostPort}/embed.html`;
-  return password ? `${url}?password=${encodeURIComponent(password)}` : url;
+  // A fragment is available to the noVNC page but is never sent in the HTTP request,
+  // reverse-proxy logs, or a Referer header. The embed keeps one-release compatibility
+  // with old stored URLs that still carry `?password=`.
+  return password ? `${url}#password=${encodeURIComponent(password)}` : url;
 }
 
 export interface ScreenUrlSources {

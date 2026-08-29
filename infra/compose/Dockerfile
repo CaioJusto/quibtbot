@@ -3,7 +3,7 @@
 # ($BUILDPLATFORM): esbuild é um binário Go que quebra sob emulação qemu, e o resultado
 # é JS estático — igual para qualquer arquitetura. Só o estágio final (pnpm install com
 # os binários nativos: prisma, esbuild do runtime) é por plataforma.
-FROM --platform=$BUILDPLATFORM node:22-bookworm AS webbuild
+FROM --platform=$BUILDPLATFORM node:22-bookworm@sha256:8a34c4ab3ea2c5cd194f07e317b2a8f09461d3c8b05c4e34c8ccd56d56024c4d AS webbuild
 ENV ONNXRUNTIME_NODE_INSTALL=skip
 RUN corepack enable
 WORKDIR /app
@@ -13,7 +13,7 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
 RUN mkdir -p packages/chat-ui/node_modules   && ln -s ../../../apps/web/node_modules/react packages/chat-ui/node_modules/react   && ln -s ../../../apps/web/node_modules/react-dom packages/chat-ui/node_modules/react-dom
 RUN pnpm --filter @quibt/web build
 
-FROM node:22-bookworm
+FROM node:22-bookworm@sha256:8a34c4ab3ea2c5cd194f07e317b2a8f09461d3c8b05c4e34c8ccd56d56024c4d
 # Set by the release workflow to the same version as the other two published
 # images (see scripts/release-version.mjs's releaseManifest) — this image is
 # tagged ghcr.io/quibt/quibt-stack:${RELEASE_VERSION}.
@@ -31,6 +31,7 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
 RUN mkdir -p packages/chat-ui/node_modules   && ln -s ../../../apps/web/node_modules/react packages/chat-ui/node_modules/react   && ln -s ../../../apps/web/node_modules/react-dom packages/chat-ui/node_modules/react-dom
 RUN pnpm --filter @quibt/db generate
 COPY --from=webbuild /app/apps/web/dist /app/apps/web/dist
+COPY --from=webbuild /app/apps/web/dist-server /app/apps/web/dist-server
 COPY infra/compose/quibt-migrate /usr/local/bin/quibt-migrate
 RUN chmod 755 /usr/local/bin/quibt-migrate
 ENV NODE_ENV=production

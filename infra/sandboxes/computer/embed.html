@@ -17,11 +17,17 @@
     <script type="module">
       import RFB from "./core/rfb.js";
 
+      const queryParams = new URLSearchParams(window.location.search);
+      const fragmentParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+
       function query(name, fallback) {
-        const match = `${document.location.href}${window.location.hash}`.match(
-          new RegExp(`.*[?&]${name}=([^&#]*)`),
-        );
-        return match ? decodeURIComponent(match[1]) : fallback;
+        return queryParams.get(name) ?? fallback;
+      }
+
+      function credential(name, fallback) {
+        // New URLs keep secrets outside HTTP. Search is a temporary compatibility fallback
+        // for a screen URL persisted by the immediately previous release.
+        return fragmentParams.get(name) ?? queryParams.get(name) ?? fallback;
       }
 
       function flag(name) {
@@ -97,7 +103,7 @@
       }
 
       function connect() {
-        const password = String(query("password", ""));
+        const password = String(credential("password", ""));
         const rfb = new RFB(screen, url, password ? { credentials: { password } } : undefined);
         rfb.viewOnly = viewOnly;
         rfb.scaleViewport = true;

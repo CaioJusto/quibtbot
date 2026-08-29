@@ -4,7 +4,8 @@
 #   curl -fsSL https://raw.githubusercontent.com/CaioJusto/quibtbot/main/scripts/install.sh | sh
 #
 # Baixa o binário `quibtbot` da última release do GitHub para esta arquitetura, confere o
-# SHA-256 publicado ao lado dele, coloca-o no PATH e roda `quibtbot install`. O binário
+# SHA-256 do manifesto autenticado pelo metadata da release, coloca-o no PATH e roda
+# `quibtbot install`. O binário
 # leva o manifesto do compose dentro de si; o install detecta (ou instala, no Linux) o Docker,
 # gera os segredos, sobe os serviços e imprime a URL e o código para o celular.
 #
@@ -12,6 +13,7 @@
 #   QUIBT_RELEASE   versão a baixar (padrão: latest)
 #   QUIBT_BIN_DIR   onde deixar o binário (padrão: /usr/local/bin, ou ~/.local/bin sem permissão)
 #   QUIBT_NO_RUN=1  só baixar; não rodar o install
+#   QUIBT_SHOW_SENSITIVE=1  mostra o código/QR no fluxo remoto autenticado
 #   QUIBT_BASE_URL  de onde baixar (padrão: a release no GitHub; útil para fork ou espelho)
 set -eu
 
@@ -54,10 +56,64 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 echo "Baixando $asset ($RELEASE)…"
-curl -fsSL "$base/$asset" -o "$tmp/quibtbot"
-curl -fsSL "$base/$asset.sha256" -o "$tmp/quibtbot.sha256"
+if [ "$RELEASE" = "latest" ]; then
+  release_api="https://api.github.com/repos/$REPO/releases/latest"
+else
+  release_api="https://api.github.com/repos/$REPO/releases/tags/v$RELEASE"
+fi
+curl -fsSL -H "Accept: application/vnd.github+json" "$release_api" -o "$tmp/release.json"
+tag=$(sed -n 's/^[[:space:]]*"tag_name": "\([^"]*\)",$/\1/p' "$tmp/release.json" | head -n 1)
+printf '%s\n' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || {
+  echo "quibtbot: a API do GitHub não devolveu uma tag de release válida." >&2
+  exit 1
+}
+if [ "$RELEASE" != "latest" ] && [ "$tag" != "v$RELEASE" ]; then
+  echo "quibtbot: a release resolvida ($tag) não é a versão pedida (v$RELEASE)." >&2
+  exit 1
+fi
+release_version=${tag#v}
+checksums_asset="checksums-$release_version.txt"
 
-expected=$(awk '{print $1}' "$tmp/quibtbot.sha256")
+asset_digest() {
+  awk -v wanted="$1" '
+    /^[[:space:]]*"name":/ {
+      current=$0
+      sub(/^[[:space:]]*"name": "/, "", current)
+      sub(/".*$/, "", current)
+    }
+    current == wanted && /^[[:space:]]*"digest": "sha256:/ {
+      digest=$0
+      sub(/^.*"digest": "sha256:/, "", digest)
+      sub(/".*$/, "", digest)
+      print digest
+      exit
+    }
+  ' "$tmp/release.json"
+}
+
+manifest_digest=$(asset_digest "$checksums_asset")
+api_asset_digest=$(asset_digest "$asset")
+if [ -z "$manifest_digest" ] || [ -z "$api_asset_digest" ]; then
+  echo "quibtbot: a release não publicou o manifesto ou o binário esperado." >&2
+  exit 1
+fi
+curl -fsSL "https://github.com/$REPO/releases/download/$tag/$checksums_asset" -o "$tmp/checksums.txt"
+if command -v sha256sum >/dev/null 2>&1; then
+  manifest_actual=$(sha256sum "$tmp/checksums.txt" | awk '{print $1}')
+else
+  manifest_actual=$(shasum -a 256 "$tmp/checksums.txt" | awk '{print $1}')
+fi
+if [ "$manifest_actual" != "$manifest_digest" ]; then
+  echo "quibtbot: o manifesto de checksums não bate com o metadata imutável do GitHub." >&2
+  exit 1
+fi
+
+curl -fsSL "$base/$asset" -o "$tmp/quibtbot"
+expected=$(awk -v wanted="$asset" '$2 == wanted || $2 == "*" wanted { print $1; exit }' "$tmp/checksums.txt")
+if [ -z "$expected" ] || [ "$expected" != "$api_asset_digest" ]; then
+  echo "quibtbot: o binário não confere entre o manifesto e o metadata da release." >&2
+  exit 1
+fi
 if command -v sha256sum >/dev/null 2>&1; then
   actual=$(sha256sum "$tmp/quibtbot" | awk '{print $1}')
 else
@@ -96,7 +152,9 @@ fi
 
 # Credenciais de pareamento nunca vão automaticamente para logs de CI/provedor. Fluxos
 # remotos autenticados precisam pedir --show-sensitive explicitamente e limpar a saída.
-if [ -t 1 ]; then
+if [ "${QUIBT_SHOW_SENSITIVE:-0}" = "1" ]; then
+  exec "$bin_dir/quibtbot" install --non-interactive --show-sensitive
+elif [ -t 1 ]; then
   exec "$bin_dir/quibtbot" install
 else
   exec "$bin_dir/quibtbot" install --non-interactive

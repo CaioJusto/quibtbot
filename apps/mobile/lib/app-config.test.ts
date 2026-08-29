@@ -7,10 +7,15 @@ const config = JSON.parse(
   readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../app.json"), "utf8"),
 ) as {
   expo: {
-    android?: { package?: string; versionCode?: number };
-    ios?: { buildNumber?: string; infoPlist?: Record<string, unknown> };
+    android?: { package?: string; userInterfaceStyle?: string; versionCode?: number };
+    ios?: {
+      buildNumber?: string;
+      infoPlist?: Record<string, unknown>;
+      userInterfaceStyle?: string;
+    };
     plugins?: Array<string | [string, Record<string, unknown>]>;
     runtimeVersion?: { policy?: string };
+    userInterfaceStyle?: string;
     version?: string;
   };
 };
@@ -37,5 +42,16 @@ describe("mobile native app config", () => {
     expect(config.expo.version).toBe("0.1.2");
     expect(config.expo.ios?.buildNumber).toBe("3");
     expect(config.expo.android?.versionCode).toBe(3);
+  });
+
+  it("enables the complete iOS dark palette without exposing a partial Android theme", () => {
+    expect(config.expo.userInterfaceStyle).toBe("automatic");
+    expect(config.expo.ios?.userInterfaceStyle).toBe("automatic");
+    expect(config.expo.android?.userInterfaceStyle).toBe("light");
+    const splash = config.expo.plugins?.find(
+      (plugin): plugin is [string, Record<string, unknown>] =>
+        Array.isArray(plugin) && plugin[0] === "expo-splash-screen",
+    );
+    expect(splash?.[1]).toMatchObject({ dark: { backgroundColor: "#161618" } });
   });
 });

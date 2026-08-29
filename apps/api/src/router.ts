@@ -34,11 +34,13 @@ import {
   probeModelCredential,
   publicComputerBootMessage,
   removePushToken,
+  revokeControlScreenOrSchedule,
   runSandboxCommand,
   sanitizeComposioError,
   savePushToken,
   scheduleComputerSleep,
   screenshotCommand,
+  screenUsesTransientVncCredential,
   scriptedCatalogEntry,
   serializeModelSecret,
   touchRunningComputer,
@@ -1479,7 +1481,7 @@ export function createRouter(deps: RouterDeps) {
             message: "Outra pessoa está no controle deste computador agora.",
           });
         }
-        await releaseControlLease(deps.prisma, {
+        await releaseControlAndRevoke(deps, {
           botId: bot.id,
           fence: desktop.controlFence,
         });
@@ -1499,7 +1501,7 @@ export function createRouter(deps: RouterDeps) {
         if (!check.ok) {
           // An expired lease is not just refused: the bot gets its computer back.
           if (check.reason === "expired") {
-            await releaseControlLease(deps.prisma, {
+            await releaseControlAndRevoke(deps, {
               botId: bot.id,
               fence: desktop.controlFence,
             });
@@ -1702,18 +1704,21 @@ export function createRouter(deps: RouterDeps) {
         // Therefore the signed WebSocket capability itself is interactive and must only be
         // issued to the live lease holder.
         if (!driving) return { url: null };
-        const stored = signStoredScreenUrl(
-          desktop.screenUrl,
-          deps.env.screenProxySecret,
-          context.screenOrigin ?? deps.env.webOrigin,
-          false,
-        );
-        if (stored) {
-          scheduleComputerSleep(deps.wakeup, bot.id);
-          return { url: stored };
+        const needsLiveCredential = screenUsesTransientVncCredential(computer.kind);
+        if (!needsLiveCredential) {
+          const stored = signStoredScreenUrl(
+            desktop.screenUrl,
+            deps.env.screenProxySecret,
+            context.screenOrigin ?? deps.env.webOrigin,
+            false,
+          );
+          if (stored) {
+            scheduleComputerSleep(deps.wakeup, bot.id);
+            return { url: stored };
+          }
         }
-        // Nothing recorded: ask the provider and write the answer down, so the next snapshot
-        // carries the screen instead of sending every client back through this path.
+        // Docker credentials are intentionally never stored. Ask the supervisor for the live
+        // fragment; managed providers still use this only when no URL was recorded.
         const discovered = await ensureDesktopScreenUrl(
           { prisma: deps.prisma, sandbox: deps.sandbox },
           desktop,
@@ -1724,6 +1729,7 @@ export function createRouter(deps: RouterDeps) {
             userId: context.actor.userId,
             signal: new AbortController().signal,
           },
+          needsLiveCredential ? { refresh: true } : undefined,
         );
         if (!discovered) return { url: null };
         scheduleComputerSleep(deps.wakeup, bot.id);
@@ -3064,7 +3070,7 @@ async function requireOwnControl(
   const check = checkControlLease(desktop, { userId: actor.userId }, new Date());
   if (!check.ok) {
     if (check.reason === "expired") {
-      await releaseControlLease(deps.prisma, {
+      await releaseControlAndRevoke(deps, {
         botId: bot.id,
         fence: desktop.controlFence,
       });
@@ -3094,6 +3100,19 @@ async function requireOwnControl(
   };
 }
 
+async function releaseControlAndRevoke(
+  deps: RouterDeps,
+  input: { botId: string; fence: number },
+): Promise<boolean> {
+  const released = await releaseControlLease(deps.prisma, input);
+  if (!released) return false;
+  await revokeControlScreenOrSchedule(
+    { prisma: deps.prisma, sandbox: deps.sandbox, wakeup: deps.wakeup },
+    input.botId,
+  );
+  return true;
+}
+
 async function computerStatus(
   deps: RouterDeps,
   actor: Actor,
@@ -3114,7 +3133,7 @@ async function computerStatus(
       : ((await deps.prisma.agentHome.findUnique({ where: { botId } }))?.revision ?? null);
   // Status is what the screen believes: never report a lease that has already run out.
   if (desktop && desktop.controlHolder === "user" && !controlLeaseLive(desktop, new Date())) {
-    const released = await releaseControlLease(deps.prisma, {
+    const released = await releaseControlAndRevoke(deps, {
       botId,
       fence: desktop.controlFence,
     });
@@ -3133,10 +3152,31 @@ async function computerStatus(
   );
   // A capability noVNC reaches the VNC socket directly. The visual `view_only` query is
   // not an authorization boundary, so no URL leaves the API until this actor owns the lease.
+  let liveScreenUrl = desktop?.screenUrl ?? undefined;
+  if (
+    desktop &&
+    computer &&
+    hasControl &&
+    screenUsesTransientVncCredential(computer.kind) &&
+    (desktop.state === "running" || desktop.state === "booting")
+  ) {
+    liveScreenUrl = await ensureDesktopScreenUrl(
+      { prisma: deps.prisma, sandbox: deps.sandbox },
+      desktop,
+      {
+        operationId: "computer.status.screen",
+        traceId: "computer.status.screen",
+        workspaceId: actor.workspaceId,
+        userId: actor.userId,
+        signal: new AbortController().signal,
+      },
+      { refresh: true },
+    ).catch(() => undefined);
+  }
   const driving =
     desktop && hasControl
       ? signStoredScreenUrl(
-          desktop.screenUrl,
+          liveScreenUrl,
           deps.env.screenProxySecret,
           loaded?.screenOrigin ?? deps.env.webOrigin,
           false,

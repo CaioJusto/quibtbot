@@ -26,7 +26,9 @@ export default defineConfig({
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    command: "pnpm dev",
+    // Exercise the same compiled Node proxy/static server shipped in Compose. Vite's
+    // development proxy is deliberately not accepted as production E2E evidence.
+    command: "pnpm build && pnpm start",
     url: baseURL,
     // Never attach the destructive E2E journey to a person's already running Quibt.
     // `pnpm verify` supplies an isolated database/API and a dedicated port (5180).

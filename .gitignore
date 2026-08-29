@@ -15,6 +15,7 @@ apps/**/data
 .tmp
 .DS_Store
 apps/web/dist
+apps/web/dist-server
 apps/desktop/dist
 apps/desktop/out
 apps/mobile/.expo
@@ -39,3 +40,7 @@ PRODUCT_PLAN.md
 # Saída do build da libssh2 para iOS (apps/mobile/scripts/build-ios-libssh2.sh):
 # binários grandes, reconstruídos por quem for empacotar o app.
 apps/mobile/ios-libssh2
+
+# Local agent review evidence and one-off screenshots are not release inputs.
+.agent-reports/
+/tela-agora.png

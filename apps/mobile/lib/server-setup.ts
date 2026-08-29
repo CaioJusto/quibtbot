@@ -133,25 +133,8 @@ export function serverHostGuide(kind: ServerHostKind): ServerHostOption {
   return { ...guide };
 }
 
-function linuxBootstrapScript(): string {
-  return `set -euo pipefail
-BASE="${RELEASE_BASE}"
-ARCH=$(uname -m)
-case "$ARCH" in
-  x86_64|amd64) ARTIFACT="quibtbot-linux-x64" ;;
-  aarch64|arm64) ARTIFACT="quibtbot-linux-arm64" ;;
-  *) echo "unsupported architecture: $ARCH"; exit 1 ;;
-esac
-tmpdir=$(mktemp -d)
-trap 'rm -rf "$tmpdir"' EXIT
-curl -fsSL "$BASE/$ARTIFACT" -o "$tmpdir/quibtbot"
-curl -fsSL "$BASE/$ARTIFACT.sha256" -o "$tmpdir/quibtbot.sha256"
-expected=$(awk '{print $1}' "$tmpdir/quibtbot.sha256")
-actual=$(sha256sum "$tmpdir/quibtbot" | awk '{print $1}')
-[ "$actual" = "$expected" ] || { echo "checksum mismatch" >&2; exit 1; }
-chmod +x "$tmpdir/quibtbot"
-"$tmpdir/quibtbot" install --non-interactive --show-sensitive
-`;
+function unixBootstrapScript(): string {
+  return INSTALL_SCRIPT_COMMAND.replace(/ sh$/, " QUIBT_SHOW_SENSITIVE=1 sh");
 }
 
 /**
@@ -165,18 +148,12 @@ export const INSTALL_SCRIPT_COMMAND = `curl -fsSL https://raw.githubusercontent.
 export function bootstrapCommand(platform: BootstrapPlatform): string {
   switch (platform) {
     case "linux":
-      return linuxBootstrapScript();
+      return unixBootstrapScript();
     case "darwin":
-      return [
-        `curl -fsSL "${RELEASE_BASE}/quibtbot-darwin-arm64" -o /tmp/quibtbot`,
-        `curl -fsSL "${RELEASE_BASE}/quibtbot-darwin-arm64.sha256" -o /tmp/quibtbot.sha256`,
-        "echo \"$(awk '{print $1}' /tmp/quibtbot.sha256)  /tmp/quibtbot\" | shasum -a 256 -c -",
-        "chmod +x /tmp/quibtbot",
-        "/tmp/quibtbot install --non-interactive --show-sensitive",
-      ].join(" && ");
+      return unixBootstrapScript();
     case "win32":
-      return `powershell -NoProfile -ExecutionPolicy Bypass -Command "& { $u='${RELEASE_BASE}/quibtbot-win32-x64.exe'; $p=$env:TEMP+'\\quibtbot.exe'; $s=$p+'.sha256'; Invoke-WebRequest -Uri $u -OutFile $p; Invoke-WebRequest -Uri ($u+'.sha256') -OutFile $s; $expected=((Get-Content $s).Trim() -split '\\s+')[0].ToLower(); $actual=(Get-FileHash -Algorithm SHA256 $p).Hash.ToLower(); if ($actual -ne $expected) { throw 'checksum mismatch' }; & $p install --non-interactive --show-sensitive }"`;
+      return `powershell -NoProfile -ExecutionPolicy Bypass -Command "& { $artifact='quibtbot-win32-x64.exe'; $release=Invoke-RestMethod -Uri 'https://api.github.com/repos/CaioJusto/quibtbot/releases/tags/v${INSTALL_RELEASE}'; $manifestName='checksums-${INSTALL_RELEASE}.txt'; $manifestAsset=$release.assets | Where-Object { $_.name -eq $manifestName } | Select-Object -First 1; $binaryAsset=$release.assets | Where-Object { $_.name -eq $artifact } | Select-Object -First 1; if (-not $manifestAsset -or -not $binaryAsset) { throw 'release metadata missing' }; $manifest=$env:TEMP+'\\'+$manifestName; $p=$env:TEMP+'\\quibtbot.exe'; Invoke-WebRequest -Uri $manifestAsset.browser_download_url -OutFile $manifest; $manifestHash=(Get-FileHash -Algorithm SHA256 $manifest).Hash.ToLower(); if ('sha256:'+$manifestHash -ne $manifestAsset.digest) { throw 'manifest metadata mismatch' }; $line=Get-Content $manifest | Where-Object { $_ -match ('\\s'+[regex]::Escape($artifact)+'$') } | Select-Object -First 1; if (-not $line) { throw 'artifact checksum missing' }; $expected=($line -split '\\s+')[0].ToLower(); if ('sha256:'+$expected -ne $binaryAsset.digest) { throw 'release metadata mismatch' }; Invoke-WebRequest -Uri '${RELEASE_BASE}/'+$artifact -OutFile $p; $actual=(Get-FileHash -Algorithm SHA256 $p).Hash.ToLower(); if ($actual -ne $expected) { throw 'checksum mismatch' }; & $p install --non-interactive --show-sensitive }"`;
     default:
-      return linuxBootstrapScript();
+      return unixBootstrapScript();
   }
 }

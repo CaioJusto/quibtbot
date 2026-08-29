@@ -973,10 +973,11 @@ describe("já instalado = ligar", () => {
     expect(result.url).toBe(PUBLIC_URL);
     expect(result.servicesStarted).toBe(true);
     expect(result.pairing).toBeUndefined();
-    // Um único `up --wait` com todos os serviços, sem pull, sem migração.
+    // Um único `up` com os serviços explícitos; a sondagem HTTP é o health gate. Sem
+    // `--wait`, porque `computer` é intencionalmente one-shot.
     const ups = composeCalls.filter((call) => call.includes(" up "));
     expect(ups).toHaveLength(1);
-    expect(ups[0]).toMatch(/ up -d --wait \[timeout 600000\]$/);
+    expect(ups[0]).toMatch(/ up -d supervisor api worker web computer \[timeout 600000\]$/);
     expect(ups[0]).not.toContain("--profile");
     expect(composeCalls.some((call) => call.includes(" pull") || call.includes("migrate"))).toBe(
       false,
@@ -1065,7 +1066,9 @@ describe("já instalado = ligar", () => {
     expect(commands).toContain("/usr/bin/open -g /Applications/Docker.app");
     expect(
       commands.some(
-        (entry) => entry.startsWith(`${DOCKER_CLI} compose`) && entry.includes(" up -d --wait"),
+        (entry) =>
+          entry.startsWith(`${DOCKER_CLI} compose`) &&
+          entry.includes(" up -d supervisor api worker web computer"),
       ),
     ).toBe(true);
     expect(events.map((event) => event.message)).toContain("Abrindo o Docker Desktop…");

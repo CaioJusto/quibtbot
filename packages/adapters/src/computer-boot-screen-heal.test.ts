@@ -1,7 +1,7 @@
 import type { AdapterContext, SandboxProvider } from "@quibt/adapter-kit";
 import type { PrismaClient } from "@quibt/db";
 import { describe, expect, it, vi } from "vitest";
-import { bootComputer } from "./computer-boot.js";
+import { bootComputer, screenUrlForPersistence } from "./computer-boot.js";
 
 const context: AdapterContext & { userId: string } = {
   operationId: "boot",
@@ -55,6 +55,35 @@ function makeRunningHarness(connectScreen: SandboxProvider["connectScreen"]) {
 }
 
 describe("booting a computer that is already running", () => {
+  it("never persists the transient Docker VNC credential", async () => {
+    const connectScreen = vi.fn(async () => ({
+      url: "http://127.0.0.1:35590/embed.html#password=fresh_secret",
+      mimeType: "text/html",
+      close: async () => undefined,
+    })) as unknown as SandboxProvider["connectScreen"];
+    const { deps, session } = makeRunningHarness(connectScreen);
+    session.screenUrl = "http://127.0.0.1:35590/embed.html?password=old_secret";
+
+    const ref = await bootComputer(deps, "bot-b", context);
+
+    expect(ref.screenUrl).toBe("http://127.0.0.1:35590/embed.html#password=fresh_secret");
+    expect(session.screenUrl).toBe("http://127.0.0.1:35590/embed.html");
+    expect(JSON.stringify(session)).not.toContain("fresh_secret");
+    expect(JSON.stringify(session)).not.toContain("old_secret");
+  });
+
+  it("strips only the Docker password and leaves managed provider URLs untouched", () => {
+    expect(
+      screenUrlForPersistence(
+        "http://127.0.0.1:6080/embed.html?view_only=false#password=vnc_secret",
+        "docker",
+      ),
+    ).toBe("http://127.0.0.1:6080/embed.html?view_only=false");
+    expect(
+      screenUrlForPersistence("https://sandbox.example/stream?authKey=provider_secret", "e2b"),
+    ).toBe("https://sandbox.example/stream?authKey=provider_secret");
+  });
+
   it("asks the provider where the screen is when the session has no URL, and records it", async () => {
     // Taking control puts the row in `running` on its own, so a boot that finds it running
     // used to return with no screen address at all — the app then showed a placeholder to
@@ -111,7 +140,7 @@ describe("booting a computer that is already running", () => {
     expect(prisma.desktopSession.updateMany).not.toHaveBeenCalled();
   });
 
-  it("segura o endereço conhecido quando o provedor não responde na hora de abrir", async () => {
+  it("does not return a credentialless Docker URL when the provider is unavailable", async () => {
     const connectScreen = vi.fn(async () => {
       throw new Error("supervisor down");
     }) as unknown as SandboxProvider["connectScreen"];
@@ -120,8 +149,9 @@ describe("booting a computer that is already running", () => {
 
     const ref = await bootComputer(deps, "bot-b", context);
 
-    // Melhor tentar o último endereço conhecido do que abrir sem nenhum.
-    expect(ref.screenUrl).toBe("http://127.0.0.1:35590/embed.html");
+    // The stored URL deliberately has no VNC password. Returning it would mount a screen
+    // that cannot authenticate and would tempt callers to persist a credential again.
+    expect(ref.screenUrl).toBeUndefined();
   });
 
   it("still boots when the provider cannot say where the screen is", async () => {

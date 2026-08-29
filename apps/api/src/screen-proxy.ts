@@ -25,7 +25,9 @@ export function addScreenProxyCapability(
       .update(`${parsed.hostname}:${parsed.port}:${expiresAt}:${mode}`)
       .digest("base64url");
     const origin = new URL(proxyOrigin).origin;
-    return `${origin}/novnc/${target}/${parsed.port}/${expiresAt}.${signature}.${mode}${targetPath}`;
+    // The VNC credential lives in the fragment: the browser needs it, the proxy must not
+    // receive or forward it. Preserve it only after the signed HTTP target is assembled.
+    return `${origin}/novnc/${target}/${parsed.port}/${expiresAt}.${signature}.${mode}${targetPath}${parsed.hash}`;
   } catch {
     return url;
   }

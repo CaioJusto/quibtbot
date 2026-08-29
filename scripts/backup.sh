@@ -6,6 +6,7 @@ case "$STAMP" in
   ""|*/*|*..*) echo "invalid backup name: $STAMP" >&2; exit 2 ;;
 esac
 OUT="${ROOT}/backups/${STAMP}"
+BACKUP_ROOT="${QUIBT_BACKUP_ROOT:-$ROOT}"
 COMPOSE=(docker compose -f "$ROOT/infra/compose/docker-compose.yml")
 mkdir -p "$OUT"
 
@@ -23,8 +24,8 @@ fi
 mv "$OUT/quibt.sql.partial" "$OUT/quibt.sql"
 
 # An empty archive is only acceptable when there is really nothing to archive.
-if [[ -d "$ROOT/data" ]]; then
-  tar -czf "$OUT/homes.tgz" -C "$ROOT" data
+if [[ -d "$BACKUP_ROOT/data" ]]; then
+  tar -czf "$OUT/homes.tgz" -C "$BACKUP_ROOT" data
 else
   tar -czf "$OUT/homes.tgz" --files-from /dev/null
 fi

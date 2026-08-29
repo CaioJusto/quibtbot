@@ -58,6 +58,8 @@ export interface SandboxProvider {
     request: ScreenRequest,
     context: AdapterContext,
   ): Promise<ScreenSession>;
+  /** Immediately invalidates an already-issued interactive screen session, when supported. */
+  revokeScreen?(computer: ComputerRef, context: AdapterContext): Promise<void>;
   sendInput(
     computer: ComputerRef,
     input: ComputerInput,

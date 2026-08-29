@@ -100,6 +100,30 @@ type WorkspaceEnsureContext = AdapterContext & {
 export const COMPUTER_SCREEN_MISSING_MESSAGE =
   "O computador religou, mas a tela não abriu. Tente de novo em instantes.";
 
+export function screenUsesTransientVncCredential(kind: string): boolean {
+  return kind === "docker" || kind === "remote-supervisor";
+}
+
+/**
+ * Docker's VNC password is a live transport credential, not durable session state.
+ * Managed providers own their URL/token lifecycle, so their URLs remain untouched.
+ */
+export function screenUrlForPersistence(url: string, kind: string): string {
+  if (!screenUsesTransientVncCredential(kind)) return url;
+  try {
+    const parsed = new URL(url);
+    let changed = parsed.searchParams.has("password");
+    parsed.searchParams.delete("password");
+    const fragment = new URLSearchParams(parsed.hash.replace(/^#/, ""));
+    if (fragment.has("password")) changed = true;
+    fragment.delete("password");
+    parsed.hash = fragment.toString();
+    return changed ? parsed.toString() : url;
+  } catch {
+    return url;
+  }
+}
+
 /**
  * Asks the provider where a running session's screen is and writes the answer down.
  *
@@ -130,7 +154,13 @@ export async function ensureDesktopScreenUrl(
    */
   options?: { refresh?: boolean; required?: boolean },
 ): Promise<string | undefined> {
-  if (session.screenUrl && !options?.refresh) return session.screenUrl;
+  if (
+    session.screenUrl &&
+    !options?.refresh &&
+    !screenUsesTransientVncCredential(session.computer.kind)
+  ) {
+    return session.screenUrl;
+  }
   const providerRef = workspaceProviderRef(session) ?? session.providerRef;
   if (!providerRef) {
     if (options?.required) throw new Error(COMPUTER_SCREEN_MISSING_MESSAGE);
@@ -168,13 +198,16 @@ export async function ensureDesktopScreenUrl(
         .catch(() => undefined);
       throw new Error(screen?.reason?.trim() || COMPUTER_SCREEN_MISSING_MESSAGE);
     }
-    return session.screenUrl ?? undefined;
+    return screenUsesTransientVncCredential(session.computer.kind)
+      ? undefined
+      : (session.screenUrl ?? undefined);
   }
-  if (screen.url === session.screenUrl) return screen.url;
+  const persistedUrl = screenUrlForPersistence(screen.url, session.computer.kind);
+  if (persistedUrl === session.screenUrl) return screen.url;
   try {
     await deps.prisma.desktopSession.updateMany({
       where: { botId: session.botId, state: "running" },
-      data: { screenUrl: screen.url },
+      data: { screenUrl: persistedUrl },
     });
   } catch {
     // Not recording it only costs the next caller another lookup.

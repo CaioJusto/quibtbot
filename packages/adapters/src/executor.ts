@@ -53,7 +53,7 @@ import { ApprovalPause, approvalCheckpoint, promptForRun } from "./approval-wait
 import { browserOpenCommand } from "./browser-url.js";
 import { builtinAgentTools, collaborationAgentTools } from "./builtin-tools.js";
 import { deleteSpawnedBot, spawnBot } from "./child-bots.js";
-import { collectLogIds } from "./composio-connector.js";
+import { collectLogIds, isComposioUnknownOutcomeResult } from "./composio-connector.js";
 import { bootComputer } from "./computer-boot.js";
 import { capHistory, HISTORY_MESSAGE_CAP } from "./history.js";
 import { PROVIDER_RETRY_PROGRESS_MESSAGE, TRY_AGAIN_HINT } from "./llm-retry.js";
@@ -964,6 +964,29 @@ export function createRunExecutor(deps: ExecutorDeps) {
             )) {
               if (event.type === "result") {
                 result = event.data;
+                if (isComposioUnknownOutcomeResult(event.data)) {
+                  await appendEvent(deps.prisma, {
+                    workspaceId: run.workspaceId,
+                    threadId: thread.id,
+                    botId: bot.id,
+                    runId: run.id,
+                    type: "effect.recorded",
+                    payload: {
+                      tool: name,
+                      executionId,
+                      status: "unknown",
+                      retry: false,
+                    },
+                  });
+                  // Persist a visible warning in the thread. The external-effect row below
+                  // is the machine-readable guard; this message is the human-readable one.
+                  await publishMessage(deps, actor, thread.id, bot.id, run.id, "bot", [
+                    {
+                      kind: "meta",
+                      text: `⚠️ ${event.data.message}`,
+                    },
+                  ]);
+                }
                 const logIds = collectLogIds(event.data);
                 for (const logId of logIds) {
                   await appendEvent(deps.prisma, {
@@ -1733,11 +1756,10 @@ async function publishMessage(
 }
 
 /**
- * Idempotency for tool side effects. `status` is the whole point of the row: only an effect
- * that actually returned counts as already applied. One left at `intended` (the worker died
- * mid-tool) or at `failed` never touched the outside world, so replaying the turn has to run
- * it again instead of handing the model the previous result — otherwise the bot reports work
- * that never happened.
+ * Idempotency for tool side effects. `status` is the whole point of the row: a completed effect
+ * is replayed, and an `unknown` Composio mutation is also never repeated because it may have
+ * happened. One left at `intended` (the worker died before a result) or at `failed` did not
+ * produce a guarded result, so replaying the turn reclaims it instead of faking success.
  */
 export async function recordEffect(
   deps: ExecutorDeps,
@@ -1749,7 +1771,7 @@ export async function recordEffect(
   const existing = await deps.prisma.externalEffect.findUnique({
     where: { idempotencyKey: executionId },
   });
-  if (existing?.status === "completed") {
+  if (existing?.status === "completed" || existing?.status === "unknown") {
     const row = await deps.prisma.run.findUniqueOrThrow({
       where: { id: run.id },
       select: { threadId: true, botId: true },
@@ -1790,10 +1812,11 @@ export async function recordEffect(
   return { duplicate: false, effect };
 }
 
-async function completeEffect(deps: ExecutorDeps, effectId: string, result: unknown) {
+export async function completeEffect(deps: ExecutorDeps, effectId: string, result: unknown) {
+  const status = isComposioUnknownOutcomeResult(result) ? "unknown" : "completed";
   await deps.prisma.externalEffect.update({
     where: { id: effectId },
-    data: { status: "completed", result: (result ?? { ok: true }) as never },
+    data: { status, result: (result ?? { ok: true }) as never },
   });
 }
 

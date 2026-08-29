@@ -83,6 +83,15 @@ describe("compose service policies", () => {
     expect(web.api?.condition).toBe("service_healthy");
   });
 
+  it("runs the dedicated production web server and checks its own health endpoint", () => {
+    expect(services.web?.command).toEqual(["pnpm", "--filter", "@quibt/web", "start"]);
+    expect(String(services.web?.healthcheck?.test)).toContain("127.0.0.1:5173/health");
+    expect(services.web?.environment?.WEB_HOST).toBe("0.0.0.0");
+    expect(String(services.web?.environment?.WEB_PORT)).toBe("5173");
+    expect(services.web?.env_file).toEqual(["../../.env"]);
+    expect(services.web?.environment?.BETTER_AUTH_SECRET).toBeUndefined();
+  });
+
   it("keeps the network posture: postgres on loopback and no port for the supervisor", () => {
     expect(services.postgres?.ports).toEqual(["127.0.0.1:5433:5432"]);
     expect(services.supervisor?.ports).toBeUndefined();
@@ -106,6 +115,16 @@ describe("compose service policies", () => {
         "production",
       );
     }
+  });
+
+  it("passes the real source-install authentication secret through to the web server", () => {
+    const rendered = renderWithDocker(
+      "BETTER_AUTH_SECRET=source-compose-test-secret-0123456789abcdef\n",
+    );
+    if (!rendered) return;
+    expect(rendered.services.web?.environment?.BETTER_AUTH_SECRET).toBe(
+      "source-compose-test-secret-0123456789abcdef",
+    );
   });
 
   it("matches what docker itself resolves from the file", () => {
@@ -151,6 +170,14 @@ describe("desktop compose service policies", () => {
     const command = desktopServices.api?.command;
     expect(command).toEqual(["pnpm", "--filter", "@quibt/api", "start"]);
     expect(JSON.stringify(command)).not.toContain("migrate deploy");
+  });
+
+  it("runs the dedicated production web server before exposing Caddy", () => {
+    expect(desktopServices.web?.command).toEqual(["pnpm", "--filter", "@quibt/web", "start"]);
+    expect(String(desktopServices.web?.healthcheck?.test)).toContain("127.0.0.1:5173/health");
+    expect(desktopServices.web?.environment?.WEB_HOST).toBe("0.0.0.0");
+    const caddy = desktopServices.caddy?.depends_on as Record<string, { condition?: string }>;
+    expect(caddy.web?.condition).toBe("service_healthy");
   });
 
   it("restarts long-running services and mounts the generated env file", () => {

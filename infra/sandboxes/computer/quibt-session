@@ -18,6 +18,29 @@ novnc_answers() {
   python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:${port}/embed.html', timeout=2).read()" >/dev/null 2>&1
 }
 
+vnc_answers() {
+  local port="$1"
+  python3 -c 'import socket,sys; s=socket.create_connection(("127.0.0.1", int(sys.argv[1])), 1); s.close()' "$port" >/dev/null 2>&1
+}
+
+stop_process() {
+  local pidfile="$1" pid i
+  [[ -f "$pidfile" ]] || return 0
+  pid="$(cat "$pidfile" 2>/dev/null || true)"
+  [[ -n "$pid" ]] || return 0
+  kill "$pid" 2>/dev/null || true
+  for i in $(seq 1 20); do
+    kill -0 "$pid" 2>/dev/null || return 0
+    sleep 0.05
+  done
+  kill -9 "$pid" 2>/dev/null || true
+  for i in $(seq 1 10); do
+    kill -0 "$pid" 2>/dev/null || return 0
+    sleep 0.05
+  done
+  return 1
+}
+
 start_novnc() {
   local dir="$1" port="$2" vnc="$3"
   mkdir -p "$dir/log"
@@ -25,22 +48,38 @@ start_novnc() {
   echo $! > "$dir/novnc.pid"
 }
 
+start_vnc() {
+  local dir="$1" display="$2" vnc="$3" vnc_auth="$4"
+  local xauthority="/run/quibt/sessions/$display/Xauthority"
+  x11vnc -display ":$display" -auth "$xauthority" -forever -shared -rfbauth "$vnc_auth" -listen 127.0.0.1 \
+    -rfbport "$vnc" -xkb -ncache 0 -nocursorshape -cursor arrow >"$dir/log/vnc.log" 2>&1 &
+  echo $! > "$dir/vnc.pid"
+}
+
 # Xvfb can still be up while websockify has leaked every FD and resets the embed.
 # A live session.pid is not a live screen.
 ensure_novnc() {
   local bot="$1"
-  local dir display port vnc i
+  local dir display port vnc vnc_auth i attempt
   dir="$(session_dir "$bot")"
   display="$(cat "$dir/display" 2>/dev/null || echo 1)"
   port="$(cat "$dir/novnc.port" 2>/dev/null || echo $((6080 + display - 1)))"
   vnc=$((5900 + display - 1))
-  if novnc_answers "$port"; then
-    return 0
+  vnc_auth="/run/quibt/sessions/$display/vnc.auth"
+  if ! vnc_answers "$vnc"; then
+    stop_process "$dir/vnc.pid" || return 1
+    for attempt in 1 2; do
+      start_vnc "$dir" "$display" "$vnc" "$vnc_auth"
+      for i in $(seq 1 15); do
+        vnc_answers "$vnc" && break 2
+        sleep 0.1
+      done
+      stop_process "$dir/vnc.pid" || return 1
+    done
+    vnc_answers "$vnc" || return 1
   fi
-  if [[ -f "$dir/novnc.pid" ]]; then
-    kill "$(cat "$dir/novnc.pid")" 2>/dev/null || true
-    sleep 0.2
-  fi
+  if novnc_answers "$port"; then return 0; fi
+  stop_process "$dir/novnc.pid" || return 1
   start_novnc "$dir" "$port" "$vnc"
   echo "$port" > "$dir/novnc.port"
   for i in $(seq 1 15); do
@@ -197,14 +236,96 @@ start_session() {
   # momento do toque e não apenas o resultado dele.
   DISPLAY=":$display" quibt-click-pulse >"$dir/log/click-pulse.log" 2>&1 &
   echo $! > "$dir/click-pulse.pid"
-  x11vnc -display ":$display" -forever -shared -rfbauth "$vnc_auth" -listen 127.0.0.1 -rfbport "$ports_vnc" -xkb -ncache 0 -nocursorshape -cursor arrow >"$dir/log/vnc.log" 2>&1 &
-  echo $! > "$dir/vnc.pid"
+  start_vnc "$dir" "$display" "$ports_vnc" "$vnc_auth"
   echo "$display" > "$dir/display"
   echo "$ports_novnc" > "$dir/novnc.port"
   start_novnc "$dir" "$ports_novnc" "$ports_vnc"
   echo "$xvfb_pid" > "$pidfile"
   ensure_watchdog "$bot"
   echo "started display=$display novnc=$ports_novnc"
+}
+
+rotate_session() {
+  local bot="$1" requested_display="$2"
+  local dir display runtime_dir vnc_password vnc_auth ports_vnc ports_novnc i
+  dir="$(session_dir "$bot")"
+  if [[ ! -f "$dir/session.pid" ]] || ! kill -0 "$(cat "$dir/session.pid" 2>/dev/null)" 2>/dev/null; then
+    echo "session not running" >&2
+    return 1
+  fi
+  display="$(cat "$dir/display" 2>/dev/null || true)"
+  if [[ -z "$display" || "$display" != "$requested_display" ]]; then
+    echo "display mismatch" >&2
+    return 1
+  fi
+  runtime_dir="/run/quibt/sessions/$display"
+  vnc_password="$runtime_dir/vnc.password"
+  vnc_auth="$runtime_dir/vnc.auth"
+  ports_vnc=$((5900 + display - 1))
+  ports_novnc=$((6080 + display - 1))
+
+  # The watchdog repairs dead listeners every five seconds. Pause it for the whole
+  # handover, otherwise it can start a second x11vnc between the two stops below and
+  # leave vnc.pid pointing at the losing process. That makes the next rotation unable
+  # to revoke the listener that actually owns the port.
+  stop_process "$dir/watchdog.pid" || return 1
+
+  # Prepare both files before dropping the old listeners. The running x11vnc has already
+  # loaded the old auth file, so replacing it cannot create a half-rotated live socket.
+  # RFB's classic password authentication only uses eight bytes. Generate exactly that and
+  # rely on the isolated network/signed proxy instead of pretending a longer string adds bits.
+  python3 -c 'import secrets,sys; open(sys.argv[1], "w").write(secrets.token_urlsafe(8)[:8])' "$vnc_password.new"
+  chmod 600 "$vnc_password.new"
+  x11vnc -storepasswd "$(cat "$vnc_password.new")" "$vnc_auth.new" >/dev/null
+  chmod 600 "$vnc_auth.new"
+  mv "$vnc_password.new" "$vnc_password"
+  mv "$vnc_auth.new" "$vnc_auth"
+
+  # Killing websockify drops every live WebSocket immediately. Restart only the VNC bridge;
+  # Xvfb, the browser, the bot and its files keep running untouched.
+  stop_process "$dir/novnc.pid" || {
+    ensure_watchdog "$bot"
+    return 1
+  }
+  stop_process "$dir/vnc.pid" || {
+    ensure_watchdog "$bot"
+    return 1
+  }
+  local ready=0 attempt
+  for attempt in 1 2; do
+    start_vnc "$dir" "$display" "$ports_vnc" "$vnc_auth"
+    for i in $(seq 1 15); do
+      if vnc_answers "$ports_vnc"; then
+        ready=1
+        break
+      fi
+      sleep 0.1
+    done
+    [[ "$ready" -eq 1 ]] && break
+    stop_process "$dir/vnc.pid" || {
+      ensure_watchdog "$bot"
+      return 1
+    }
+  done
+  if [[ "$ready" -ne 1 ]]; then
+    ensure_watchdog "$bot"
+    return 1
+  fi
+  start_novnc "$dir" "$ports_novnc" "$ports_vnc"
+  echo "$ports_novnc" > "$dir/novnc.port"
+  for i in $(seq 1 15); do
+    if novnc_answers "$ports_novnc"; then
+      ensure_watchdog "$bot"
+      echo "rotated"
+      return 0
+    fi
+    sleep 0.2
+  done
+  # A failed rotation must not permanently disable self-healing. The caller still gets a
+  # non-zero result and retries, while the watchdog can restore whichever bridge failed.
+  ensure_watchdog "$bot"
+  echo "rotation failed" >&2
+  return 1
 }
 
 stop_session() {
@@ -267,8 +388,15 @@ case "$ACTION" in
     echo "broken"
     exit 1
     ;;
+  rotate)
+    if [[ -z "$BOT_ID" || -z "$DISPLAY_NUM" ]]; then
+      echo "usage: quibt-session rotate <botId> <display>" >&2
+      exit 1
+    fi
+    rotate_session "$BOT_ID" "$DISPLAY_NUM"
+    ;;
   *)
-    echo "usage: quibt-session start|stop|status|repair <botId> [display]" >&2
+    echo "usage: quibt-session start|stop|status|repair|rotate <botId> [display]" >&2
     exit 1
     ;;
 esac

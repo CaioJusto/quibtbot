@@ -1,4 +1,4 @@
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171
 # Set by the release workflow — tagged ghcr.io/quibt/quibt-computer:${RELEASE_VERSION},
 # the same version as quibt-supervisor and quibt-stack (scripts/release-version.mjs).
 ARG RELEASE_VERSION=0.0.0-dev

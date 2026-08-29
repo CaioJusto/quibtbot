@@ -50,6 +50,8 @@ function harness(overrides: Partial<DesktopRow> = {}) {
   const inputs: Array<{ leaseId: string; fence: number }> = [];
   const jobs: Array<{ name: string; payload: unknown; runAt?: Date }> = [];
   const keepAlives: Array<{ botId: string; workspaceId?: string }> = [];
+  let screenLookups = 0;
+  let screenRevocations = 0;
   const bot = {
     id: "bot-1",
     workspaceId: "ws-1",
@@ -114,6 +116,17 @@ function harness(overrides: Partial<DesktopRow> = {}) {
       keepAlive: async (computer: { botId: string }, context?: { workspaceId?: string }) => {
         keepAlives.push({ botId: computer.botId, workspaceId: context?.workspaceId });
       },
+      connectScreen: async () => {
+        screenLookups += 1;
+        return {
+          url: "http://127.0.0.1:49152/embed.html#password=vnc_secret",
+          mimeType: "text/html",
+          close: async () => undefined,
+        };
+      },
+      revokeScreen: async () => {
+        screenRevocations += 1;
+      },
     },
     env: {
       defaultProvider: "openrouter",
@@ -123,7 +136,15 @@ function harness(overrides: Partial<DesktopRow> = {}) {
       webOrigin: "https://app.example",
     },
   } as unknown as RouterDeps;
-  return { router: createRouter(deps), desktop, inputs, jobs, keepAlives };
+  return {
+    router: createRouter(deps),
+    desktop,
+    inputs,
+    jobs,
+    keepAlives,
+    screenLookups: () => screenLookups,
+    screenRevocations: () => screenRevocations,
+  };
 }
 
 const keypress = { botId: "bot-1", kind: "key" as const, payload: { key: "a" } };
@@ -214,7 +235,7 @@ describe("computer.input", () => {
   });
 
   it("refuses an expired lease and hands the computer back to the bot", async () => {
-    const { router, desktop, inputs } = harness({
+    const { router, desktop, inputs, screenRevocations } = harness({
       controlHolder: "user",
       controlLeaseId: "ctl_old",
       controlLeaseUserId: "user-1",
@@ -227,6 +248,7 @@ describe("computer.input", () => {
     expect(inputs).toEqual([]);
     expect(desktop.controlHolder).toBe("bot");
     expect(desktop.controlLeaseId).toBeNull();
+    expect(screenRevocations()).toBe(1);
   });
 });
 
@@ -391,6 +413,25 @@ describe("computer.status", () => {
     );
     expect(controlling.screenUrl).toContain(".control/");
     expect(controlling.screenUrl).toContain("view_only=false");
+    expect(controlling.screenUrl).toContain("#password=vnc_secret");
+  });
+
+  it("fetches the live Docker credential without ever writing it to the desktop row", async () => {
+    const { router, desktop, screenLookups } = harness({
+      screenUrl: "http://127.0.0.1:49152/embed.html",
+    });
+    await call(router.computer.takeover, { botId: "bot-1" }, { context: { actor: owner } });
+
+    const status = await call(
+      router.computer.status,
+      { botId: "bot-1" },
+      { context: { actor: owner } },
+    );
+
+    expect(status.screenUrl).toContain("#password=vnc_secret");
+    expect(screenLookups()).toBeGreaterThan(0);
+    expect(desktop.screenUrl).toBe("http://127.0.0.1:49152/embed.html");
+    expect(JSON.stringify(desktop)).not.toContain("vnc_secret");
   });
 
   it("refuses the dedicated screenUrl RPC until this actor holds the lease", async () => {
@@ -413,7 +454,7 @@ describe("computer.status", () => {
   });
 
   it("stops reporting a lease that already expired", async () => {
-    const { router, desktop } = harness({
+    const { router, desktop, screenRevocations } = harness({
       controlHolder: "user",
       controlLeaseId: "ctl_old",
       controlLeaseUserId: "user-1",
@@ -428,6 +469,7 @@ describe("computer.status", () => {
     expect(status.controlHolder).toBe("bot");
     expect(status.controlLeaseExpiresAt).toBeNull();
     expect(desktop.controlHolder).toBe("bot");
+    expect(screenRevocations()).toBe(1);
   });
 
   it("reports the deadline while the lease is live", async () => {
@@ -458,5 +500,15 @@ describe("computer.release", () => {
     await call(router.computer.release, { botId: "bot-1" }, { context: { actor: owner } });
     expect(desktop.controlHolder).toBe("bot");
     expect(desktop.controlLeaseUserId).toBeNull();
+  });
+
+  it("revokes the live Docker screen as soon as its holder releases control", async () => {
+    const { router, desktop, screenRevocations } = harness();
+    await call(router.computer.takeover, { botId: "bot-1" }, { context: { actor: owner } });
+
+    await call(router.computer.release, { botId: "bot-1" }, { context: { actor: owner } });
+
+    expect(screenRevocations()).toBe(1);
+    expect(desktop.screenUrl).toBeNull();
   });
 });

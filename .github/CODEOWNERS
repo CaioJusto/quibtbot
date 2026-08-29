@@ -1,0 +1,14 @@
+/.github/ @CaioJusto
+/.github/dependabot.yml @CaioJusto
+/apps/api/ @CaioJusto
+/apps/web/src/server.ts @CaioJusto
+/apps/web/src/node-screen-proxy.ts @CaioJusto
+/infra/ @CaioJusto
+/packages/auth/ @CaioJusto
+/packages/db/prisma/migrations/ @CaioJusto
+/scripts/ @CaioJusto
+/patches/ @CaioJusto
+/package.json @CaioJusto
+/pnpm-lock.yaml @CaioJusto
+/.npmrc @CaioJusto
+/pnpm-workspace.yaml @CaioJusto

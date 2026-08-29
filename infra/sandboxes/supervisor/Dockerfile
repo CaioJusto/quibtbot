@@ -1,4 +1,4 @@
-FROM node:22-bookworm-slim
+FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5
 # Set by the release workflow — tagged ghcr.io/quibt/quibt-supervisor:${RELEASE_VERSION},
 # the same version as quibt-computer and quibt-stack (scripts/release-version.mjs).
 ARG RELEASE_VERSION=0.0.0-dev

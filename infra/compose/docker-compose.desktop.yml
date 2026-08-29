@@ -111,12 +111,13 @@ services:
 
   web:
     image: ghcr.io/quibt/quibt-stack:${QUIBT_STACK_VERSION:?}
-    command: ["pnpm", "--filter", "@quibt/web", "preview", "--host", "0.0.0.0", "--port", "5173"]
+    command: ["pnpm", "--filter", "@quibt/web", "start"]
     env_file:
       - ${INSTALL_ENV_FILE:?}
     environment:
-      # O `vite preview` também decide pelo NODE_ENV se aceita um segredo de exemplo.
       NODE_ENV: production
+      WEB_HOST: 0.0.0.0
+      WEB_PORT: "5173"
       API_PROXY_TARGET: http://api:3100
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?}
       WEB_ORIGIN: ${WEB_ORIGIN:?}
@@ -128,6 +129,11 @@ services:
       # QUIBT_WEB_BIND_HOST=0.0.0.0 para aceitar acesso remoto explicitamente.
       - "${QUIBT_WEB_BIND_HOST:-127.0.0.1}:5173:5173"
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5173/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
     depends_on:
       api:
         condition: service_healthy
@@ -156,4 +162,4 @@ services:
     restart: unless-stopped
     depends_on:
       web:
-        condition: service_started
+        condition: service_healthy

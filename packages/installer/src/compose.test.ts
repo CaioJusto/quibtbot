@@ -1,7 +1,13 @@
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { composeServices, readComposeFile } from "../../testkit/src/compose-config.js";
-import { allQuibtImages, composeInvocation, DESKTOP_SIGNING, INSTALL_RELEASE } from "./compose.js";
+import {
+  allQuibtImages,
+  composeInvocation,
+  DESKTOP_SIGNING,
+  INSTALL_RELEASE,
+  stackUpInvocation,
+} from "./compose.js";
 
 const desktopComposeFile = path.resolve("infra/compose/docker-compose.desktop.yml");
 const manifest = readComposeFile(desktopComposeFile);
@@ -55,6 +61,31 @@ describe("composeInvocation", () => {
       "-d",
       "--build",
     ]);
+  });
+
+  it("restarts explicit app services and lets the readiness probe own the wait", () => {
+    expect(stackUpInvocation("packaged", composeFile, envFile)).toEqual([
+      ...base,
+      "up",
+      "-d",
+      "supervisor",
+      "api",
+      "worker",
+      "web",
+      "computer",
+    ]);
+    expect(stackUpInvocation("source", composeFile, envFile)).toEqual([
+      ...base,
+      "up",
+      "-d",
+      "--build",
+      "supervisor",
+      "api",
+      "worker",
+      "web",
+      "computer",
+    ]);
+    expect(stackUpInvocation("packaged", composeFile, envFile)).not.toContain("--wait");
   });
 
   it("pulls images before waiting in packaged mode", () => {

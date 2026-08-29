@@ -456,10 +456,33 @@ export class DockerSandboxProvider implements SandboxProvider {
     }
     const body = (await res.json()) as { screenUrl?: string };
     return {
-      url: body.screenUrl ?? this.url(`/computers/${computer.id}/screen`),
+      url: body.screenUrl ?? null,
       mimeType: "text/html",
+      ...(body.screenUrl
+        ? {}
+        : { reason: "O supervisor não devolveu um endereço seguro para a tela." }),
       close: async () => undefined,
     };
+  }
+
+  async revokeScreen(computer: ComputerRef, context: AdapterContext): Promise<void> {
+    const res = await this.call(
+      "revoke screen",
+      `/computers/${computer.id}/screen/revoke`,
+      {
+        method: "POST",
+        headers: {
+          ...this.headers(context, computerIdentity(computer, context)),
+          ...this.displayHeader(computer),
+        },
+        signal: requestSignal(context.signal),
+      },
+      context.signal,
+    );
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      throw new SupervisorRequestError("revoke screen", res.status, detail);
+    }
   }
 
   /**

@@ -1,0 +1,71 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Sao_Paulo
+    open-pull-requests-limit: 10
+    groups:
+      expo-react-native:
+        patterns:
+          - "@expo*"
+          - "expo*"
+          - "@react-native*"
+          - "react-native*"
+      development-tooling:
+        dependency-type: development
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:30"
+      timezone: America/Sao_Paulo
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: docker
+    directory: /infra/compose
+    schedule:
+      interval: weekly
+      day: monday
+      time: "10:00"
+      timezone: America/Sao_Paulo
+
+  - package-ecosystem: docker
+    directory: /infra/sandboxes/computer
+    schedule:
+      interval: weekly
+      day: monday
+      time: "10:15"
+      timezone: America/Sao_Paulo
+
+  - package-ecosystem: docker
+    directory: /infra/sandboxes/supervisor
+    schedule:
+      interval: weekly
+      day: monday
+      time: "10:30"
+      timezone: America/Sao_Paulo
+
+  - package-ecosystem: docker
+    directory: /infra/release
+    schedule:
+      interval: weekly
+      day: monday
+      time: "10:45"
+      timezone: America/Sao_Paulo
+
+  - package-ecosystem: docker
+    directory: /infra/sandboxes/desktop
+    schedule:
+      interval: weekly
+      day: monday
+      time: "11:00"
+      timezone: America/Sao_Paulo

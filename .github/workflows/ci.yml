@@ -1,6 +1,9 @@
 name: ci
 on:
+  # Release tags have their own signed/publishing workflow. Keeping this trigger scoped
+  # to branches prevents the full CI graph from running twice for the same release SHA.
   push:
+    branches: ["**"]
   pull_request:
   # The Docker smoke is too slow for every push, so it also has a nightly run and a manual one.
   schedule:
@@ -20,26 +23,28 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
-      - run: pnpm install
+      - run: pnpm install --frozen-lockfile
       - run: pnpm lint
+      - run: pnpm audit --audit-level moderate
+      - run: pnpm lint:actions
 
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
-      - run: pnpm install
+      - run: pnpm install --frozen-lockfile
       - run: pnpm db:generate
         env:
           DATABASE_URL: postgres://quibt:quibt@127.0.0.1:5433/quibt
@@ -50,13 +55,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
-      - run: pnpm install
+      - run: pnpm install --frozen-lockfile
       - run: pnpm db:generate
         env:
           DATABASE_URL: postgres://quibt:quibt@127.0.0.1:5433/quibt
@@ -69,19 +74,41 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
-      - run: pnpm install
+      - run: pnpm install --frozen-lockfile
       - run: pnpm db:generate
         env:
           DATABASE_URL: postgres://quibt:quibt@127.0.0.1:5433/quibt
       - run: pnpm --filter @quibt/mobile check
       - run: pnpm --filter @quibt/www build
       - run: pnpm verify:installer
+
+  # The patched SSH transport is native code. TypeScript and Expo config tests cannot
+  # prove that Gradle can compile the generated project, so every branch build does.
+  mobile-native-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      CI: "1"
+      GRADLE_OPTS: -Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx4g
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Generate the Android native project
+        run: pnpm --filter @quibt/mobile exec expo prebuild --platform android --clean --no-install
+      - name: Compile the patched native application
+        working-directory: apps/mobile/android
+        run: ./gradlew assembleDebug --stacktrace
 
   migrations-and-journeys:
     runs-on: ubuntu-latest
@@ -103,13 +130,13 @@ jobs:
     env:
       DATABASE_URL: postgres://quibt:quibt@127.0.0.1:5432/quibt
     steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
-      - run: pnpm install
+      - run: pnpm install --frozen-lockfile
       - run: pnpm db:generate
       - run: pnpm db:migrate
       # Sequential: the lease suite exercises the global reaper, which would otherwise
@@ -151,7 +178,7 @@ jobs:
           --health-retries 10
     env:
       DATABASE_URL: postgres://quibt:quibt@127.0.0.1:5432/quibt
-      NODE_ENV: development
+      NODE_ENV: production
       BETTER_AUTH_SECRET: ci-e2e-better-auth-secret-0123456789abcdef
       ENCRYPTION_KEY: ci-e2e-encryption-key-0123456789abcdef0123
       # O primeiro dono entra por convite de uso único: o teste emite o convite pela
@@ -172,18 +199,18 @@ jobs:
       SANDBOX_PROVIDER: fake
       WAKEUP_DRIVER: graphile
     steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
-      - run: pnpm install
+      - run: pnpm install --frozen-lockfile
       - run: pnpm db:generate
       - run: pnpm db:migrate
       - run: pnpm --filter @quibt/web exec playwright install --with-deps chromium
-      # Playwright only starts Vite (its webServer runs in apps/web); the API and the worker
-      # are the halves that make the journey durable, so they are started here.
+      # Playwright starts the built production web server (its webServer runs in apps/web);
+      # the API and worker are the other halves that make the journey durable.
       - name: Start API and worker
         run: |
           pnpm --filter @quibt/api start > /tmp/api.log 2>&1 &
@@ -202,7 +229,7 @@ jobs:
       - if: failure()
         run: tail -n 200 /tmp/api.log /tmp/worker.log
       - if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: playwright-report
           path: playwright-report
@@ -212,13 +239,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
-      - run: pnpm install
+      - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @quibt/desktop build
       # electron-builder --dir produces an unpacked app (out/linux-unpacked here on the
       # ubuntu-latest runner) without a signing identity, so it runs on every push. The full
@@ -245,13 +272,13 @@ jobs:
       SMOKE_BOT_ID: cismokebot
       DATA_DIR: ./data
     steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
-      - run: pnpm install
+      - run: pnpm install --frozen-lockfile
       - run: pnpm sandbox:build
       # The computer runs as uid 1000 and the runner is uid 1001, so the bind-mounted home
       # has to be writable by both before the graphical session starts.
@@ -278,13 +305,13 @@ jobs:
       COMPOSE_FILE: infra/compose/docker-compose.desktop.yml
       INSTALL_ROOT: /tmp/quibt-vps-smoke
     steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
-      - run: pnpm install
+      - run: pnpm install --frozen-lockfile
       - name: Generate a fresh install environment
         run: |
           set -euo pipefail

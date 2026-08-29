@@ -31,7 +31,7 @@ Details and the non-technical walkthrough: [docs/computers.md](docs/computers.md
 
 ## Run locally
 
-Node.js >= 22.19, pnpm 9, Docker Desktop.
+Node.js >= 22.19, pnpm 10.34.5, Docker Desktop.
 
 ```bash
 cp .env.example .env

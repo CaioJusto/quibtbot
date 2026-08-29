@@ -18,6 +18,7 @@ import {
   loadFolderGrantsByUser,
   PiAgentRuntime,
   PiOAuthLogins,
+  revokeControlScreenOrSchedule,
   ScriptedAgentRuntime,
   sandboxOptionsFromSettings,
   sleepComputerIfIdle,
@@ -301,7 +302,20 @@ export async function createApp(overrides: CreateAppOverrides = {}): Promise<App
       },
       "control.reap": async (payload) => {
         const botId = payload.botId ? String(payload.botId) : undefined;
-        await reapControl({ db: prisma, wakeup }, botId ? { botId } : {});
+        const released = await reapControl({ db: prisma, wakeup }, botId ? { botId } : {});
+        for (const releasedBotId of released) {
+          await revokeControlScreenOrSchedule({ prisma, sandbox, wakeup }, releasedBotId);
+        }
+      },
+      "control.screen.revoke": async (payload) => {
+        const botId = String(payload.botId ?? "");
+        if (!botId) return;
+        const attempt = Number(payload.attempt ?? 1);
+        await revokeControlScreenOrSchedule(
+          { prisma, sandbox, wakeup },
+          botId,
+          Number.isFinite(attempt) ? attempt : 1,
+        );
       },
     });
   }

@@ -50,6 +50,15 @@ describe("embeddableScreenUrl", () => {
     ).toBe("http://192.168.1.20:16080/embed.html");
   });
 
+  it("preserves the VNC credential fragment while rewriting the host", () => {
+    expect(
+      embeddableScreenUrl(
+        "http://127.0.0.1:16080/embed.html?view_only=false#password=vnc_secret",
+        "http://10.0.2.2:3100",
+      ),
+    ).toBe("http://10.0.2.2:16080/embed.html?view_only=false#password=vnc_secret");
+  });
+
   it("returns null when there is no screen", () => {
     expect(embeddableScreenUrl(null, "http://127.0.0.1:3100")).toBeNull();
   });

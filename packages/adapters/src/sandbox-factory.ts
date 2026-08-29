@@ -261,6 +261,9 @@ export function createRoutingSandboxProvider(deps: SandboxRouterDeps): RoutingSa
     connectScreen(computer, request, context) {
       return forRef(computer).connectScreen(computer, request, context);
     },
+    async revokeScreen(computer, context) {
+      await forRef(computer).revokeScreen?.(computer, context);
+    },
     sendInput(computer, input, lease, context) {
       return forRef(computer).sendInput(computer, input, lease, context);
     },

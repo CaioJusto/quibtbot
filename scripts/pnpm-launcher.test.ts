@@ -55,7 +55,7 @@ describe("onde achar o pnpm", () => {
     expect(lines[0]).toContain("pnpm exec vitest");
     expect(lines[0]).toContain("spawn pnpm ENOENT");
     expect(lines[1]).toContain("corepack enable pnpm");
-    expect(lines[1]).toContain("pnpm@9");
+    expect(lines[1]).toContain("pnpm@10.34.5");
   });
 });
 
@@ -174,7 +174,7 @@ describe("dev-desktop: startPnpm", () => {
     children[0]?.emit("error", enoent);
     children[1]?.emit("error", enoent);
     expect(failures).toHaveLength(1);
-    expect(failures[0]?.[1]).toContain("npm install -g pnpm@9");
+    expect(failures[0]?.[1]).toContain("npm install -g pnpm@10.34.5");
   });
 
   it("repassa a saída do filho para quem chamou", () => {

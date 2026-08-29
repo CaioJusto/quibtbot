@@ -103,8 +103,8 @@ export function postgresUpInvocation(
 }
 
 /**
- * Religa um stack já instalado: todos os serviços de uma vez, esperando ficarem
- * saudáveis. Numa instalação pública o profile entra para o Caddy voltar junto.
+ * Religa um stack já instalado: todos os serviços de uma vez; a sondagem HTTP logo
+ * depois é a barreira de saúde. Numa instalação pública o profile acorda o Caddy.
  */
 export function stackUpInvocation(
   mode: ComposeMode,
@@ -115,8 +115,12 @@ export function stackUpInvocation(
   const base = options.publicAccess
     ? [...composeBaseArgs(composeFile, envFile), "--profile", PUBLIC_PROFILE]
     : composeBaseArgs(composeFile, envFile);
-  if (mode === "source") return [...base, "up", "-d", "--build", "--wait"];
-  return [...base, "up", "-d", "--wait"];
+  const services = options.publicAccess ? [...APP_SERVICES, "caddy"] : [...APP_SERVICES];
+  // The API/public readiness probe below this command is the real health gate. `computer`
+  // intentionally exits after proving the image, so a project-wide `--wait` can stall a
+  // restart even though every long-running service is already healthy.
+  if (mode === "source") return [...base, "up", "-d", "--build", ...services];
+  return [...base, "up", "-d", ...services];
 }
 
 /**

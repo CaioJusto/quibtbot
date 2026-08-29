@@ -2,6 +2,7 @@ import type { AgentHomeStore, SandboxProvider, WakeupDriver } from "@quibt/adapt
 import {
   reapExpiredLeases,
   reconcilePendingProviderCleanups,
+  revokeControlScreenOrSchedule,
   scheduleOrphanReconcile,
   scheduleRunReap,
   sleepComputerIfIdle,
@@ -45,7 +46,26 @@ export function createWakeupHandlers(deps: WorkerHandlerDeps): WakeupHandlers {
     // computer back. Scheduled for the lease deadline by `computer.takeover`.
     "control.reap": async (payload) => {
       const botId = payload.botId ? String(payload.botId) : undefined;
-      await reapControl({ db: deps.prisma, wakeup: deps.wakeup }, botId ? { botId } : {});
+      const released = await reapControl(
+        { db: deps.prisma, wakeup: deps.wakeup },
+        botId ? { botId } : {},
+      );
+      for (const releasedBotId of released) {
+        await revokeControlScreenOrSchedule(
+          { prisma: deps.prisma, sandbox: deps.sandbox, wakeup: deps.wakeup },
+          releasedBotId,
+        );
+      }
+    },
+    "control.screen.revoke": async (payload) => {
+      const botId = String(payload.botId ?? "");
+      if (!botId) return;
+      const attempt = Number(payload.attempt ?? 1);
+      await revokeControlScreenOrSchedule(
+        { prisma: deps.prisma, sandbox: deps.sandbox, wakeup: deps.wakeup },
+        botId,
+        Number.isFinite(attempt) ? attempt : 1,
+      );
     },
     // A worker that dies mid-run leaves the row `running` until the Graphile lock expires
     // hours later. The reaper requeues those runs and always reschedules itself.

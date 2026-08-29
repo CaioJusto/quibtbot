@@ -65,10 +65,14 @@ describe("chaves separadas por domínio", () => {
   });
 
   it("o web deriva as mesmas chaves que a API", () => {
-    // O `vite.config.ts` não pode importar `@quibt/core` nem a API (ver o comentário em
-    // `apps/web/src/build-config.ts`), então a derivação é espelhada lá. Se um lado mudar
-    // de rótulo sem o outro, a tela fica preta e o auto-login local para de valer.
-    const config = readFileSync(path.join(import.meta.dirname, "../../web/vite.config.ts"), "utf8");
+    // O servidor web não pode importar `@quibt/core` nem a API (ver o comentário em
+    // `apps/web/src/build-config.ts`), então a derivação é espelhada em `server-keys` e
+    // compartilhada pelo Vite e pelo servidor de produção. Se um lado mudar de rótulo sem
+    // o outro, a tela fica preta e o auto-login local para de valer.
+    const config = readFileSync(
+      path.join(import.meta.dirname, "../../web/src/server-keys.ts"),
+      "utf8",
+    );
     expect(config).toContain('"quibt-bot/screen-capability/v1"');
     expect(config).toContain('"quibt-bot/internal-proxy-proof/v1"');
     expect(config).toContain('createHmac("sha256", authSecret).update(label).digest("base64url")');

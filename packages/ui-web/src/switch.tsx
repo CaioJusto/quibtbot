@@ -1,13 +1,19 @@
 import * as SwitchPrimitive from "@radix-ui/react-switch";
 import { cn } from "./lib/utils.js";
 
+export type SwitchProps = SwitchPrimitive.SwitchProps & {
+  /** Replaces the default thumb utilities when a product surface owns its geometry. */
+  thumbClassName?: string;
+};
+
 /** iOS-style toggle: grey when off, system green when on. */
 export function Switch({
   checked,
   onCheckedChange,
   className,
+  thumbClassName,
   ...props
-}: SwitchPrimitive.SwitchProps) {
+}: SwitchProps) {
   return (
     <SwitchPrimitive.Root
       checked={checked}
@@ -18,7 +24,12 @@ export function Switch({
       )}
       {...props}
     >
-      <SwitchPrimitive.Thumb className="block h-[27px] w-[27px] translate-x-[2px] rounded-full bg-white shadow-[0_2px_5px_rgba(0,0,0,.35)] transition-transform data-[state=checked]:translate-x-[22px]" />
+      <SwitchPrimitive.Thumb
+        className={
+          thumbClassName ??
+          "block h-[27px] w-[27px] translate-x-[2px] rounded-full bg-white shadow-[0_2px_5px_rgba(0,0,0,.35)] transition-transform data-[state=checked]:translate-x-[22px]"
+        }
+      />
     </SwitchPrimitive.Root>
   );
 }

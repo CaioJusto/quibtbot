@@ -1490,25 +1490,30 @@ body,
   height: 22px;
   overflow: hidden;
   border: 0;
+  border-radius: 999px;
   background: var(--qb-hairline);
   padding: 0;
+  transition: background-color 160ms ease;
 }
 
 .qb-grok-switch[data-state="checked"] {
   background: var(--qb-ink-strong);
 }
 
-.qb-grok-switch > span {
+.qb-grok-switch__thumb {
+  display: block;
+  flex: 0 0 auto;
   width: 18px;
   height: 18px;
-  transform: none;
-  translate: 2px 0;
+  border-radius: 999px;
+  background: #fff;
+  transform: translateX(2px);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 160ms ease;
 }
 
-.qb-grok-switch > span[data-state="checked"] {
-  transform: none;
-  translate: 18px 0;
+.qb-grok-switch__thumb[data-state="checked"] {
+  transform: translateX(18px);
 }
 
 .qb-routine__save {

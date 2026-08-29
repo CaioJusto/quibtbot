@@ -19,8 +19,9 @@ const context: AdapterContext & { userId: string } = {
   signal: new AbortController().signal,
 };
 
-const OLD_SCREEN = "http://127.0.0.1:32801/embed.html?password=old";
+const OLD_SCREEN = "http://127.0.0.1:32801/embed.html";
 const NEW_SCREEN = "http://127.0.0.1:32901/embed.html?password=new";
+const NEW_SCREEN_PERSISTED = "http://127.0.0.1:32901/embed.html";
 
 type StartOutcome = "ok" | "route-missing" | "docker-down" | "other-id";
 
@@ -164,7 +165,7 @@ describe("container Exited após um reboot", () => {
       expect.objectContaining({ data: expect.objectContaining({ state: "stopped" }) }),
     );
     expect(ref.screenUrl).toBe(NEW_SCREEN);
-    expect(session.screenUrl).toBe(NEW_SCREEN);
+    expect(session.screenUrl).toBe(NEW_SCREEN_PERSISTED);
     expect(await runCommand(sandbox, ref)).toEqual([
       { type: "stdout", data: "ok\n" },
       { type: "exit", code: 0 },
@@ -223,15 +224,15 @@ describe("container Exited após um reboot", () => {
     expect(session.screenUrl).toBeNull();
   });
 
-  it("sem religar, uma tela que não responde ainda deixa a de antes de pé", async () => {
-    // Este boot não religou nada: o container já estava ligado e a URL guardada continua
-    // valendo. Falhar aqui tiraria a tela de quem está com ela aberta.
+  it("sem religar, uma tela que não responde não ressuscita uma URL sem credencial", async () => {
+    // A rota persistida identifica a tela, mas a credencial VNC é transitória e só existe
+    // na resposta viva do provedor. Reaproveitar a rota limpa daria uma falsa tela ativa.
     const { deps, session, container } = harness("ok", "no-screen");
     container.running = true;
 
     const ref = await bootComputer(deps, "bot-b", context);
 
-    expect(ref.screenUrl).toBe(OLD_SCREEN);
+    expect(ref.screenUrl).toBeUndefined();
     expect(session.screenUrl).toBe(OLD_SCREEN);
   });
 

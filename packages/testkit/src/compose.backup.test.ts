@@ -1,5 +1,6 @@
-import { execFileSync, execSync } from "node:child_process";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -41,39 +42,46 @@ describeBackup("compose backup and restore", () => {
     expect(existsSync(backupScript)).toBe(true);
     expect(existsSync(restoreScript)).toBe(true);
     const stamp = `verify-${Date.now()}`;
-    execSync(`${backupScript} ${stamp}`, { stdio: "pipe", timeout: 60_000 });
+    const restoreDatabase = `quibt_restore_${Date.now()}_${process.pid}`;
+    const fixtureRoot = mkdtempSync(path.join(tmpdir(), "quibt-backup-fixture-"));
+    mkdirSync(path.join(fixtureRoot, "data"));
+    writeFileSync(path.join(fixtureRoot, "data", "probe.txt"), "backup probe\n");
     const dump = path.resolve("backups", stamp, "quibt.sql");
-    expect(existsSync(dump)).toBe(true);
-    const sql = readFileSync(dump, "utf8");
-    expect(sql).toMatch(/CREATE TABLE|CREATE TABLE IF NOT EXISTS/i);
-    expect(sql.toLowerCase()).toContain("bots");
-    expect(sql).not.toMatch(/OPENROUTER_API_KEY|sk-or-v1-/);
+    const dockerCompose = ["compose", "-f", composeFile, "exec", "-T", "postgres"];
+    const postgresSql = (sql: string, database = "postgres") =>
+      execFileSync("docker", [...dockerCompose, "psql", "-U", "quibt", "-d", database, "-c", sql], {
+        encoding: "utf8",
+        timeout: 30_000,
+      });
+    try {
+      execFileSync(backupScript, [stamp], {
+        env: { ...process.env, QUIBT_BACKUP_ROOT: fixtureRoot },
+        stdio: "pipe",
+        timeout: 60_000,
+      });
+      expect(existsSync(dump)).toBe(true);
+      const sql = readFileSync(dump, "utf8");
+      expect(sql).toMatch(/CREATE TABLE|CREATE TABLE IF NOT EXISTS/i);
+      expect(sql.toLowerCase()).toContain("bots");
+      expect(sql).not.toMatch(/OPENROUTER_API_KEY|sk-or-v1-/);
 
-    execSync(
-      `docker compose -f ${composeFile} exec -T postgres psql -U quibt -d postgres -c "DROP DATABASE IF EXISTS quibt_restore_test"`,
-      { stdio: "pipe", timeout: 20_000 },
-    );
-    execSync(
-      `docker compose -f ${composeFile} exec -T postgres psql -U quibt -d postgres -c "CREATE DATABASE quibt_restore_test"`,
-      { stdio: "pipe", timeout: 20_000 },
-    );
-    execSync(
-      `docker compose -f ${composeFile} exec -T postgres psql -U quibt -d quibt_restore_test`,
-      {
+      postgresSql(`DROP DATABASE IF EXISTS "${restoreDatabase}"`);
+      postgresSql(`CREATE DATABASE "${restoreDatabase}"`);
+      execFileSync("docker", [...dockerCompose, "psql", "-U", "quibt", "-d", restoreDatabase], {
         input: sql,
         stdio: ["pipe", "pipe", "pipe"],
         timeout: 60_000,
-      },
-    );
-    const tables = execSync(
-      `docker compose -f ${composeFile} exec -T postgres psql -U quibt -d quibt_restore_test -c "\\dt"`,
-      { encoding: "utf8", timeout: 20_000 },
-    );
-    expect(tables).toMatch(/bots/);
-    execSync(
-      `docker compose -f ${composeFile} exec -T postgres psql -U quibt -d postgres -c "DROP DATABASE quibt_restore_test"`,
-      { stdio: "pipe", timeout: 20_000 },
-    );
-    rmSync(path.resolve("backups", stamp), { recursive: true, force: true });
-  }, 90_000);
+      });
+      const tables = postgresSql("\\dt", restoreDatabase);
+      expect(tables).toMatch(/bots/);
+    } finally {
+      try {
+        postgresSql(`DROP DATABASE IF EXISTS "${restoreDatabase}"`);
+      } catch {
+        // The assertion retains the primary failure; the unique side database is disposable.
+      }
+      rmSync(path.resolve("backups", stamp), { recursive: true, force: true });
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  }, 120_000);
 });

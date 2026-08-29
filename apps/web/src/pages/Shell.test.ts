@@ -7,6 +7,7 @@ const root = path.dirname(fileURLToPath(import.meta.url));
 const shell = readFileSync(path.join(root, "Shell.tsx"), "utf8");
 const inbox = readFileSync(path.join(root, "Inbox.tsx"), "utf8");
 const preview = readFileSync(path.join(root, "ComputerPreview.tsx"), "utf8");
+const styles = readFileSync(path.join(root, "../styles.css"), "utf8");
 
 describe("dashboard copies the landing product demo", () => {
   it("uses the landing three-column chrome", () => {
@@ -106,6 +107,17 @@ describe("dashboard copies the landing product demo", () => {
     expect(shell).toContain("ComputerPreview");
     expect(preview).toContain("qb-dash__desktop");
     expect(preview).toContain("qb-dash__window");
+  });
+
+  it("renders the routine switch without depending on workspace Tailwind discovery", () => {
+    expect(shell).toContain('thumbClassName="qb-grok-switch__thumb"');
+    expect(styles).toMatch(/\.qb-grok-switch\s*\{[^}]*border-radius:\s*999px/s);
+    expect(styles).toMatch(
+      /\.qb-grok-switch__thumb\s*\{[^}]*background:\s*#fff[^}]*translateX\(2px\)/s,
+    );
+    expect(styles).toMatch(
+      /\.qb-grok-switch__thumb\[data-state="checked"\]\s*\{[^}]*translateX\(18px\)/s,
+    );
   });
 
   it("does not keep the old featured-mascot inbox", () => {

@@ -1,6 +1,7 @@
 import { Prisma, type PrismaClient } from "@quibt/db";
 import { describe, expect, it, vi } from "vitest";
-import { type ExecutorDeps, recordEffect } from "./executor.js";
+import { COMPOSIO_UNKNOWN_OUTCOME } from "./composio-connector.js";
+import { completeEffect, type ExecutorDeps, recordEffect } from "./executor.js";
 
 interface EffectRow {
   id: string;
@@ -68,25 +69,28 @@ describe("recordEffect", () => {
     expect(rows[0]).toMatchObject({ status: "intended", idempotencyKey: "run-1:call-1" });
   });
 
-  it("replays a completed effect instead of running the tool twice", async () => {
-    const { deps, rows, events } = effectStore([
-      {
-        id: "eff-1",
-        workspaceId: "ws-1",
-        runId: "run-1",
-        kind: "shell",
-        idempotencyKey: "run-1:call-1",
-        status: "completed",
-        request: { command: "ls" },
-        result: { stdout: "ok" },
-      },
-    ]);
-    const applied = await recordEffect(deps, run, "shell", "run-1:call-1", { command: "ls" });
-    expect(applied.duplicate).toBe(true);
-    expect(applied.effect.result).toEqual({ stdout: "ok" });
-    expect(rows).toHaveLength(1);
-    expect(events).toHaveLength(1);
-  });
+  it.each(["completed", "unknown"])(
+    "replays a %s effect instead of running the tool twice",
+    async (status) => {
+      const { deps, rows, events } = effectStore([
+        {
+          id: "eff-1",
+          workspaceId: "ws-1",
+          runId: "run-1",
+          kind: "shell",
+          idempotencyKey: "run-1:call-1",
+          status,
+          request: { command: "ls" },
+          result: { stdout: "ok" },
+        },
+      ]);
+      const applied = await recordEffect(deps, run, "shell", "run-1:call-1", { command: "ls" });
+      expect(applied.duplicate).toBe(true);
+      expect(applied.effect.result).toEqual({ stdout: "ok" });
+      expect(rows).toHaveLength(1);
+      expect(events).toHaveLength(1);
+    },
+  );
 
   it.each(["intended", "failed"])(
     "runs the tool again when the previous attempt was %s",
@@ -115,4 +119,31 @@ describe("recordEffect", () => {
       expect(events).toEqual([]);
     },
   );
+
+  it("persists a Composio unknown outcome as unknown, never as success or failure", async () => {
+    const { deps, rows } = effectStore([
+      {
+        id: "eff-1",
+        workspaceId: "ws-1",
+        runId: "run-1",
+        kind: "GMAIL_SEND_EMAIL",
+        idempotencyKey: "run-1:call-1",
+        status: "intended",
+        request: { to: "person@example.com" },
+        result: null,
+      },
+    ]);
+    const result = {
+      outcome: COMPOSIO_UNKNOWN_OUTCOME,
+      status: "unknown" as const,
+      retry: false as const,
+      tool: "GMAIL_SEND_EMAIL",
+      executionId: "run-1:call-1",
+      message: "A ação pode ter acontecido; não repita automaticamente.",
+    };
+
+    await completeEffect(deps, "eff-1", result);
+
+    expect(rows[0]).toMatchObject({ status: "unknown", result });
+  });
 });

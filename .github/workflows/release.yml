@@ -39,13 +39,13 @@ jobs:
     outputs:
       release: ${{ steps.release.outputs.release }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
-      - run: pnpm install
+      - run: pnpm install --frozen-lockfile
       # The tag is the only source of truth for the release version. It must be a clean
       # semver (scripts/release-version.mjs rejects "-dirty"/"v"-prefixed/non-semver input)
       # and it must equal the version every package.json was pinned to in Task 3 — one
@@ -79,7 +79,6 @@ jobs:
     needs: validate
     permissions:
       contents: read
-      packages: write
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -89,10 +88,10 @@ jobs:
       supervisor_digest: ${{ steps.supervisor.outputs.digest }}
       stack_digest: ${{ steps.stack.outputs.digest }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           # The repository lives under CaioJusto while the packages live under Quibt.
@@ -101,33 +100,61 @@ jobs:
           password: ${{ secrets.GHCR_WRITE_TOKEN }}
       - name: Build and push quibt-computer
         id: computer
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: infra/sandboxes/computer
           push: true
           platforms: linux/amd64,linux/arm64
+          provenance: mode=max
+          sbom: true
           tags: ghcr.io/quibt/quibt-computer:${{ env.RELEASE }}
           build-args: RELEASE_VERSION=${{ env.RELEASE }}
       - name: Build and push quibt-supervisor
         id: supervisor
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: infra/sandboxes/supervisor/Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
+          provenance: mode=max
+          sbom: true
           tags: ghcr.io/quibt/quibt-supervisor:${{ env.RELEASE }}
           build-args: RELEASE_VERSION=${{ env.RELEASE }}
       - name: Build and push quibt-stack
         id: stack
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: infra/compose/Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
+          provenance: mode=max
+          sbom: true
           tags: ghcr.io/quibt/quibt-stack:${{ env.RELEASE }}
           build-args: RELEASE_VERSION=${{ env.RELEASE }}
+      - name: Verify image SBOM and provenance attestations
+        env:
+          COMPUTER_REF: ghcr.io/quibt/quibt-computer@${{ steps.computer.outputs.digest }}
+          SUPERVISOR_REF: ghcr.io/quibt/quibt-supervisor@${{ steps.supervisor.outputs.digest }}
+          STACK_REF: ghcr.io/quibt/quibt-stack@${{ steps.stack.outputs.digest }}
+        run: |
+          set -euo pipefail
+          verify_attestations() {
+            local ref="$1"
+            local platform
+            for platform in linux/amd64 linux/arm64; do
+              docker buildx imagetools inspect "$ref" \
+                --format "{{ json (index .SBOM \"$platform\").SPDX }}" \
+                | jq -e 'type == "object" and .SPDXID == "SPDXRef-DOCUMENT"' >/dev/null
+              docker buildx imagetools inspect "$ref" \
+                --format "{{ json (index .Provenance \"$platform\").SLSA }}" \
+                | jq -e 'type == "object" and length > 0' >/dev/null
+            done
+          }
+          verify_attestations "$COMPUTER_REF"
+          verify_attestations "$SUPERVISOR_REF"
+          verify_attestations "$STACK_REF"
 
   # 3. Smoke the image-only compose file (infra/compose/docker-compose.desktop.yml has no
   # `build:` blocks — every service is a published image) using exactly the digests `images`
@@ -141,18 +168,13 @@ jobs:
       RELEASE: ${{ needs.validate.outputs.release }}
       COMPOSE_FILE: infra/compose/docker-compose.desktop.yml
     steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
-      - run: pnpm install
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: CaioJusto
-          password: ${{ secrets.GHCR_WRITE_TOKEN }}
+      - run: pnpm install --frozen-lockfile
       - name: Pull and re-tag the published images by digest
         run: |
           set -euo pipefail
@@ -217,13 +239,13 @@ jobs:
     env:
       RELEASE: ${{ needs.validate.outputs.release }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
-      - run: pnpm install
+      - run: pnpm install --frozen-lockfile
       - name: Pin packaged Compose images to release digests
         run: >-
           node scripts/pin-release-images.mjs
@@ -231,7 +253,7 @@ jobs:
           --supervisor "${{ needs.images.outputs.supervisor_digest }}"
           --computer "${{ needs.images.outputs.computer_digest }}"
       - run: node scripts/build-cli-binary.mjs --release "${{ env.RELEASE }}" --out dist/cli-binaries
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.name }}
           path: |
@@ -261,24 +283,24 @@ jobs:
     env:
       RELEASE: ${{ needs.validate.outputs.release }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
-      - run: pnpm install
+      - run: pnpm install --frozen-lockfile
       - name: Pin packaged Compose images to release digests
         run: >-
           node scripts/pin-release-images.mjs
           --stack "${{ needs.images.outputs.stack_digest }}"
           --supervisor "${{ needs.images.outputs.supervisor_digest }}"
           --computer "${{ needs.images.outputs.computer_digest }}"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: quibtbot-linux-x64
           path: dist/cli-binaries
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: quibtbot-linux-arm64
           path: dist/cli-binaries
@@ -341,7 +363,7 @@ jobs:
           WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
         run: node scripts/pack-desktop.mjs ${{ matrix.target }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: desktop-installer-${{ matrix.target }}
           if-no-files-found: ignore
@@ -358,7 +380,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: release-artifacts
           # docker/build-push-action uploads internal *.dockerbuild records. They are not
@@ -373,7 +395,7 @@ jobs:
             | xargs -0 sha256sum \
             | sed "s#\./[^/]*/##" > "$OUT"
           cat "$OUT"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: checksums
           path: release-artifacts/checksums-*.txt
@@ -390,7 +412,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: release-artifacts
           pattern: "!*.dockerbuild"
@@ -409,7 +431,7 @@ jobs:
           done < <(find release-artifacts -type f -name "signing-status.json" -print0)
           ls -la dist/release
       - name: Publish a draft GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ github.ref_name }}
           name: Quibt Bot ${{ needs.validate.outputs.release }}

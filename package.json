@@ -5,15 +5,17 @@
   "homepage": "https://quibt.com.br",
   "license": "Apache-2.0",
   "type": "module",
-  "packageManager": "pnpm@9.15.0",
+  "packageManager": "pnpm@10.34.5+sha512.a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e",
   "engines": {
-    "node": ">=22.19.0"
+    "node": ">=22.19.0",
+    "pnpm": ">=10.34.5 <11"
   },
   "scripts": {
     "dev": "turbo dev --filter=@quibt/api --filter=@quibt/worker --filter=@quibt/web --filter=@quibt/sandbox-supervisor",
     "build": "turbo build",
     "check": "turbo check",
     "lint": "biome check .",
+    "lint:actions": "node scripts/lint-actions.mjs",
     "format": "biome check --write .",
     "db:generate": "pnpm --filter @quibt/db generate",
     "db:migrate": "pnpm --filter @quibt/db migrate",
@@ -51,6 +53,19 @@
     "yaml": "^2.9.0"
   },
   "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/engines",
+      "cpu-features",
+      "electron-winstaller",
+      "esbuild",
+      "prisma",
+      "protobufjs",
+      "ssh2"
+    ],
+    "ignoredBuiltDependencies": [
+      "@google/genai",
+      "onnxruntime-node"
+    ],
     "overrides": {
       "adm-zip": "0.6.0",
       "deepmerge-ts": "8.0.2",

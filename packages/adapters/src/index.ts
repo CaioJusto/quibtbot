@@ -16,6 +16,7 @@ export * from "./computer-boot-provision.js";
 export * from "./computer-idle.js";
 export * from "./computer-probe.js";
 export * from "./control-lease-lifecycle.js";
+export * from "./control-screen-revocation.js";
 export * from "./desktop-sandbox.js";
 export * from "./destination-emulator.js";
 export * from "./docker-sandbox.js";

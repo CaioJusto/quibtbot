@@ -17,7 +17,9 @@ import {
   MAX_WORKSPACE_SESSIONS,
   resolveScreenUrl,
   type SandboxInput,
+  screenPortPolicyMatches,
   sessionPorts,
+  shouldPublishScreenPorts,
   WORKSPACE_RESTART_POLICY,
   workspaceDesktopPath,
   workspaceHomePath,
@@ -192,6 +194,7 @@ app.post("/computers", async (c) => {
     await hardenDesktopRoot(serviceDesktopPath);
     const homePath = hostHomePath(serviceHomePath, runtimeInfo);
     const desktopPath = hostHomePath(serviceDesktopPath, runtimeInfo);
+    const publishScreenPorts = shouldPublishScreenPorts();
     const existing = await findWorkspaceContainer(body.workspaceId);
     let container = existing;
     let resumed = Boolean(existing);
@@ -201,6 +204,7 @@ app.post("/computers", async (c) => {
       if (
         info.Image !== desired.Id ||
         (networkMode && info.HostConfig.NetworkMode !== networkMode) ||
+        !screenPortPolicyMatches(info.HostConfig.PortBindings, publishScreenPorts) ||
         !containerUsesWorkspaceHome(info.Mounts, homePath, desktopPath)
       ) {
         await existing.remove({ force: true }).catch(() => undefined);
@@ -231,6 +235,7 @@ app.post("/computers", async (c) => {
           homePath,
           desktopPath,
           networkMode,
+          publishScreenPorts,
         }),
       );
       await startWorkspaceContainer(container);
@@ -417,7 +422,7 @@ app.post("/computers/:id/exec", async (c) => {
   }
 });
 
-app.get("/computers/:id/screen", async (c) => {
+app.post("/computers/:id/screen/revoke", async (c) => {
   const id = c.req.param("id");
   try {
     const found = await managedSession(
@@ -426,11 +431,19 @@ app.get("/computers/:id/screen", async (c) => {
       c.req.header("x-quibt-workspace-id"),
     );
     const session = requireSession(found.session);
-    await ensureComputerNetworkMembers(session.workspaceId).catch(() => undefined);
-    const screenUrl = await publishedSessionUrl(found.container, session.display, found.info);
-    return c.redirect(screenUrl);
-  } catch {
-    return c.json({ error: "computer not found" }, 404);
+    await withWorkspaceSessionLock(session.workspaceId, async () => {
+      await execIn(
+        found.container,
+        ["quibt-session", "rotate", session.botId, String(session.display)],
+        sessionUser(session.display),
+      );
+      // The in-memory entry is authoritative for a running supervisor. Refresh it without
+      // returning the credential from this revocation endpoint.
+      session.screenUrl = await publishedSessionUrl(found.container, session.display);
+    });
+    return c.json({ rotated: true });
+  } catch (error) {
+    return failure(c, error, "revoke screen");
   }
 });
 

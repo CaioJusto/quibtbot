@@ -1,7 +1,7 @@
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   type BillingSnapshot,
@@ -286,25 +286,27 @@ export default function Account() {
             title="Plugins"
             onPress={() => router.push("/plugins")}
           />
-          <Row
-            icon="circle.lefthalf.filled"
-            title="Aparência"
-            detail={appearanceLabel(appearance)}
-            onPress={() => {
-              const pick = (choice: AppearanceChoice) => {
-                setAppearance(choice);
-                applyAppearance(choice);
-                void saveAppearance(choice);
-              };
-              showNativeSheet({
-                title: "Aparência",
-                actions: (["system", "light", "dark"] as const).map((choice) => ({
-                  label: appearanceLabel(choice),
-                  onPress: () => pick(choice),
-                })),
-              });
-            }}
-          />
+          {Platform.OS === "ios" ? (
+            <Row
+              icon="circle.lefthalf.filled"
+              title="Aparência"
+              detail={appearanceLabel(appearance)}
+              onPress={() => {
+                const pick = (choice: AppearanceChoice) => {
+                  setAppearance(choice);
+                  applyAppearance(choice);
+                  void saveAppearance(choice);
+                };
+                showNativeSheet({
+                  title: "Aparência",
+                  actions: (["system", "light", "dark"] as const).map((choice) => ({
+                    label: appearanceLabel(choice),
+                    onPress: () => pick(choice),
+                  })),
+                });
+              }}
+            />
+          ) : null}
           {billing?.enabled ? (
             <Row
               icon="crown"

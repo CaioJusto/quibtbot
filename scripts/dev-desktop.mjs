@@ -31,7 +31,7 @@ export function pnpmCandidates(env = process.env, platform = process.platform) {
 export function missingPnpmMessage(args, error) {
   return [
     `Não deu para rodar "pnpm ${args.join(" ")}": ${error?.message ?? "erro desconhecido"}`,
-    'Instale o pnpm 9 com "npm install -g pnpm@9", ou ligue o corepack com "corepack enable pnpm", e repita.',
+    'Instale o pnpm 10.34.5 com "npm install -g pnpm@10.34.5", ou ligue o corepack com "corepack enable pnpm", e repita.',
   ];
 }
 

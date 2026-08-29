@@ -1,7 +1,16 @@
 import { radii, tokens } from "@quibt/ui-tokens";
 import { SymbolView } from "expo-symbols";
 import { useSyncExternalStore } from "react";
-import { ActionSheetIOS, Modal, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  ActionSheetIOS,
+  Appearance,
+  Modal,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 
 export type AppSymbolName =
   | "chevron.left"
@@ -178,7 +187,7 @@ export function showNativeSheet(input: SheetInput) {
         options,
         cancelButtonIndex: options.length - 1,
         destructiveButtonIndex: destructive >= 0 ? destructive : undefined,
-        userInterfaceStyle: "light",
+        userInterfaceStyle: Appearance.getColorScheme() === "dark" ? "dark" : "light",
       },
       (index) => {
         if (index == null || index === options.length - 1) return;

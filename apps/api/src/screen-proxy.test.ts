@@ -23,6 +23,23 @@ describe("screen proxy capability", () => {
     expect(result.searchParams.get("view_only")).toBe("true");
   });
 
+  it("carries the VNC credential only in the browser fragment", () => {
+    const result = new URL(
+      addScreenProxyCapability(
+        "http://127.0.0.1:49152/embed.html#password=vnc_secret",
+        "secret",
+        "https://app.example",
+        100,
+      ),
+    );
+    expect(result.searchParams.has("password")).toBe(false);
+    expect(new URLSearchParams(result.hash.slice(1)).get("password")).toBe("vnc_secret");
+
+    const serverPath = `${result.pathname}${result.search}`;
+    expect(serverPath).not.toContain("password");
+    expect(resolveNovncTarget(serverPath, "secret", 100)?.path).toBe("/embed.html?view_only=false");
+  });
+
   it("does not modify managed-provider URLs", () => {
     const url = "https://sandbox.example/embed.html?token=provider-token";
     expect(addScreenProxyCapability(url, "secret", "https://app.example", 100)).toBe(url);

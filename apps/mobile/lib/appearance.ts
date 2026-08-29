@@ -6,7 +6,7 @@
  * faz o sistema entregar a versão certa de cada cor — e o que o seletor em Conta mexe.
  */
 import * as SecureStore from "expo-secure-store";
-import { Appearance, type ColorSchemeName } from "react-native";
+import { Appearance, type ColorSchemeName, Platform } from "react-native";
 import { type AppearanceChoice, isAppearanceChoice } from "./appearance-core";
 
 export { type AppearanceChoice, appearanceLabel, isAppearanceChoice } from "./appearance-core";
@@ -14,7 +14,9 @@ export { type AppearanceChoice, appearanceLabel, isAppearanceChoice } from "./ap
 const KEY = "quibt.appearance";
 
 export function applyAppearance(choice: AppearanceChoice): void {
-  // react-native-web não tem setColorScheme; lá fica o tema do sistema mesmo.
+  // A paleta customizada usa DynamicColorIOS. Android permanece claro até ter o mesmo
+  // sistema de cores dinâmicas; não mude só o cromo nativo e deixe 32 telas claras.
+  if (Platform.OS !== "ios") return;
   if (typeof Appearance.setColorScheme !== "function") return;
   Appearance.setColorScheme((choice === "system" ? null : choice) as ColorSchemeName);
 }
