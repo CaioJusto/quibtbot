@@ -68,6 +68,7 @@ jobs:
       # healthy but empty Postgres service to those tests.
       - run: pnpm db:migrate
       - run: pnpm lint
+      - run: pnpm verify:install-pin
       - run: pnpm check
       - run: pnpm build
       - run: pnpm verify:fast

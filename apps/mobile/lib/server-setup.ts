@@ -1,3 +1,6 @@
+import { INSTALL_SCRIPT_RAW_URL } from "@quibt/core";
+import { INSTALL_RELEASE } from "./release-artifacts.js";
+
 /**
  * Catálogo puro de onde o **servidor Quibt** fica ligado — distinto do computador dos bots.
  * E2B nunca aparece aqui: ela só isola o desktop de cada bot, não hospeda a API.
@@ -30,7 +33,6 @@ export interface ServerHostOption {
   showAdvancedSetup?: boolean;
 }
 
-const INSTALL_RELEASE = "0.2.17";
 const RELEASE_BASE = `https://github.com/CaioJusto/quibtbot/releases/download/v${INSTALL_RELEASE}`;
 
 const LOCAL_HOST: ServerHostOption = {
@@ -142,7 +144,7 @@ function unixBootstrapScript(): string {
  * arquitetura, baixa o `quibtbot` certo, confere o SHA-256 e roda `quibtbot install`. É o
  * mesmo comando que o site mostra. No Windows o caminho é o app de desktop.
  */
-export const INSTALL_SCRIPT_COMMAND = `curl -fsSL https://raw.githubusercontent.com/CaioJusto/quibtbot/v${INSTALL_RELEASE}/scripts/install.sh | QUIBT_RELEASE=${INSTALL_RELEASE} sh`;
+export const INSTALL_SCRIPT_COMMAND = `curl -fsSL ${INSTALL_SCRIPT_RAW_URL} | QUIBT_RELEASE=${INSTALL_RELEASE} sh`;
 
 /** Comando público copiável para subir o servidor Quibt no host escolhido. */
 export function bootstrapCommand(platform: BootstrapPlatform): string {

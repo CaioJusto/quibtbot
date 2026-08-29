@@ -33,6 +33,7 @@ jobs:
       - run: pnpm lint
       - run: pnpm audit --audit-level moderate
       - run: pnpm lint:actions
+      - run: pnpm verify:install-pin
 
   check:
     runs-on: ubuntu-latest

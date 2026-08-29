@@ -1,3 +1,4 @@
+import { INSTALL_SCRIPT_RAW_URL, INSTALL_SCRIPT_REVISION } from "@quibt/core";
 import { describe, expect, it } from "vitest";
 import { bootstrapCommand, INSTALL_SCRIPT_COMMAND, serverHostOptions } from "./server-setup.js";
 
@@ -9,7 +10,8 @@ describe("serverHostOptions", () => {
 
 describe("bootstrapCommand", () => {
   it("uses the canonical CLI command", () => {
-    expect(bootstrapCommand("linux")).toContain("/scripts/install.sh");
+    expect(INSTALL_SCRIPT_REVISION).toMatch(/^[a-f0-9]{40}$/);
+    expect(bootstrapCommand("linux")).toContain(INSTALL_SCRIPT_RAW_URL);
     expect(bootstrapCommand("linux")).toContain("QUIBT_SHOW_SENSITIVE=1");
   });
   it("names the release assets exactly as the release workflow publishes them", () => {
@@ -20,7 +22,7 @@ describe("bootstrapCommand", () => {
     expect(bootstrapCommand("win32")).toContain("api.github.com");
   });
   it("sends the person's own computer to the arch-detecting script the site shows", () => {
-    expect(INSTALL_SCRIPT_COMMAND).toContain("/scripts/install.sh");
+    expect(INSTALL_SCRIPT_COMMAND).toContain(INSTALL_SCRIPT_RAW_URL);
     expect(INSTALL_SCRIPT_COMMAND).toContain("QUIBT_RELEASE=");
   });
 });

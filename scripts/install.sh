@@ -1,7 +1,7 @@
 #!/bin/sh
 # Quibt Bot — instalar o servidor com um comando.
 #
-#   curl -fsSL https://raw.githubusercontent.com/CaioJusto/quibtbot/main/scripts/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/CaioJusto/quibtbot/f75c7c22b79a75cf682e3e461e6d61ea58202101/scripts/install.sh | sh
 #
 # Baixa o binário `quibtbot` da última release do GitHub para esta arquitetura, confere o
 # SHA-256 do manifesto autenticado pelo metadata da release, coloca-o no PATH e roda

@@ -195,6 +195,7 @@ describe("mobile bootstrap system journey", () => {
   }
 
   async function configureServer() {
+    const { INSTALL_SCRIPT_RAW_URL } = await import("@quibt/core");
     const { serverHostGuide, serverHostOptions, bootstrapCommand } = await import(
       "../lib/server-setup.js"
     );
@@ -207,8 +208,11 @@ describe("mobile bootstrap system journey", () => {
     expect(guide.showBootstrapCommand).toBe(true);
 
     const command = bootstrapCommand("linux");
-    expect(command).toContain('"$tmpdir/quibtbot" install');
-    expect(command).toContain("sha256sum");
+    expect(command).toContain(INSTALL_SCRIPT_RAW_URL);
+    expect(command).toContain("QUIBT_RELEASE=0.2.17");
+    expect(command).toContain("QUIBT_SHOW_SENSITIVE=1");
+    expect(command).not.toContain("/releases/latest/");
+    expect(command).not.toContain('"$tmpdir/quibtbot" install');
 
     // This is the step where a real user would point the app at the server they just
     // set up. Route it at the in-process fake origin explicitly, through the same

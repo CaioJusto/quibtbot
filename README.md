@@ -66,7 +66,7 @@ the same tag. Until it is public, use the immutable latest-production command be
 
 ```bash
 release=0.2.14
-curl -fsSL "https://raw.githubusercontent.com/CaioJusto/quibtbot/v${release}/scripts/install.sh" \
+curl -fsSL "https://raw.githubusercontent.com/CaioJusto/quibtbot/f75c7c22b79a75cf682e3e461e6d61ea58202101/scripts/install.sh" \
   | QUIBT_RELEASE="${release}" sh
 ```
 
@@ -89,7 +89,7 @@ laptop. Only a desktop using its local stack offers the LAN / user-owned HTTPS t
 
 ```bash
 release=0.2.14
-curl -fsSL "https://raw.githubusercontent.com/CaioJusto/quibtbot/v${release}/scripts/install.sh" \
+curl -fsSL "https://raw.githubusercontent.com/CaioJusto/quibtbot/f75c7c22b79a75cf682e3e461e6d61ea58202101/scripts/install.sh" \
   | QUIBT_RELEASE="${release}" QUIBT_SHOW_SENSITIVE=1 sh
 ```
 

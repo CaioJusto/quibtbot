@@ -12,6 +12,7 @@ export * from "./edition.js";
 export * from "./events.js";
 export * from "./file-kind.js";
 export * from "./hermes-memory.js";
+export * from "./install-script.js";
 export * from "./lesson.js";
 export * from "./live-feed.js";
 export * from "./machine-onboarding.js";

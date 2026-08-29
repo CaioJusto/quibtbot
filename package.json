@@ -24,6 +24,7 @@
     "release:manifest": "node scripts/release-version.mjs",
     "release:cli-binary": "node scripts/build-cli-binary.mjs",
     "verify:fast": "vitest run",
+    "verify:install-pin": "node scripts/verify-install-script-pin.mjs",
     "verify:installer": "vitest run packages/installer apps/cli packages/testkit/src/installer-smoke.test.ts",
     "smoke:installer": "node scripts/smoke-installer.mjs",
     "verify": "tsx packages/testkit/src/cli/verify.ts",

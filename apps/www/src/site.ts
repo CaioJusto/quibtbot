@@ -1,3 +1,4 @@
+import { INSTALL_SCRIPT_RAW_URL } from "@quibt/core";
 import { DESKTOP_SIGNING, type DesktopSigning, INSTALL_RELEASE } from "@quibt/installer";
 import { COPY, type Locale } from "./i18n";
 
@@ -36,7 +37,7 @@ export function macDownloadNote(locale: Locale, signing: DesktopSigning = DESKTO
  * bootstrap use.
  */
 export const INSTALL_COMMAND =
-  `curl -fsSL https://raw.githubusercontent.com/CaioJusto/quibtbot/v${INSTALL_RELEASE}/scripts/install.sh | QUIBT_RELEASE=${INSTALL_RELEASE} sh`;
+  `curl -fsSL ${INSTALL_SCRIPT_RAW_URL} | QUIBT_RELEASE=${INSTALL_RELEASE} sh`;
 
 const fallbackApp = "http://127.0.0.1:5173";
 export const APP_ORIGIN = (import.meta.env.PUBLIC_APP_ORIGIN as string | undefined) || fallbackApp;

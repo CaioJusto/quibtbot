@@ -6,6 +6,7 @@ import { parse as parseYaml } from "yaml";
 const rootPackage = JSON.parse(readFileSync(path.resolve("package.json"), "utf8")) as {
   packageManager?: string;
   engines?: { pnpm?: string };
+  scripts?: Record<string, string>;
   pnpm?: { onlyBuiltDependencies?: string[]; ignoredBuiltDependencies?: string[] };
 };
 const workflowFiles = ["ci.yml", "publish-images.yml", "release.yml"];
@@ -14,6 +15,16 @@ const workflowSources = workflowFiles.map((name) => ({
   source: readFileSync(path.resolve(".github/workflows", name), "utf8"),
 }));
 const installerSource = readFileSync(path.resolve("scripts/install.sh"), "utf8");
+const publicInstallerReferenceFiles = ["README.md", "docs/onboarding.md", "scripts/install.sh"];
+const installScriptModuleSource = readFileSync(
+  path.resolve("packages/core/src/install-script.ts"),
+  "utf8",
+);
+const installScriptConsumerFiles = [
+  "packages/core/src/computer-catalog.ts",
+  "apps/mobile/lib/server-setup.ts",
+  "apps/www/src/site.ts",
+];
 const workspaceConfig = parseYaml(readFileSync(path.resolve("pnpm-workspace.yaml"), "utf8")) as {
   minimumReleaseAge?: number;
   blockExoticSubdeps?: boolean;
@@ -60,6 +71,43 @@ describe("dependency installer hardening", () => {
     expect(installerSource).toContain('checksums_asset="checksums-$release_version.txt"');
     expect(installerSource).toContain("manifest_digest=$(asset_digest");
     expect(installerSource).not.toContain('"$base/$asset.sha256"');
+  });
+
+  it("pins every public curl-pipe-shell bootstrap to an immutable commit", () => {
+    const canonicalRevision = /INSTALL_SCRIPT_REVISION\s*=\s*"([a-f0-9]+)"/.exec(
+      installScriptModuleSource,
+    )?.[1];
+    expect(canonicalRevision).toMatch(/^[a-f0-9]{40}$/);
+    expect(installScriptModuleSource).toMatch(
+      /quibtbot\/\$\{INSTALL_SCRIPT_REVISION\}\/scripts\/install\.sh/,
+    );
+
+    for (const file of publicInstallerReferenceFiles) {
+      const source = readFileSync(path.resolve(file), "utf8");
+      const revisions = [
+        ...source.matchAll(
+          /raw\.githubusercontent\.com\/CaioJusto\/quibtbot\/([^/"'\\\s]+)\/scripts\/install\.sh/g,
+        ),
+      ].map((match) => match[1]);
+      expect(revisions.length, file).toBeGreaterThan(0);
+      for (const revision of revisions) {
+        expect(revision, file).toMatch(/^[a-f0-9]{40}$/);
+      }
+    }
+
+    for (const file of installScriptConsumerFiles) {
+      const source = readFileSync(path.resolve(file), "utf8");
+      expect(source, file).toContain("INSTALL_SCRIPT_RAW_URL");
+      expect(source, file).not.toContain("raw.githubusercontent.com");
+    }
+
+    const ci = workflowSources.find(({ name }) => name === "ci.yml")?.source ?? "";
+    const release = workflowSources.find(({ name }) => name === "release.yml")?.source ?? "";
+    expect(rootPackage.scripts?.["verify:install-pin"]).toBe(
+      "node scripts/verify-install-script-pin.mjs",
+    );
+    expect(ci).toContain("pnpm verify:install-pin");
+    expect(release).toContain("pnpm verify:install-pin");
   });
 });
 

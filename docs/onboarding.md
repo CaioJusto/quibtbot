@@ -24,7 +24,7 @@ Escolha um caminho.
 **Por um comando** (Mac ou Linux, sem o app): cole no terminal
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CaioJusto/quibtbot/v0.2.14/scripts/install.sh \
+curl -fsSL https://raw.githubusercontent.com/CaioJusto/quibtbot/f75c7c22b79a75cf682e3e461e6d61ea58202101/scripts/install.sh \
   | QUIBT_RELEASE=0.2.14 sh
 ```
 

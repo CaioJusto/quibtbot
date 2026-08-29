@@ -2,11 +2,13 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { INSTALL_SCRIPT_RAW_URL } from "@quibt/core";
 import { DESKTOP_SIGNING } from "@quibt/installer";
 import { DESKTOP_ARTIFACT_NAMES } from "../../../scripts/release-version.mjs";
 import { COPY } from "./i18n";
 import {
   DESKTOP_VERSION,
+  INSTALL_COMMAND,
   LINUX_DOWNLOAD_URL,
   MAC_DOWNLOAD_URL,
   macDownloadNote,
@@ -141,8 +143,10 @@ describe("landing pricing", () => {
 
     // O comando do site tem de ser algo que um visitante consegue colar e rodar: o
     // script baixa o binário e chama `quibtbot install` por dentro.
-    expect(publicSurface).toContain("/scripts/install.sh");
-    expect(publicSurface).toContain("QUIBT_RELEASE=");
+    expect(INSTALL_COMMAND).toContain(INSTALL_SCRIPT_RAW_URL);
+    expect(INSTALL_COMMAND).toContain("QUIBT_RELEASE=");
+    expect(INSTALL_COMMAND).toMatch(/quibtbot\/[a-f0-9]{40}\/scripts\/install\.sh/);
+    expect(publicSurface).toContain("INSTALL_COMMAND");
     expect(site).toContain("quibtbot install");
     expect(publicSurface).toContain("MAC_DOWNLOAD_URL");
     expect(publicSurface).toContain("WIN_DOWNLOAD_URL");
