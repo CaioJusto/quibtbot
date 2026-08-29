@@ -19,7 +19,7 @@ index 22ba1a7d2a77f227ad1e6a83a7bd0f8d37fe2f3a..e2d755bdc51a044d670f44cf5b2c1552
  
  public class RNSshClientModule extends ReactContextBaseJavaModule {
    private class SSHClient {
-@@ -87,6 +93,181 @@ public class RNSshClientModule extends ReactContextBaseJavaModule {
+@@ -87,6 +93,197 @@ public class RNSshClientModule extends ReactContextBaseJavaModule {
              .emit(eventName, params);
    }
  
@@ -70,7 +70,7 @@ index 22ba1a7d2a77f227ad1e6a83a7bd0f8d37fe2f3a..e2d755bdc51a044d670f44cf5b2c1552
 +          jsch.setHostKeyRepository(new HostKeyRepository() {
 +            public int check(String hostName, byte[] key) {
 +              capturedKey[0] = key.clone();
-+              return HostKeyRepository.NOT_MATCH;
++              return HostKeyRepository.NOT_INCLUDED;
 +            }
 +
 +            public void add(HostKey hostKey, UserInfo userInfo) {}
@@ -81,6 +81,14 @@ index 22ba1a7d2a77f227ad1e6a83a7bd0f8d37fe2f3a..e2d755bdc51a044d670f44cf5b2c1552
 +
 +            public String getKnownHostsRepositoryID() {
 +              return "quibt-inspect-host-key";
++            }
++
++            public HostKey[] getHostKey() {
++              return new HostKey[0];
++            }
++
++            public HostKey[] getHostKey(String host, String type) {
++              return new HostKey[0];
 +            }
 +          });
 +          session = jsch.getSession("quibt-fingerprint-probe", host, port);
@@ -134,9 +142,9 @@ index 22ba1a7d2a77f227ad1e6a83a7bd0f8d37fe2f3a..e2d755bdc51a044d670f44cf5b2c1552
 +            public int check(String hostName, byte[] key) {
 +              try {
 +                String actual = sha256Fingerprint(key);
-+                return actual.equals(expected) ? HostKeyRepository.OK : HostKeyRepository.NOT_MATCH;
++                return actual.equals(expected) ? 0 : HostKeyRepository.CHANGED;
 +              } catch (Exception error) {
-+                return HostKeyRepository.NOT_MATCH;
++                return HostKeyRepository.CHANGED;
 +              }
 +            }
 +
@@ -148,6 +156,14 @@ index 22ba1a7d2a77f227ad1e6a83a7bd0f8d37fe2f3a..e2d755bdc51a044d670f44cf5b2c1552
 +
 +            public String getKnownHostsRepositoryID() {
 +              return "quibt-verified-ssh";
++            }
++
++            public HostKey[] getHostKey() {
++              return new HostKey[0];
++            }
++
++            public HostKey[] getHostKey(String host, String type) {
++              return new HostKey[0];
 +            }
 +          });
 +

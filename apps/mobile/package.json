@@ -4,6 +4,7 @@
   "license": "Apache-2.0",
   "main": "expo-router/entry",
   "scripts": {
+    "eas-build-pre-install": "./scripts/eas-build-pre-install.sh",
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
