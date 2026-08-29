@@ -148,7 +148,10 @@ export function appServicesUpInvocation(
     : composeBaseArgs(composeFile, envFile);
   const services = options.publicAccess ? [...APP_SERVICES, "caddy"] : [...APP_SERVICES];
   if (mode === "source") {
-    return [...base, "up", "-d", "--build", "--wait", ...services];
+    return [...base, "up", "-d", "--build", ...services];
   }
-  return [...base, "up", "-d", "--wait", ...services];
+  // The API readiness probe immediately after this command is the health gate. Keeping
+  // `--wait` here makes Compose wait forever for the intentional one-shot `computer`
+  // dependency even after every long-running service is healthy.
+  return [...base, "up", "-d", ...services];
 }

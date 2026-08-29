@@ -20,7 +20,6 @@ describe("packaged install compose order", () => {
       ...base,
       "up",
       "-d",
-      "--wait",
       "supervisor",
       "api",
       "worker",
@@ -30,6 +29,7 @@ describe("packaged install compose order", () => {
 
     expect(postgresUp).not.toContain("--build");
     expect(appsUp).not.toContain("--build");
+    expect(appsUp).not.toContain("--wait");
     expect(composeInvocation("packaged", composeFile, envFile, "up")).not.toContain("--build");
   });
 

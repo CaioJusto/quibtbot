@@ -35,6 +35,29 @@ export function requiredImageCount(): number {
   return REQUIRED_IMAGE_COUNT;
 }
 
+export function rollbackComposeOverride(images: ImageRollbackRef[]): string {
+  const referenceFor = (image: "stack" | "supervisor" | "computer") => {
+    const match = images.find(({ reference }) => reference.includes(`/quibt-${image}:`));
+    if (!match) throw new Error(`Rollback image reference for quibt-${image} is missing.`);
+    return JSON.stringify(match.reference);
+  };
+  const stack = referenceFor("stack");
+  return [
+    "services:",
+    "  computer:",
+    `    image: ${referenceFor("computer")}`,
+    "  supervisor:",
+    `    image: ${referenceFor("supervisor")}`,
+    "  api:",
+    `    image: ${stack}`,
+    "  worker:",
+    `    image: ${stack}`,
+    "  web:",
+    `    image: ${stack}`,
+    "",
+  ].join("\n");
+}
+
 async function inspectLocalImage(
   run: ProcessRunner,
   docker: DockerInvocation,
@@ -241,10 +264,37 @@ export async function performCompleteRollback(deps: {
   }
   completedSteps.push("retag-images");
 
+  // Release CLIs embed a Compose file pinned by digest. Retagging the old images alone is
+  // not enough: the pinned base file would immediately recreate the new release while the
+  // rollback reported success. Overlay the captured version tags explicitly.
+  const rollbackComposePath = path.join(path.resolve(deps.dataDir), "rollback-compose.yml");
+  try {
+    writeAtomicFile(rollbackComposePath, rollbackComposeOverride(deps.rollback.images), 0o600);
+  } catch (error) {
+    return {
+      status: "manual_recovery_required",
+      message: error instanceof Error ? error.message : "Failed to create rollback Compose file.",
+      completedSteps,
+      failedStep: "compose-override",
+      cleanupWarning,
+    };
+  }
+  completedSteps.push("compose-override");
+
   const up = await runDockerCommand(
     deps.run,
     deps.docker,
-    composeInvocation("packaged", deps.composeFile, envFile, "up"),
+    [
+      "compose",
+      "-f",
+      deps.composeFile,
+      "-f",
+      rollbackComposePath,
+      "--env-file",
+      envFile,
+      "up",
+      "-d",
+    ],
   );
   if (up.code !== 0) {
     return {

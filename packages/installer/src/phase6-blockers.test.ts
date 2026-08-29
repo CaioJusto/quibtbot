@@ -25,7 +25,7 @@ import {
 import type { ProcessRunner } from "./orchestrator.js";
 import { runInstall, runStatus } from "./orchestrator.js";
 import { resolvePreviousRelease } from "./release-allowlist.js";
-import { performCompleteRollback } from "./rollback.js";
+import { performCompleteRollback, rollbackComposeOverride } from "./rollback.js";
 import {
   inspectInstallState,
   installStatePath,
@@ -497,6 +497,19 @@ describe("state validation split", () => {
 });
 
 describe("restore cleanup warnings", () => {
+  it("overrides digest-pinned services with the captured rollback tags", () => {
+    const body = rollbackComposeOverride([
+      { reference: "ghcr.io/quibt/quibt-stack:0.2.13", id: "sha256:stack" },
+      { reference: "ghcr.io/quibt/quibt-supervisor:0.2.13", id: "sha256:supervisor" },
+      { reference: "ghcr.io/quibt/quibt-computer:0.2.13", id: "sha256:computer" },
+    ]);
+
+    expect(body).toContain('image: "ghcr.io/quibt/quibt-computer:0.2.13"');
+    expect(body).toContain('image: "ghcr.io/quibt/quibt-supervisor:0.2.13"');
+    expect(body.match(/image: "ghcr\.io\/quibt\/quibt-stack:0\.2\.13"/g)).toHaveLength(3);
+    expect(body).not.toContain("@sha256:");
+  });
+
   it("reports completed rollback with cleanup warning when runner rejects cleanup", async () => {
     const dataDir = mkdtempSync(path.join(tmpdir(), "quibt-restore-reject-cleanup-"));
     ensureInstallEnvironment(dataDir, PUBLIC_URL);
