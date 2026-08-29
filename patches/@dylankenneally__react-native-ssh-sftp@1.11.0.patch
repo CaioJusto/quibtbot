@@ -1,3 +1,13 @@
+diff --git a/android/build.gradle b/android/build.gradle
+index 98d96d8..32cfe30 100644
+--- a/android/build.gradle
++++ b/android/build.gradle
+@@ -26,5 +26,3 @@ dependencies {
+-    implementation 'org.bouncycastle:bcprov-jdk15on:1.70'
+-
+     api 'com.facebook.react:react-native:+'
+     api 'com.github.mwiede:jsch:0.2.17'
+     api 'com.fasterxml.jackson.core:jackson-core:2.10.3'
 diff --git a/android/src/main/java/me/dylankenneally/rnssh/RNSshClientModule.java b/android/src/main/java/me/dylankenneally/rnssh/RNSshClientModule.java
 index 22ba1a7d2a77f227ad1e6a83a7bd0f8d37fe2f3a..e2d755bdc51a044d670f44cf5b2c15525f05aa6e 100644
 --- a/android/src/main/java/me/dylankenneally/rnssh/RNSshClientModule.java

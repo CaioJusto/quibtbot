@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -167,13 +168,30 @@ export {
 
 const DEFAULT_PROCESS_TIMEOUT_MS = 300_000;
 
+export function resolveDarwinDataDir(
+  homeDir = os.homedir(),
+  pathExists: (target: string) => boolean = existsSync,
+): string {
+  const applicationSupport = path.join(homeDir, "Library", "Application Support");
+  const desktopDir = path.join(applicationSupport, "Quibt Bot");
+  const legacyCliDir = path.join(applicationSupport, "Quibt");
+  const hasInstall = (dir: string) =>
+    pathExists(path.join(dir, "install-state.json")) || pathExists(path.join(dir, "quibt.env"));
+
+  // Electron uses "Quibt Bot" as its macOS userData directory. Prefer that install so the
+  // CLI can update a stack created by the desktop app; retain a pre-existing legacy CLI install.
+  if (hasInstall(desktopDir)) return desktopDir;
+  if (hasInstall(legacyCliDir)) return legacyCliDir;
+  return desktopDir;
+}
+
 export function defaultDataDir(): string {
   if (process.platform === "win32") {
     const base = process.env.LOCALAPPDATA ?? path.join(os.homedir(), "AppData", "Local");
     return path.join(base, "Quibt");
   }
   if (process.platform === "darwin") {
-    return path.join(os.homedir(), "Library", "Application Support", "Quibt");
+    return resolveDarwinDataDir();
   }
   const base = process.env.XDG_DATA_HOME ?? path.join(os.homedir(), ".local", "share");
   return path.join(base, "quibt");

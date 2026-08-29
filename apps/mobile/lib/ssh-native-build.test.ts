@@ -24,6 +24,7 @@ describe("native SSH release build", () => {
     expect(patch.match(/public HostKey\[\] getHostKey\(String host, String type\)/g)).toHaveLength(
       2,
     );
+    expect(patch).toContain("-    implementation 'org.bouncycastle:bcprov-jdk15on:1.70'");
   });
 
   it("builds the modern iOS libssh2 before EAS runs prebuild and CocoaPods", () => {
