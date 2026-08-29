@@ -16,16 +16,7 @@ describe("packaged install compose order", () => {
     expect(migrate).toEqual([...base, ...CONTAINER_MIGRATE_ARGS]);
     expect(migrate.join(" ")).toContain("run --rm");
     expect(migrate.join(" ")).not.toContain("exec -T");
-    expect(appsUp).toEqual([
-      ...base,
-      "up",
-      "-d",
-      "supervisor",
-      "api",
-      "worker",
-      "web",
-      "computer",
-    ]);
+    expect(appsUp).toEqual([...base, "up", "-d", "supervisor", "api", "worker", "web", "computer"]);
 
     expect(postgresUp).not.toContain("--build");
     expect(appsUp).not.toContain("--build");

@@ -16,8 +16,8 @@ describe("resolveDarwinDataDir", () => {
   });
 
   it("keeps an existing legacy CLI installation when no desktop install exists", () => {
-    expect(
-      resolveDarwinDataDir(home, (target) => target === path.join(legacy, "quibt.env")),
-    ).toBe(legacy);
+    expect(resolveDarwinDataDir(home, (target) => target === path.join(legacy, "quibt.env"))).toBe(
+      legacy,
+    );
   });
 });

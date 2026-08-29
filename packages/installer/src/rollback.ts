@@ -281,21 +281,17 @@ export async function performCompleteRollback(deps: {
   }
   completedSteps.push("compose-override");
 
-  const up = await runDockerCommand(
-    deps.run,
-    deps.docker,
-    [
-      "compose",
-      "-f",
-      deps.composeFile,
-      "-f",
-      rollbackComposePath,
-      "--env-file",
-      envFile,
-      "up",
-      "-d",
-    ],
-  );
+  const up = await runDockerCommand(deps.run, deps.docker, [
+    "compose",
+    "-f",
+    deps.composeFile,
+    "-f",
+    rollbackComposePath,
+    "--env-file",
+    envFile,
+    "up",
+    "-d",
+  ]);
   if (up.code !== 0) {
     return {
       status: "manual_recovery_required",

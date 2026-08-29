@@ -69,11 +69,14 @@ describe("embedded release manifest", () => {
     expect(verified.digests["quibtbot-linux-arm64"]).toHaveLength(64);
   });
 
-  it("loads the repository assets manifest fixture", () => {
+  it("keeps the source manifest pending until the release pipeline writes real digests", () => {
     const manifest = loadEmbeddedReleaseManifest(assetsManifest);
     expect(manifest.schemaVersion).toBe(1);
     expect(manifest.release).toBe(INSTALL_RELEASE);
-    expect(manifest.pipelineStatus).toBe("ready");
-    expect(() => assertReleaseManifestReady(manifest)).not.toThrow();
+    expect(manifest.pipelineStatus).toBe("pending");
+    expect(manifest.digests["quibtbot-linux-x64"]).toBe(PLACEHOLDER_DIGEST);
+    expect(manifest.digests["quibtbot-linux-arm64"]).toBe(PLACEHOLDER_DIGEST);
+    expect(() => assertReleaseManifestReady(manifest)).toThrow(/not ready/i);
+    expect(() => assertReleaseManifestReady(manifest, { allowPending: true })).not.toThrow();
   });
 });

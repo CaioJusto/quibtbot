@@ -14,7 +14,7 @@ import {
 
 export interface AppEnv {
   nodeEnv: string;
-  /** Release do stack (ex.: 0.2.14), distinta da versão interna do pacote API. */
+  /** Release do stack (ex.: 0.2.15), distinta da versão interna do pacote API. */
   release: string;
   databaseUrl: string;
   authSecret: string;

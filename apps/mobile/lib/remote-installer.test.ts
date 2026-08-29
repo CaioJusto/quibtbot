@@ -4,7 +4,6 @@ import { createServerBoxRequest } from "./box-api.js";
 import {
   buildRemoteUpdateShell,
   INSTALL_RELEASE,
-  LINUX_ARTIFACTS,
   releaseManifestFixture,
   resolveEmbeddedReleaseArtifacts,
 } from "./release-artifacts.js";
@@ -100,7 +99,9 @@ describe("parseInstallerOutput", () => {
 
 describe("remote server update", () => {
   it("downloads the verified release binary and invokes update without pairing output", () => {
-    const command = buildRemoteUpdateShell(resolveEmbeddedReleaseArtifacts());
+    const command = buildRemoteUpdateShell(
+      resolveEmbeddedReleaseArtifacts(releaseManifestFixture()),
+    );
     expect(command).toContain('if [ "$ACTUAL" != "$EXPECTED" ]');
     expect(command).toContain('"$tmpdir/quibtbot" update --non-interactive');
     expect(command).not.toContain("--show-sensitive");
@@ -108,12 +109,12 @@ describe("remote server update", () => {
 
   it("extracts the release and backup while redacting the credential", () => {
     const parsed = parseRemoteUpdateOutput(
-      '[database] succeeded: backup hunter2\n{\n  "release": "0.2.14",\n  "previousRelease": "0.2.8",\n  "backupPath": "/var/lib/quibt/backups/ok"\n}\n',
+      '[database] succeeded: backup hunter2\n{\n  "release": "0.2.15",\n  "previousRelease": "0.2.8",\n  "backupPath": "/var/lib/quibt/backups/ok"\n}\n',
       ["hunter2"],
     );
     expect(parsed).toMatchObject({
       ok: true,
-      release: "0.2.14",
+      release: "0.2.15",
       previousRelease: "0.2.8",
       backupPath: "/var/lib/quibt/backups/ok",
     });
@@ -125,7 +126,7 @@ describe("remote server update", () => {
     const transport = createMockSshTransport({
       release: releaseManifestFixture(),
       installOutput:
-        '[health] succeeded: API ready\n{\n  "release": "0.2.14",\n  "previousRelease": "0.2.8",\n  "backupPath": "/var/lib/quibt/backups/ok"\n}\n',
+        '[health] succeeded: API ready\n{\n  "release": "0.2.15",\n  "previousRelease": "0.2.8",\n  "backupPath": "/var/lib/quibt/backups/ok"\n}\n',
     });
     const identity = await transport.inspectIdentity();
     transport.attachCredential(loadCredential);
@@ -136,7 +137,7 @@ describe("remote server update", () => {
     });
 
     expect(loadCredential).toHaveBeenCalledTimes(1);
-    expect(result).toMatchObject({ ok: true, release: "0.2.14", previousRelease: "0.2.8" });
+    expect(result).toMatchObject({ ok: true, release: "0.2.15", previousRelease: "0.2.8" });
   });
 });
 
@@ -243,15 +244,11 @@ describe("INSTALL_RELEASE do celular", () => {
 });
 
 describe("resolveEmbeddedReleaseArtifacts", () => {
-  it("ships a manifest the phone can really install from", () => {
-    // Este era o teste que guardava o defeito: o manifesto embutido vinha com digests
-    // zerados e "pending", então a instalação por SSH morria depois de já ter conectado
-    // no servidor. Agora ele vem do pipeline de release, como o do computador.
-    const release = resolveEmbeddedReleaseArtifacts();
-    expect(release.release).toBe(INSTALL_RELEASE);
-    for (const artifact of LINUX_ARTIFACTS) {
-      expect(release.digests[artifact]).toMatch(/^[a-f0-9]{64}$/i);
-    }
+  it("keeps the source manifest closed until the pipeline writes the published digests", () => {
+    // A tag nasce com placeholders para não reaproveitar hashes da release anterior. O
+    // pipeline gera o manifesto pronto a partir dos binários recém-publicados; somente esse
+    // arquivo pode entrar no build/OTA de produção.
+    expect(() => resolveEmbeddedReleaseArtifacts()).toThrow(/not ready for remote install/i);
   });
 
   it("still fails closed when a manifest arrives pending or com digest zerado", () => {

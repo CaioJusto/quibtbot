@@ -31,8 +31,8 @@ const GENERIC_VPS_SCRIPT = `#!/usr/bin/env bash
 set -euo pipefail
 # Bring-your-own VPS: use the versioned Quibt installer. It verifies the
 # architecture-specific binary checksum and installs Docker through the distro path.
-curl -fsSL https://raw.githubusercontent.com/CaioJusto/quibtbot/v0.2.14/scripts/install.sh \
-  | QUIBT_RELEASE=0.2.14 sh
+curl -fsSL https://raw.githubusercontent.com/CaioJusto/quibtbot/v0.2.15/scripts/install.sh \
+  | QUIBT_RELEASE=0.2.15 sh
 `;
 
 export const MACHINE_CATALOG: MachineCatalogDefinition[] = [
