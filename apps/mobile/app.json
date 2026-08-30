@@ -97,8 +97,7 @@
         "NSMicrophoneUsageDescription": "O Quibt Bot usa o microfone só se você ditar uma mensagem.",
         "ITSAppUsesNonExemptEncryption": false,
         "NSSpeechRecognitionUsageDescription": "O Quibt Bot usa o reconhecimento de fala só para transformar o que você dita em texto."
-      },
-      "appleTeamId": "PFCLC953QY"
+      }
     },
     "android": {
       "package": "app.quibt.bot",
