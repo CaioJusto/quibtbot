@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BoxSandboxProvider, boxCommandFromArgv, isUnrecoverableBoxError } from "./box-sandbox.js";
+import {
+  BOX_TRIAL_TTL_SECONDS,
+  BoxSandboxProvider,
+  boxCommandFromArgv,
+  isUnrecoverableBoxError,
+} from "./box-sandbox.js";
 
 const ctx = {
   operationId: "1",
@@ -134,6 +139,60 @@ describe("BoxSandboxProvider", () => {
     const create = requests.find((r) => r.method === "POST" && r.path === "/api/box/v1/boxes");
     expect(create?.body).toEqual({ ttlSeconds: null, noEnv: true });
     expect(requests.filter((r) => r.method === "GET").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("retries a free-trial Box with the provider's two-hour auto-stop maximum", async () => {
+    const requests = mockBoxApi((req) => {
+      if (req.method === "POST" && req.path === "/api/box/v1/boxes") {
+        if ((req.body as { ttlSeconds?: number | null }).ttlSeconds === null) {
+          return json(
+            {
+              ok: false,
+              code: "trial_auto_stop_required",
+              message: "Free-trial Boxes cannot run without auto-stop",
+            },
+            400,
+          );
+        }
+        return json({ ok: true, type: "box.created", box: boxInfo() });
+      }
+      if (req.method === "GET" && req.path === "/api/box/v1/boxes/bx_23456789") {
+        return json({ ok: true, box: boxInfo() });
+      }
+      throw new Error(`unexpected request ${req.method} ${req.path}`);
+    });
+
+    await provider().provision({ botId: "bot-trial", homePath: "/tmp/trial" }, ctx);
+
+    expect(
+      requests
+        .filter((request) => request.method === "POST" && request.path === "/api/box/v1/boxes")
+        .map((request) => request.body),
+    ).toEqual([
+      { ttlSeconds: null, noEnv: true },
+      { ttlSeconds: BOX_TRIAL_TTL_SECONDS, noEnv: true },
+    ]);
+  });
+
+  it("does not expose the Box response body in request errors", async () => {
+    mockBoxApi(() =>
+      json(
+        {
+          ok: false,
+          code: "invalid_api_key",
+          message: "secret provider diagnostics",
+          key: "box_should_not_leak",
+        },
+        401,
+      ),
+    );
+
+    const failure = await provider()
+      .provision({ botId: "bot-1", homePath: "/tmp/h" }, ctx)
+      .catch((error: unknown) => error);
+    expect(failure).toMatchObject({ status: 401, code: "invalid_api_key" });
+    expect((failure as Error).message).toBe("box api POST /boxes failed: 401 invalid_api_key");
+    expect((failure as Error).message).not.toContain("box_should_not_leak");
   });
 
   it("resumes an archived box when reconnecting by providerRef", async () => {

@@ -5,6 +5,13 @@ describe("shouldKeepWaitingForSubscription", () => {
   it("keeps waiting when the phone lost the request while the app was in the background", () => {
     expect(shouldKeepWaitingForSubscription(new Error("Network request failed"))).toBe(true);
     expect(shouldKeepWaitingForSubscription(new Error("Failed to fetch"))).toBe(true);
+    expect(
+      shouldKeepWaitingForSubscription(
+        new Error(
+          "fetch failed: UnexpectedException: The network connection was lost. (at ExpoModulesCore/Promise.swift:56)",
+        ),
+      ),
+    ).toBe(true);
     expect(shouldKeepWaitingForSubscription(new Error("Load failed"))).toBe(true);
     expect(
       shouldKeepWaitingForSubscription(

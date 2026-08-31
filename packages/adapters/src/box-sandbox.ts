@@ -15,6 +15,8 @@ export const BOX_API_BASE_URL = "https://ascii.dev/api/box/v1";
 
 /** Box command timeout cap per the v1 API (`timeoutSeconds` is 1-600). */
 export const BOX_COMMAND_TIMEOUT_SECONDS = 600;
+/** Free-trial Boxes require auto-stop at two hours or less. */
+export const BOX_TRIAL_TTL_SECONDS = 2 * 60 * 60;
 
 const READY_STATES = new Set(["ready", "idle", "running"]);
 const DEFAULT_PROVISION_TIMEOUT_MS = 5 * 60_000;
@@ -38,6 +40,27 @@ export interface BoxSandboxOptions {
   pollIntervalMs?: number;
   provisionTimeoutMs?: number;
   requestTimeoutMs?: number;
+}
+
+export class BoxApiRequestError extends Error {
+  constructor(
+    readonly method: string,
+    readonly path: string,
+    readonly status: number,
+    readonly code?: string,
+  ) {
+    super(`box api ${method} ${path} failed: ${status}${code ? ` ${code}` : ""}`);
+    this.name = "BoxApiRequestError";
+  }
+}
+
+export function isBoxTrialAutoStopRequired(error: unknown): boolean {
+  return (
+    (error instanceof BoxApiRequestError && error.code === "trial_auto_stop_required") ||
+    /trial_auto_stop_required|free-trial boxes cannot run without auto-stop/i.test(
+      error instanceof Error ? error.message : String(error),
+    )
+  );
 }
 
 export function isUnrecoverableBoxError(error: unknown): boolean {
@@ -73,9 +96,9 @@ export function shellQuote(part: string): string {
  * API (https://docs.ascii.dev/openapi/box-v1.yaml) with native fetch — the
  * surface we need is six endpoints, so the SDK would only add a dependency.
  * Boxes are created per bot with `ttlSeconds: null` (no auto-stop) and
- * `noEnv: true` (never inherit operator credentials); the
- * platform's own idle scheduler decides when to stop them, and a stop archives
- * the disk so resume restores the same machine state.
+ * `noEnv: true` (never inherit operator credentials). Free-trial accounts
+ * reject that shape, so creation is retried with their two-hour maximum. In
+ * both cases a stop archives the disk and resume restores the same machine.
  */
 export class BoxSandboxProvider implements SandboxProvider {
   private readonly baseUrl: string;
@@ -129,7 +152,7 @@ export class BoxSandboxProvider implements SandboxProvider {
     });
     if (!res.ok) {
       const detail = await res.text().catch(() => "");
-      throw new Error(`box api ${method} ${path} failed: ${res.status} ${redact(detail)}`.trim());
+      throw new BoxApiRequestError(method, path, res.status, boxErrorCode(detail));
     }
     return (await res.json()) as T;
   }
@@ -184,12 +207,21 @@ export class BoxSandboxProvider implements SandboxProvider {
         if (!isUnrecoverableBoxError(error)) throw error;
       }
     }
-    const created = await this.request<{ box: BoxInfo }>("POST", "/boxes", {
-      // Persistent per-bot computer: null disables auto-stop entirely; our own
-      // idle scheduler (computer.sleep) stops the box when the bot goes quiet.
-      body: { ttlSeconds: null, noEnv: true },
-      signal: context.signal,
-    });
+    const create = (ttlSeconds: number | null) =>
+      this.request<{ box: BoxInfo }>("POST", "/boxes", {
+        body: { ttlSeconds, noEnv: true },
+        signal: context.signal,
+      });
+    let created: { box: BoxInfo };
+    try {
+      // Paid accounts can stay up until our idle scheduler archives them.
+      created = await create(null);
+    } catch (error) {
+      if (!isBoxTrialAutoStopRequired(error)) throw error;
+      // The trial caps each continuous session. The Box disk is still
+      // persistent, and waitUntilReady resumes the same VM after auto-stop.
+      created = await create(BOX_TRIAL_TTL_SECONDS);
+    }
     const box = await this.waitUntilReady(created.box.id, context.signal);
     return this.toRef(box, request.botId, context);
   }
@@ -288,8 +320,8 @@ export class BoxSandboxProvider implements SandboxProvider {
   }
 
   async keepAlive(computer: ComputerRef): Promise<void> {
-    // Boxes are created with auto-stop disabled, so keepAlive only needs to
-    // resurrect a box that was archived (e.g. stopped by our idle scheduler).
+    // Trial boxes may auto-stop after two hours; paid boxes can also be archived
+    // by our idle scheduler. Both come back from the same persistent disk.
     const boxId = computer.providerRef || computer.id;
     const box = await this.getBox(boxId);
     if (box?.state === "archived") {
@@ -316,8 +348,21 @@ export class BoxSandboxProvider implements SandboxProvider {
   }
 }
 
-function redact(text: string): string {
-  return text.replace(/(_token|token|key)=[^&\s"']+/gi, "$1=redacted").slice(0, 500);
+function boxErrorCode(detail: string): string | undefined {
+  try {
+    const body = JSON.parse(detail) as {
+      code?: unknown;
+      error?: { code?: unknown } | unknown;
+    };
+    const nested =
+      typeof body.error === "object" && body.error !== null
+        ? (body.error as { code?: unknown }).code
+        : undefined;
+    const code = body.code ?? nested;
+    return typeof code === "string" && /^[a-z0-9._-]{1,80}$/i.test(code) ? code : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {

@@ -216,6 +216,27 @@ describe("mobile rpc", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("retries the native iOS failure produced when device-code login returns from Safari", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new Error(
+          "fetch failed: UnexpectedException: The network connection was lost. (at ExpoModulesCore/Promise.swift:56)",
+        ),
+      )
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ json: { status: "connected" } }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+    const { MOBILE_RPC_RETRY_DELAY_MS, rpc } = await import("./api");
+    const request = rpc("models/completeOAuth", { loginId: "login-1" });
+    await vi.advanceTimersByTimeAsync(MOBILE_RPC_RETRY_DELAY_MS);
+    await expect(request).resolves.toEqual({ status: "connected" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("retries a 502 and then succeeds", async () => {
     vi.useFakeTimers();
     const fetchMock = vi

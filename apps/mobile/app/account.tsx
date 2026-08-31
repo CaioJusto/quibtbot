@@ -134,20 +134,27 @@ export default function Account() {
 
   function manageInfrastructureCredential(row: InfrastructureCredentialMetadata) {
     const sshTarget = parseSshCredentialHostId(row.hostId);
+    const isBox = row.authType === "boxApiKey" && row.hostId === "box.ascii.dev";
     showNativeSheet({
       title: row.label,
-      message: sshTarget
-        ? "Atualize esta VPS com backup, verificação da impressão SSH e Face ID."
-        : "Esta credencial fica protegida pela biometria deste aparelho.",
+      message: isBox
+        ? "Atualize a Box salva com backup e Face ID, sem informar a chave novamente."
+        : sshTarget
+          ? "Atualize esta VPS com backup, verificação da impressão SSH e Face ID."
+          : "Esta credencial fica protegida pela biometria deste aparelho.",
       actions: [
-        ...(sshTarget
+        ...(sshTarget || isBox
           ? [
               {
                 label: "Atualizar servidor",
                 onPress: () =>
                   router.push({
                     pathname: "/setup-ssh",
-                    params: { action: "update", hostId: row.hostId },
+                    params: {
+                      action: "update",
+                      hostId: row.hostId,
+                      ...(isBox ? { mode: "box" } : {}),
+                    },
                   }),
               },
             ]

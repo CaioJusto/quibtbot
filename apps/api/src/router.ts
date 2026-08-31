@@ -445,10 +445,11 @@ export function createRouter(deps: RouterDeps) {
       }),
       probe: authed.computers.probe.handler(async ({ context, input }) => {
         if (!context.actor.isDeploymentOwner) throw new ORPCError("FORBIDDEN");
+        const saved = await savedMachineProbeInput(deps, input);
         return probeComputer({
-          kind: input.kind,
-          endpoint: input.endpoint,
-          apiKey: input.apiKey,
+          kind: saved.kind,
+          endpoint: saved.endpoint,
+          apiKey: saved.apiKey,
           supervisorUrl: deps.env.sandboxSupervisorUrl,
           supervisorToken: deps.env.sandboxSupervisorToken,
         });
@@ -3492,6 +3493,38 @@ async function computerCatalog(deps: RouterDeps, query: string) {
     searchable: entry.searchable,
     recipe: entry.recipe,
   }));
+}
+
+async function savedMachineProbeInput(
+  deps: RouterDeps,
+  input: { kind: string; endpoint?: string; apiKey?: string },
+) {
+  const boot = bootableKind(input.kind);
+  if (!boot || (input.apiKey?.trim() && (boot !== "remote-supervisor" || input.endpoint?.trim()))) {
+    return input;
+  }
+  const settings = await deps.prisma.deploymentSettings.findUnique({
+    where: { id: "default" },
+    select: {
+      sandboxProvider: true,
+      sandboxEndpoint: true,
+      sandboxCredentialCipher: true,
+    },
+  });
+  if (settings?.sandboxProvider !== boot) return input;
+  let savedKey: string | undefined;
+  if (!input.apiKey?.trim() && settings.sandboxCredentialCipher) {
+    try {
+      savedKey = deps.secrets.load(settings.sandboxCredentialCipher);
+    } catch {
+      savedKey = undefined;
+    }
+  }
+  return {
+    ...input,
+    endpoint: input.endpoint?.trim() || settings.sandboxEndpoint || undefined,
+    apiKey: input.apiKey?.trim() || savedKey,
+  };
 }
 
 function mapRoutine(row: {

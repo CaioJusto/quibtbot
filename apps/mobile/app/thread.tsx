@@ -148,6 +148,10 @@ export default function Thread() {
   }>();
   const isGroup = Boolean(groupId);
   const isDemo = demo === "1" || isDemoBotId(botId);
+  function closeThread() {
+    if (router.canGoBack()) router.back();
+    else router.replace("/");
+  }
   const list = useRef<FlatList<ThreadRow>>(null);
   const draftInput = useRef<TextInput>(null);
   const pinnedToBottom = useRef(true);
@@ -1249,7 +1253,7 @@ export default function Thread() {
   return (
     <View style={styles.screen}>
       <ScreenHeader
-        onBack={() => router.back()}
+        onBack={closeThread}
         title={title}
         color={
           isGroup ? undefined : typeof color === "string" && color ? color : DEFAULT_MARK_COLOR

@@ -1,3 +1,4 @@
+import { BOX_PUBLIC_PROXY_ENV } from "@quibt/core";
 import type { Clock } from "./orchestrator.js";
 
 export const HEALTH_BACKOFF_MS = [500, 1_000, 2_000, 4_000, 8_000] as const;
@@ -149,7 +150,9 @@ export async function deploymentNeedsFirstOwner(
  * o passo `health` em toda instalação pública: nada servia https ainda.
  */
 export function apiBaseUrl(envValues: Record<string, string>, publicUrl: string): string {
-  if (envValues.QUIBT_PUBLIC_HOST) return "http://127.0.0.1:3100";
+  if (envValues.QUIBT_PUBLIC_HOST || envValues[BOX_PUBLIC_PROXY_ENV]) {
+    return "http://127.0.0.1:3100";
+  }
   const api = envValues.API_URL?.replace(/\/+$/, "");
   if (api) return api;
   try {

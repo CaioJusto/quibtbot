@@ -26,6 +26,25 @@ export type ComputerStatus = {
   screenUrl?: string | null;
 };
 
+/** Provider diagnostics belong in logs; this is the sentence shown on the black computer screen. */
+export function computerFailureMessage(error: unknown, fallback: string): string {
+  const message = error instanceof Error && error.message.trim() ? error.message.trim() : fallback;
+  if (/trial_auto_stop_required|free-trial boxes cannot run without auto-stop/i.test(message)) {
+    return "A sua conta Box está no trial e exige pausa automática. O Quibt usa o limite de 2 horas e preserva o disco para retomar depois. Tente ligar novamente.";
+  }
+  if (/box api\b.*\b(?:401|403)\b|invalid_api_key/i.test(message)) {
+    return "A Box recusou a chave salva. Atualize a chave em Máquina dos bots e tente novamente.";
+  }
+  if (/box api\b.*\b429\b|rate_limit/i.test(message)) {
+    return "A sua conta Box atingiu o limite de máquinas agora. Aguarde um pouco ou confira o plano da Box.";
+  }
+  if (/^box api\b/i.test(message)) {
+    return "A Box não conseguiu ligar este computador. Tente novamente; se continuar, confira a conta e a chave Box.";
+  }
+  if (/^rpc computer\/(?:boot|status) failed/i.test(message)) return fallback;
+  return message;
+}
+
 /** Skip the extra screenUrl RPC when status already carried it or the viewer is pinned. */
 export function needsScreenUrlRpc(input: {
   status: ComputerStatus;

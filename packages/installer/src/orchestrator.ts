@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { BOX_PUBLIC_PROXY_ENV, normalizeBoxHostedUrl } from "@quibt/core";
 import {
   appServicesUpInvocation,
   type ComposeMode,
@@ -152,6 +153,8 @@ export interface OrchestratorDeps {
  * entregava `http://127.0.0.1:5173` ao telefone, um endereço morto fora do host.
  */
 export function reachableUrl(envValues: Record<string, string>, publicUrl: string): string {
+  const proxyUrl = normalizeBoxHostedUrl(envValues[BOX_PUBLIC_PROXY_ENV] ?? "");
+  if (proxyUrl) return proxyUrl;
   const host = envValues[PUBLIC_HOST_ENV]?.trim();
   return host ? `https://${host}` : publicUrl;
 }
@@ -867,7 +870,7 @@ export async function runStatus(deps: {
     services,
     healthy,
     release: INSTALL_RELEASE,
-    url: deps.publicUrl,
+    url: reachableUrl(envValues, deps.publicUrl),
     stateIssue,
   };
 }

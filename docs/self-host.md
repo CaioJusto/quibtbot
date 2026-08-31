@@ -132,6 +132,23 @@ The decision is printed during the `environment` step and is **fail-closed**: no
 `QUIBT_PUBLIC_HOST` in `quibt.env` and survives reinstalls, so the address the phone saved and
 the certificate keep working.
 
+### HTTPS when the server itself runs in Box
+
+The mobile and desktop Box wizards create or recover one persistent `noEnv` Box for the Quibt
+server. The CLI initially talks to that VM on `http://127.0.0.1:5173`; that address is valid only
+inside the Box and must never be handed to an iPhone. After installation, the wizard makes the web
+port listen on `0.0.0.0`, runs Box's documented
+[`host 5173 --public`](https://docs.ascii.dev/box/hosting), and receives a stable origin
+like `https://<box-subdomain>-5173.on.ascii.dev`. Ascii terminates TLS and proxies that origin to
+the Box's port 5173.
+
+The origin is stored as `QUIBT_PUBLIC_PROXY_URL`, and `WEB_ORIGIN`, `BETTER_AUTH_URL`, and
+`API_URL` are reconciled to the same value before API/web restart. The app renews the first-owner
+invite inside the API container and probes `/rpc/health` through the public HTTPS route before it
+shows **Criar minha conta**. Retrying with a saved Box id repairs that same VM in place; it does not
+delete the disk or allocate another Box. This server VM is separate from any per-bot Boxes later
+created through `SANDBOX_PROVIDER=box`.
+
 ### Your own domain, or an existing proxy
 
 If you already run Traefik/Caddy/nginx on 80/443 (the install detected them and stayed local),

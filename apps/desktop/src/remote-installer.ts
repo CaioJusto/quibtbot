@@ -2,9 +2,15 @@ import { createHash } from "node:crypto";
 import { lookup as dnsLookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import {
+  BOX_INSTALL_MISSING_EXIT_CODE,
+  buildBoxHostCommand,
+  buildBoxHostingPreparationShell,
+  buildBoxPublicConfigurationShell,
   type InstallerEvent,
   type InstallerEventStatus,
   type InstallStep,
+  parseBoxHostedUrl,
+  probeBoxHostedUrl,
   redactInstallerText,
 } from "@quibt/installer";
 import { Client } from "ssh2";
@@ -804,7 +810,6 @@ export async function installOnBox(
     secrets,
   );
   try {
-    const release = verifiedRelease(deps);
     const box = await resolveServerBox(input, fetchImpl, deps?.signal, deps?.onBoxAllocated, () =>
       emitSanitized(
         onEvent,
@@ -825,53 +830,142 @@ export async function installOnBox(
     emitSanitized(
       onEvent,
       {
-        step: "images",
+        step: "services",
         status: "running",
-        message: "Running verified bootstrap on Box (detached)",
+        message: "Conferindo a instalação existente na Box",
       },
       secrets,
     );
 
-    const command = buildRemoteBootstrapShell(release);
-    const result = await runBoxDetachedInstall(
-      input.apiKey,
-      box.id,
-      command,
-      secrets,
-      onEvent,
-      fetchImpl,
-      deps?.signal,
-    ).catch(async (error) => {
-      if (activeBoxId && deps?.signal?.aborted) {
-        await interruptBox(input.apiKey, activeBoxId, fetchImpl).catch(() => undefined);
+    const runBoxCommand = (command: string) =>
+      runBoxDetachedInstall(
+        input.apiKey,
+        box.id,
+        command,
+        secrets,
+        onEvent,
+        fetchImpl,
+        deps?.signal,
+      ).catch(async (error) => {
+        if (activeBoxId && deps?.signal?.aborted) {
+          await interruptBox(input.apiKey, activeBoxId, fetchImpl).catch(() => undefined);
+        }
+        throw error;
+      });
+
+    let preparation = await runBoxCommand(buildBoxHostingPreparationShell());
+    const logs: string[] = [];
+
+    if (preparation.exitCode === BOX_INSTALL_MISSING_EXIT_CODE) {
+      emitSanitized(
+        onEvent,
+        {
+          step: "images",
+          status: "running",
+          message: "Running verified bootstrap on Box (detached)",
+        },
+        secrets,
+      );
+      const release = verifiedRelease(deps);
+      const bootstrap = await runBoxCommand(buildRemoteBootstrapShell(release));
+      const parsedBootstrap = parseInstallerOutput(
+        `${bootstrap.stdout}\n${bootstrap.stderr}`,
+        secrets,
+      );
+      if (parsedBootstrap.log) logs.push(parsedBootstrap.log);
+      if (bootstrap.exitCode !== 0) {
+        return {
+          ok: false,
+          error: redactInstallerText(parsedBootstrap.log || "Box install command failed", secrets),
+          log: logs.join("\n"),
+          boxId: box.id,
+        };
       }
-      throw error;
-    });
+      preparation = await runBoxCommand(buildBoxHostingPreparationShell());
+    }
 
-    const parsed = parseInstallerOutput(`${result.stdout}\n${result.stderr}`, secrets);
-    const url = parsed.url ?? (box.url ? String(box.url) : undefined);
-
-    if (result.exitCode !== 0) {
+    const parsedPreparation = parseInstallerOutput(
+      `${preparation.stdout}\n${preparation.stderr}`,
+      secrets,
+    );
+    if (parsedPreparation.log) logs.push(parsedPreparation.log);
+    if (preparation.exitCode !== 0) {
       return {
         ok: false,
-        error: redactInstallerText(result.stderr || "Box install command failed", secrets),
-        log: parsed.log,
-        url,
-        pairing: parsed.pairing?.code ? parsed.pairing : undefined,
+        error: redactInstallerText(
+          parsedPreparation.log || "Não consegui preparar a instalação existente na Box.",
+          secrets,
+        ),
+        log: logs.join("\n"),
         boxId: box.id,
       };
     }
 
     emitSanitized(
       onEvent,
-      { step: "health", status: "succeeded", message: "Box install finished" },
+      {
+        step: "services",
+        status: "running",
+        message: "Publicando o Quibt com HTTPS pela Box",
+      },
+      secrets,
+    );
+    const hosted = await runBoxCommand(buildBoxHostCommand());
+    const parsedHosted = parseInstallerOutput(`${hosted.stdout}\n${hosted.stderr}`, secrets);
+    if (parsedHosted.log) logs.push(parsedHosted.log);
+    const publicUrl = parseBoxHostedUrl(`${hosted.stdout}\n${hosted.stderr}`);
+    if (hosted.exitCode !== 0 || !publicUrl) {
+      return {
+        ok: false,
+        error: redactInstallerText(
+          parsedHosted.log ||
+            "A Box não confirmou a URL HTTPS pública da instalação. A máquina foi preservada.",
+          secrets,
+        ),
+        log: logs.join("\n"),
+        boxId: box.id,
+      };
+    }
+
+    const configured = await runBoxCommand(buildBoxPublicConfigurationShell(publicUrl));
+    const parsed = parseInstallerOutput(`${configured.stdout}\n${configured.stderr}`, secrets);
+    if (parsed.log) logs.push(parsed.log);
+    if (configured.exitCode !== 0) {
+      return {
+        ok: false,
+        error: redactInstallerText(
+          parsed.log || "Não consegui concluir a configuração pública da Box.",
+          secrets,
+        ),
+        log: logs.join("\n"),
+        boxId: box.id,
+      };
+    }
+
+    const publiclyHealthy = await probeBoxHostedUrl(publicUrl, fetchImpl, {
+      signal: deps?.signal,
+    });
+    if (!publiclyHealthy) {
+      return {
+        ok: false,
+        error:
+          "A Box publicou o endereço, mas o Quibt ainda não respondeu pela internet. A máquina e os dados foram preservados; tente novamente.",
+        log: logs.join("\n"),
+        boxId: box.id,
+      };
+    }
+
+    emitSanitized(
+      onEvent,
+      { step: "health", status: "succeeded", message: `Quibt disponível em ${publicUrl}` },
       secrets,
     );
     return {
       ok: true,
-      url,
-      pairing: parsed.pairing?.code ? parsed.pairing : undefined,
-      log: parsed.log,
+      url: publicUrl,
+      pairing:
+        parsed.pairing?.code && parsed.pairing.url === publicUrl ? parsed.pairing : undefined,
+      log: logs.join("\n"),
       boxId: box.id,
     };
   } catch (error) {

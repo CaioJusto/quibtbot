@@ -1,6 +1,7 @@
 import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { BOX_PUBLIC_PROXY_ENV } from "@quibt/core";
 import { describe, expect, it } from "vitest";
 import { INSTALL_RELEASE } from "./compose.js";
 import { ensureInstallEnvironment, parseEnvFile } from "./environment.js";
@@ -99,5 +100,33 @@ describe("ensureInstallEnvironment", () => {
       CUSTOM: "value=with=equals",
       KEY: "part=ial",
     });
+  });
+
+  it("preserves a Box proxy origin and reconciles auth plus bind addresses", () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), "quibt-install-env-"));
+    const publicUrl = "https://quibt-owner-5173.on.ascii.dev";
+    writeFileSync(
+      path.join(dataDir, "quibt.env"),
+      [
+        `${BOX_PUBLIC_PROXY_ENV}=${publicUrl}`,
+        "QUIBT_PUBLIC_HOST=stale.example.com",
+        "QUIBT_WEB_BIND_HOST=127.0.0.1",
+        "QUIBT_API_BIND_HOST=0.0.0.0",
+        "WEB_ORIGIN=http://127.0.0.1:5173",
+        "BETTER_AUTH_URL=http://127.0.0.1:5173",
+        "API_URL=http://127.0.0.1:3100",
+      ].join("\n"),
+      { mode: 0o600 },
+    );
+
+    const result = ensureInstallEnvironment(dataDir, "http://127.0.0.1:5173");
+
+    expect(result.values[BOX_PUBLIC_PROXY_ENV]).toBe(publicUrl);
+    expect(result.values.QUIBT_PUBLIC_HOST).toBeUndefined();
+    expect(result.values.QUIBT_WEB_BIND_HOST).toBe("0.0.0.0");
+    expect(result.values.QUIBT_API_BIND_HOST).toBe("127.0.0.1");
+    expect(result.values.WEB_ORIGIN).toBe(publicUrl);
+    expect(result.values.BETTER_AUTH_URL).toBe(publicUrl);
+    expect(result.values.API_URL).toBe(publicUrl);
   });
 });

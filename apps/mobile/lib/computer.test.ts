@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   allowScreenNavigation,
+  computerFailureMessage,
   computerPollMs,
   controlLabel,
   createPointerMoveCoalescer,
@@ -25,6 +26,28 @@ const dir = path.dirname(fileURLToPath(import.meta.url));
 function source(relative: string) {
   return readFileSync(path.join(dir, relative), "utf8");
 }
+
+describe("computerFailureMessage", () => {
+  it("turns the Box trial diagnostic into a clear recovery message", () => {
+    const message = computerFailureMessage(
+      new Error(
+        'box api POST /boxes failed: 400 {"code":"trial_auto_stop_required","message":"Free-trial Boxes cannot run without auto-stop"}',
+      ),
+      "Não foi possível abrir o computador",
+    );
+    expect(message).toMatch(/trial/i);
+    expect(message).toMatch(/2 horas/i);
+    expect(message).toMatch(/preserva o disco/i);
+    expect(message).not.toMatch(/box api|\{"code"/i);
+  });
+
+  it("keeps ordinary useful errors and hides generic computer RPC jargon", () => {
+    expect(computerFailureMessage(new Error("Acesso negado"), "fallback")).toBe("Acesso negado");
+    expect(computerFailureMessage(new Error("rpc computer/boot failed"), "fallback")).toBe(
+      "fallback",
+    );
+  });
+});
 
 describe("embeddableScreenUrl", () => {
   it("leaves a public stream URL alone", () => {

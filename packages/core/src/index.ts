@@ -1,4 +1,5 @@
 export * from "./approvals.js";
+export * from "./box-server-hosting.js";
 export * from "./chief-of-staff.js";
 export * from "./client-onboarding.js";
 export * from "./computer-catalog.js";
@@ -17,6 +18,7 @@ export * from "./lesson.js";
 export * from "./live-feed.js";
 export * from "./machine-onboarding.js";
 export * from "./mentions.js";
+export * from "./network-errors.js";
 export * from "./plans.js";
 export * from "./polling.js";
 export * from "./presence.js";

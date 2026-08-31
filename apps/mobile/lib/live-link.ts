@@ -1,4 +1,4 @@
-import type { LiveFeedStatus } from "@quibt/core";
+import { isTransientNetworkMessage, type LiveFeedStatus } from "@quibt/core";
 
 /**
  * O fio da conversa sobre uma rede de celular.
@@ -80,9 +80,7 @@ export function createSafetyPoller(options: SafetyPollerOptions): () => void {
  */
 export function isConnectionProblem(message: string | null | undefined): boolean {
   if (!message) return false;
-  return /network request failed|failed to fetch|networkerror|load failed|demorou demais|conexão falhou|não foi possível alcançar|ECONNREFUSED|timed? ?out|HTTP 5\d\d/i.test(
-    message,
-  );
+  return isTransientNetworkMessage(message);
 }
 
 export const CONNECTION_PROBLEM_MESSAGE =

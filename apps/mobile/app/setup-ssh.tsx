@@ -1,3 +1,4 @@
+import { normalizeBoxHostedUrl } from "@quibt/core";
 import type { InstallerEvent } from "@quibt/installer";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
@@ -16,7 +17,11 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AUTH_BG, AUTH_FIELD_TEXT } from "../lib/auth-ui";
 import { claimInstallation } from "../lib/bootstrap-pairing";
-import { createBoxInstallTransport, runBoxRemoteInstall } from "../lib/box-install-transport";
+import {
+  createBoxInstallTransport,
+  runBoxRemoteInstall,
+  runBoxRemoteUpdate,
+} from "../lib/box-install-transport";
 import { loadBoxServerId, saveBoxServerId } from "../lib/box-server-state";
 import {
   COLORS,
@@ -74,7 +79,7 @@ export default function SetupSshScreen() {
   const mode: SetupMode = params.mode === "box" ? "box" : "ssh";
   const savedTarget =
     params.action === "update" ? parseSshCredentialHostId(params.hostId ?? "") : null;
-  const operation: SetupOperation = savedTarget ? "update" : "install";
+  const operation: SetupOperation = params.action === "update" ? "update" : "install";
 
   const [stage, setStage] = useState<SetupStage>("form");
   const [host, setHost] = useState(savedTarget?.hostname ?? "");
@@ -187,10 +192,27 @@ export default function SetupSshScreen() {
             throw new Error("Informe a chave Box ou salve uma credencial primeiro.");
           },
         });
+        if (operation === "update") {
+          const result = await runBoxRemoteUpdate(transport, (event) => {
+            setEvents((current) => [...current, event]);
+          });
+          if (!result.ok) throw new Error(result.error ?? "Atualização da Box falhou.");
+          setUpdatedRelease(result.release ?? null);
+          setPreviousRelease(result.previousRelease ?? null);
+          setBackupPath(result.backupPath ?? null);
+          setStage("done");
+          return;
+        }
         const result = await runBoxRemoteInstall(transport, (event) => {
           setEvents((current) => [...current, event]);
         });
         if (!result.ok) throw new Error(result.error ?? "Instalação Box falhou.");
+        const boxPublicUrl = normalizeBoxHostedUrl(result.url ?? "");
+        if (!boxPublicUrl) {
+          throw new Error(
+            "A Box não devolveu um endereço HTTPS público válido. A máquina foi preservada.",
+          );
+        }
         if (saveCredential && boxApiKey.trim()) {
           await saveInfrastructureCredential("box.ascii.dev", {
             type: "boxApiKey",
@@ -198,7 +220,7 @@ export default function SetupSshScreen() {
             apiKey: boxApiKey.trim(),
           });
         }
-        setResultUrl(result.url ?? null);
+        setResultUrl(boxPublicUrl);
         setResultCode(result.pairing?.code ?? null);
         setStage("done");
         return;
@@ -333,22 +355,35 @@ export default function SetupSshScreen() {
           <View style={styles.card}>
             {mode === "box" ? (
               <>
-                <Text style={styles.label}>Chave da API Box</Text>
-                <TextInput
-                  value={boxApiKey}
-                  onChangeText={setBoxApiKey}
-                  secureTextEntry
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  placeholder="box_live_..."
-                  placeholderTextColor={COLORS.tertiary}
-                  style={AUTH_FIELD_TEXT}
-                />
-                <Text style={styles.hint}>
-                  Use somente uma chave criada em box.ascii.dev — não é a chave da Hetzner. Ela fica
-                  no SecureStore deste aparelho e não é enviada para a API Quibt. No trial, o
-                  servidor de teste fica ligado por até 2 horas por vez.
-                </Text>
+                {operation === "update" ? (
+                  <>
+                    <Text style={styles.label}>Box salva neste iPhone</Text>
+                    <Text style={styles.hint}>
+                      O Face ID libera a chave Box já salva somente neste aparelho. A máquina, os
+                      bots e os dados serão preservados; antes da troca de versão, o Quibt cria um
+                      backup para rollback.
+                    </Text>
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.label}>Chave da API Box</Text>
+                    <TextInput
+                      value={boxApiKey}
+                      onChangeText={setBoxApiKey}
+                      secureTextEntry
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      placeholder="box_live_..."
+                      placeholderTextColor={COLORS.tertiary}
+                      style={AUTH_FIELD_TEXT}
+                    />
+                    <Text style={styles.hint}>
+                      Use somente uma chave criada em box.ascii.dev — não é a chave da Hetzner. Ela
+                      fica no SecureStore deste aparelho e não é enviada para a API Quibt. No trial,
+                      o servidor de teste fica ligado por até 2 horas por vez.
+                    </Text>
+                  </>
+                )}
               </>
             ) : operation === "update" ? (
               <>
@@ -451,7 +486,13 @@ export default function SetupSshScreen() {
             ) : null}
 
             <PrimaryButton
-              label={mode === "box" ? "Instalar no Box" : "Ler impressão digital"}
+              label={
+                mode === "box"
+                  ? operation === "update"
+                    ? "Atualizar minha Box"
+                    : "Instalar no Box"
+                  : "Ler impressão digital"
+              }
               onPress={() => {
                 softHaptic();
                 void inspectFingerprint();

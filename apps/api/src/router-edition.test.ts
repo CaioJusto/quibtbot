@@ -157,6 +157,17 @@ describe("the machine the deploy reports", () => {
     expect(box.sandboxProvider).toBe("box");
   });
 
+  it("reuses the saved machine key when the owner tests the configured Box again", async () => {
+    const { router } = harness(
+      { availableMachines: ["docker"] },
+      { sandboxProvider: "box", sandboxCredentialCipher: "enc:box_saved" },
+    );
+    await expect(call(router.computers.probe, { kind: "box" }, { context })).resolves.toEqual({
+      ok: true,
+      message: "Chave presente. O próximo computador sobe no Box.",
+    });
+  });
+
   it("lets the owner pick a VPS when URL and token are present", async () => {
     const { router } = harness({ availableMachines: ["docker"] });
     await expect(

@@ -21,7 +21,12 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { rpc } from "../lib/api";
 import { BRAND_BLUE, BRAND_BLUE_SOFT, QuibtComputerArt } from "../lib/brand";
 import { COLORS, GlassIconButton } from "../lib/design-system";
-import { machineActivationGate, splitMachineCatalog } from "../lib/machine-settings";
+import { loadInfrastructureCredential } from "../lib/infrastructure-secrets";
+import {
+  effectiveMachineApiKey,
+  machineActivationGate,
+  splitMachineCatalog,
+} from "../lib/machine-settings";
 
 type CatalogItem = {
   kind: string;
@@ -41,10 +46,14 @@ type CatalogItem = {
 export default function MachineSettings() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  function close() {
+    if (router.canGoBack()) router.back();
+    else router.replace("/");
+  }
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 8 }]}>
       <View style={styles.topBar}>
-        <GlassIconButton symbol="chevron.left" label="Voltar" onPress={() => router.back()} />
+        <GlassIconButton symbol="chevron.left" label="Voltar" onPress={close} />
         <Text style={styles.topTitle}>Máquina dos bots</Text>
         <View style={{ width: 44 }} />
       </View>
@@ -60,6 +69,10 @@ export function MachineSettingsBody({ onSaved }: { onSaved?: () => void }) {
   const [selected, setSelected] = useState("docker");
   const [endpoint, setEndpoint] = useState("");
   const [apiKey, setApiKey] = useState("");
+  const [savedBoxKey, setSavedBoxKey] = useState<string | null>(null);
+  const [savedBoxKeyState, setSavedBoxKeyState] = useState<
+    "loading" | "available" | "missing" | "reauth-required"
+  >("loading");
   const [active, setActive] = useState<string | null>(null);
   const [running, setRunning] = useState("docker");
   const [saved, setSaved] = useState<string | null>(null);
@@ -71,7 +84,20 @@ export function MachineSettingsBody({ onSaved }: { onSaved?: () => void }) {
   /** O guia longo fica atrás de um toque: a tela abre só com o essencial. */
   const [guideOpen, setGuideOpen] = useState(false);
 
+  async function unlockSavedBoxKey() {
+    setSavedBoxKeyState("loading");
+    const result = await loadInfrastructureCredential("box.ascii.dev");
+    if (result.state === "ok" && result.credential.type === "boxApiKey") {
+      setSavedBoxKey(result.credential.apiKey);
+      setSavedBoxKeyState("available");
+      return;
+    }
+    setSavedBoxKey(null);
+    setSavedBoxKeyState(result.state === "ok" ? "missing" : result.state);
+  }
+
   useEffect(() => {
+    void unlockSavedBoxKey();
     void Promise.all([
       rpc<CatalogItem[]>("computers/catalog", {}).catch(() => []),
       rpc<{ sandboxProvider?: string | null; sandboxEndpoint?: string | null }>(
@@ -94,9 +120,10 @@ export function MachineSettingsBody({ onSaved }: { onSaved?: () => void }) {
   const { cards, recipes } = useMemo(() => splitMachineCatalog(catalog), [catalog]);
   const item = catalog.find((entry) => entry.kind === selected);
   const notice = machineNotice({ chosen: selected, running, saved });
+  const effectiveApiKey = effectiveMachineApiKey(selected, apiKey, savedBoxKey);
 
   async function probe() {
-    const ready = machineCredentialsReady(item, { endpoint, apiKey });
+    const ready = machineCredentialsReady(item, { endpoint, apiKey: effectiveApiKey });
     if (!ready.ok) {
       setError(ready.message);
       return null;
@@ -107,7 +134,7 @@ export function MachineSettingsBody({ onSaved }: { onSaved?: () => void }) {
       const result = await rpc<{ ok: boolean; message: string }>("computers/probe", {
         kind: selected,
         endpoint: endpoint.trim() || undefined,
-        apiKey: apiKey.trim() || undefined,
+        apiKey: effectiveApiKey || undefined,
       });
       setLastProbe(result);
       setProbeMessage(result.message);
@@ -124,7 +151,7 @@ export function MachineSettingsBody({ onSaved }: { onSaved?: () => void }) {
   }
 
   async function save() {
-    const ready = machineCredentialsReady(item, { endpoint, apiKey });
+    const ready = machineCredentialsReady(item, { endpoint, apiKey: effectiveApiKey });
     const gate = machineActivationGate({
       credentialsReady: ready.ok,
       credentialsMessage: ready.ok ? undefined : ready.message,
@@ -145,7 +172,7 @@ export function MachineSettingsBody({ onSaved }: { onSaved?: () => void }) {
       const settings = await rpc<{ sandboxProvider: string }>("computers/activate", {
         kind: selected,
         endpoint: endpoint.trim() || undefined,
-        apiKey: apiKey.trim() || undefined,
+        apiKey: effectiveApiKey || undefined,
       });
       setSaved(settings.sandboxProvider);
       setActive(settings.sandboxProvider);
@@ -219,15 +246,40 @@ export function MachineSettingsBody({ onSaved }: { onSaved?: () => void }) {
         />
       ) : null}
       {item?.needsKey ? (
-        <TextInput
-          value={apiKey}
-          onChangeText={setApiKey}
-          placeholder={item.keyLabel ?? "Chave da sua conta"}
-          placeholderTextColor={COLORS.tertiary}
-          autoCapitalize="none"
-          secureTextEntry
-          style={styles.input}
-        />
+        <>
+          <TextInput
+            value={apiKey}
+            onChangeText={setApiKey}
+            placeholder={
+              selected === "box" && savedBoxKeyState === "available"
+                ? "Chave Box já salva neste iPhone"
+                : (item.keyLabel ?? "Chave da sua conta")
+            }
+            placeholderTextColor={COLORS.tertiary}
+            autoCapitalize="none"
+            secureTextEntry
+            style={styles.input}
+          />
+          {selected === "box" && savedBoxKeyState === "available" && !apiKey.trim() ? (
+            <Text style={styles.savedCredential}>
+              A chave usada para instalar o Quibt na Box será reutilizada automaticamente.
+            </Text>
+          ) : null}
+          {selected === "box" && savedBoxKeyState === "reauth-required" ? (
+            <Pressable onPress={() => void unlockSavedBoxKey()} style={styles.unlockCredential}>
+              <Text style={styles.unlockCredentialText}>Desbloquear a chave Box já salva</Text>
+            </Pressable>
+          ) : null}
+        </>
+      ) : null}
+      {selected === "box" ? (
+        <View style={styles.trialNotice}>
+          <Text style={styles.trialNoticeTitle}>Como funciona no trial da Box</Text>
+          <Text style={styles.trialNoticeText}>
+            Cada bot usa uma VM própria. No trial, ela pausa automaticamente em até 2 horas; o disco
+            fica salvo e o Quibt retoma a mesma máquina na próxima mensagem.
+          </Text>
+        </View>
       ) : null}
       {vpsRecipes.length && item?.family === "remote-supervisor" ? (
         <View style={styles.recipeCard}>
@@ -449,6 +501,35 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     fontSize: 16,
     marginTop: 12,
+  },
+  savedCredential: {
+    color: COLORS.secondary,
+    fontSize: 14,
+    lineHeight: 19,
+    marginTop: 8,
+    paddingHorizontal: 4,
+  },
+  unlockCredential: {
+    alignSelf: "flex-start",
+    marginTop: 8,
+    paddingHorizontal: 4,
+    paddingVertical: 6,
+  },
+  unlockCredentialText: { color: BRAND_BLUE, fontSize: 15, fontWeight: "700" },
+  trialNotice: {
+    backgroundColor: BRAND_BLUE_SOFT,
+    borderColor: BRAND_BLUE,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    marginTop: 14,
+    padding: 16,
+  },
+  trialNoticeTitle: { color: COLORS.primary, fontSize: 16, fontWeight: "800" },
+  trialNoticeText: {
+    color: COLORS.secondary,
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 5,
   },
   recipeCard: {
     marginTop: 14,

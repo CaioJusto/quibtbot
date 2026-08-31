@@ -9,12 +9,11 @@
  * tela, senão o polling para e a credencial nunca é salva. Só o que o servidor devolve
  * de fato (`status: "error"`) ou uma sessão expirada merecem interromper a espera.
  */
-const TRANSIENT_MESSAGE =
-  /network request failed|failed to fetch|networkerror|load failed|connection (reset|closed)|err_|demorou demais|timed? ?out|aborted|conexão falhou/i;
+import { isTransientNetworkFailure } from "./network-errors.js";
 
 export function shouldKeepWaitingForSubscription(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const code = (error as { code?: unknown }).code;
   if (code === "session_expired" || code === "UNAUTHORIZED") return false;
-  return TRANSIENT_MESSAGE.test(error.message);
+  return isTransientNetworkFailure(error);
 }

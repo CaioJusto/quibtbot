@@ -118,6 +118,16 @@ order, implemented in `lib/remote-installer.ts` / `lib/ssh-transport.native.ts` 
 6. **Box stays `noEnv`.** The Box transport allocates VMs with `noEnv: true`, so the
    operator's own Quibt secrets never enter the VM it just created — a different guarantee
    from the SSH transport, whose target already belongs to the user pairing it.
+7. **Box loopback is never a client URL.** After the CLI installs on the VM, the transport
+   makes the web container listen on `0.0.0.0:5173`, runs the Box in-VM
+   `host 5173 --public` command, and accepts only its exact
+   `https://<box-subdomain>-5173.on.ascii.dev` origin. `127.0.0.1` inside the CLI output is
+   the Box itself and is deliberately discarded because it would mean the phone on iOS.
+8. **Public health is the success barrier.** The transport restarts API/web with that HTTPS
+   origin, mints a fresh first-owner invite inside the API container, then probes
+   `/rpc/health` through the public Box URL. The UI cannot show **Criar minha conta** before
+   that phone-facing request succeeds. An already-installed Box is repaired in place before
+   release artifacts are resolved, preserving its id, disk, database, and SecureStore entry.
 
 ## EAS / native-SSH requirement
 

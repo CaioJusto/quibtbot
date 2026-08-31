@@ -1,5 +1,5 @@
 import { Image } from "expo-image";
-import { useLocalSearchParams, useNavigation } from "expo-router";
+import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { createElement, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   AppState,
@@ -19,6 +19,7 @@ import {
   allowScreenNavigation,
   COMPUTER_HEARTBEAT_MS,
   type ComputerStatus,
+  computerFailureMessage,
   computerPollMs,
   controlLabel,
   createPointerMoveCoalescer,
@@ -58,6 +59,7 @@ async function loadComputerStatus(botId: string, pinnedUrl: string | null) {
 
 export default function Computer() {
   const navigation = useNavigation();
+  const router = useRouter();
   const insets = useSafeAreaInsets();
   const { botId, name: nameParam } = useLocalSearchParams<{ botId?: string; name?: string }>();
   const name = nameParam || "Bot";
@@ -90,6 +92,20 @@ export default function Computer() {
     }
   }
   const autoBooted = useRef<string | null>(null);
+
+  function leaveComputer() {
+    setComputerOpen(false);
+    setTrackpad(false);
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+    if (botId) {
+      router.replace({ pathname: "/thread", params: { botId, name } });
+      return;
+    }
+    router.replace("/");
+  }
 
   const embeddedScreenUrl = embeddableScreenUrl(screenUrl, currentApiBase());
   const hasControl = computer?.controlHolder === "user";
@@ -236,7 +252,7 @@ export default function Computer() {
         setReady(true);
       } catch (err) {
         if (!active) return;
-        setError(err instanceof Error ? err.message : "Não foi possível atualizar o computador");
+        setError(computerFailureMessage(err, "Não foi possível atualizar o computador"));
         setReady(true);
       } finally {
         inFlight = false;
@@ -285,7 +301,7 @@ export default function Computer() {
       if (isActive()) setError(null);
     } catch (err) {
       if (isActive()) {
-        setError(err instanceof Error ? err.message : "Não foi possível abrir o computador");
+        setError(computerFailureMessage(err, "Não foi possível abrir o computador"));
       }
       throw err;
     } finally {
@@ -375,7 +391,7 @@ export default function Computer() {
       setTrackpad(false);
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Não foi possível liberar o computador");
+      setError(computerFailureMessage(err, "Não foi possível liberar o computador"));
     }
   }
 
@@ -386,7 +402,7 @@ export default function Computer() {
       if (!text) return;
       await rpc("computer/input", { botId, kind: "clipboard", payload: { text } });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Não foi possível colar no computador");
+      setError(computerFailureMessage(err, "Não foi possível colar no computador"));
     }
   }
 
@@ -433,7 +449,7 @@ export default function Computer() {
         }}
         pointerEvents="box-none"
       >
-        <DarkIconButton symbol="chevron.left" label="Voltar" onPress={() => navigation.goBack()} />
+        <DarkIconButton symbol="chevron.left" label="Voltar" onPress={leaveComputer} />
         <Text
           numberOfLines={1}
           style={{ color: SCREEN_INK, fontSize: 19, fontWeight: "700", flex: 1, minWidth: 0 }}
@@ -621,9 +637,7 @@ export default function Computer() {
                 symbol="chevron.left"
                 label="Fechar computador"
                 onPress={() => {
-                  setComputerOpen(false);
-                  setTrackpad(false);
-                  navigation.goBack();
+                  leaveComputer();
                 }}
               />
               {/* Só a marca e o nome, como no chrome de tela cheia do sistema. */}

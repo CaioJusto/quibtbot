@@ -1,5 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { machineActivationGate, splitMachineCatalog } from "./machine-settings.js";
+import {
+  effectiveMachineApiKey,
+  machineActivationGate,
+  splitMachineCatalog,
+} from "./machine-settings.js";
+
+describe("effectiveMachineApiKey", () => {
+  it("reuses the Box key saved during server installation", () => {
+    expect(effectiveMachineApiKey("box", "", " box_saved ")).toBe("box_saved");
+    expect(effectiveMachineApiKey("box", "box_new", "box_saved")).toBe("box_new");
+  });
+
+  it("never lends the Box key to another provider", () => {
+    expect(effectiveMachineApiKey("e2b", "", "box_saved")).toBe("");
+    expect(effectiveMachineApiKey("remote-supervisor", " vps_token ", "box_saved")).toBe(
+      "vps_token",
+    );
+  });
+});
 
 describe("machineActivationGate", () => {
   it("blocks when credentials are missing", () => {

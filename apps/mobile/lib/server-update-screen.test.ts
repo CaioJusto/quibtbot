@@ -16,6 +16,16 @@ describe("mobile remote server update", () => {
     expect(account).toContain("parseSshCredentialHostId");
   });
 
+  it("updates the saved Box without asking for its key again", () => {
+    const account = source("../app/account.tsx");
+    const setup = source("../app/setup-ssh.tsx");
+    expect(account).toContain('row.authType === "boxApiKey"');
+    expect(account).toContain('{ mode: "box" }');
+    expect(setup).toContain("runBoxRemoteUpdate");
+    expect(setup).toContain("Atualizar minha Box");
+    expect(setup).toContain("Box salva neste iPhone");
+  });
+
   it("requires fingerprint confirmation and biometric credential loading", () => {
     const setup = source("../app/setup-ssh.tsx");
     expect(setup).toContain("runVerifiedRemoteUpdate");

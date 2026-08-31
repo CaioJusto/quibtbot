@@ -226,6 +226,18 @@ export function isComputerMissingError(error: unknown): boolean {
 export function publicComputerBootMessage(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
   const detail = error instanceof SupervisorRequestError ? error.detail : "";
+  if (/trial_auto_stop_required|free-trial boxes cannot run without auto-stop/i.test(raw)) {
+    return "A sua conta Box está no trial e exige pausa automática. O Quibt usa o limite de 2 horas e preserva o disco para retomar depois.";
+  }
+  if (/^box api\b.*\b(?:401|403)\b/i.test(raw)) {
+    return "A Box recusou a chave salva. Atualize a chave em Máquina dos bots e tente novamente.";
+  }
+  if (/^box api\b.*\b429\b/i.test(raw)) {
+    return "A sua conta Box atingiu o limite de máquinas agora. Aguarde um pouco ou confira o plano da Box.";
+  }
+  if (/^box api\b/i.test(raw)) {
+    return "A Box não conseguiu ligar este computador. Tente novamente; se continuar, confira a conta e a chave Box.";
+  }
   // Antes do ramo por código: com `computer-stopped` a frase inteira do supervisor
   // passava e o dono lia "RLIMIT_NPROC do uid 1000 no host", que é recado de operador.
   if (EAGAIN_MESSAGE.test(detail) || EAGAIN_MESSAGE.test(raw)) return COMPUTER_EAGAIN_MESSAGE;

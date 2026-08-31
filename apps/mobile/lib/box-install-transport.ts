@@ -1,3 +1,11 @@
+import {
+  BOX_INSTALL_MISSING_EXIT_CODE,
+  buildBoxHostCommand,
+  buildBoxHostingPreparationShell,
+  buildBoxPublicConfigurationShell,
+  parseBoxHostedUrl,
+  probeBoxHostedUrl,
+} from "@quibt/core";
 import type { InstallerEvent } from "@quibt/installer";
 import {
   BOX_API_BASE_URL,
@@ -9,6 +17,7 @@ import {
 } from "./box-api.js";
 import {
   buildRemoteBootstrapShell,
+  buildRemoteUpdateShell,
   type EmbeddedReleaseManifest,
   resolveEmbeddedReleaseArtifacts,
 } from "./release-artifacts.js";
@@ -16,7 +25,9 @@ import {
   emitInstallerEvent,
   type InstallResult,
   parseInstallerOutput,
+  parseRemoteUpdateOutput,
   type RemoteInstallTransport,
+  type RemoteUpdateResult,
 } from "./remote-installer.js";
 
 export const BOX_ID_PATTERN = /^bx_[23456789abcdefghjkmnpqrstuvwxyz]{8}$/;
@@ -318,6 +329,10 @@ export interface BoxInstallTransportOptions {
   signal?: AbortSignal;
 }
 
+export type BoxInstallTransport = RemoteInstallTransport & {
+  runUpdate(onEvent: (event: InstallerEvent) => void): Promise<RemoteUpdateResult>;
+};
+
 export async function runBoxRemoteInstall(
   transport: RemoteInstallTransport,
   onEvent: (event: InstallerEvent) => void,
@@ -337,9 +352,28 @@ export async function runBoxRemoteInstall(
   }
 }
 
+export async function runBoxRemoteUpdate(
+  transport: BoxInstallTransport,
+  onEvent: (event: InstallerEvent) => void,
+): Promise<RemoteUpdateResult> {
+  try {
+    await transport.connect("box-api");
+    const result = await transport.runUpdate(onEvent);
+    await transport.close().catch(() => undefined);
+    return result;
+  } catch (error) {
+    await transport.close().catch(() => undefined);
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Box update failed",
+      log: "",
+    };
+  }
+}
+
 export function createBoxInstallTransport(
   options: BoxInstallTransportOptions,
-): RemoteInstallTransport {
+): BoxInstallTransport {
   let activeBoxId: string | undefined;
 
   return {
@@ -352,7 +386,6 @@ export function createBoxInstallTransport(
     },
     async runInstall(onEvent) {
       const fetchImpl = options.fetch ?? fetch;
-      const release = resolveEmbeddedReleaseArtifacts(options.release);
       const secrets: string[] = [];
 
       emitInstallerEvent(
@@ -396,34 +429,144 @@ export function createBoxInstallTransport(
       emitInstallerEvent(
         onEvent,
         {
-          step: "images",
+          step: "services",
           status: "running",
-          message: "Running verified bootstrap on Box (detached)",
+          message: "Conferindo a instalação existente na Box",
         },
         secrets,
       );
 
-      const command = buildRemoteBootstrapShell(release);
-      const result = await runBoxDetachedInstall(
+      let preparation = await runBoxDetachedInstall(
         options.loadApiKey,
         box.id,
-        command,
+        buildBoxHostingPreparationShell(),
         secrets,
         onEvent,
         fetchImpl,
         options.signal,
       );
+      const logs: string[] = [];
 
-      const parsed = parseInstallerOutput(`${result.stdout}\n${result.stderr}`, secrets);
-      const url = parsed.url ?? (box.url ? String(box.url) : undefined);
+      if (preparation.exitCode === BOX_INSTALL_MISSING_EXIT_CODE) {
+        emitInstallerEvent(
+          onEvent,
+          {
+            step: "images",
+            status: "running",
+            message: "Running verified bootstrap on Box (detached)",
+          },
+          secrets,
+        );
+        const release = resolveEmbeddedReleaseArtifacts(options.release);
+        const bootstrap = await runBoxDetachedInstall(
+          options.loadApiKey,
+          box.id,
+          buildRemoteBootstrapShell(release),
+          secrets,
+          onEvent,
+          fetchImpl,
+          options.signal,
+        );
+        const parsedBootstrap = parseInstallerOutput(
+          `${bootstrap.stdout}\n${bootstrap.stderr}`,
+          secrets,
+        );
+        if (parsedBootstrap.log) logs.push(parsedBootstrap.log);
+        if (bootstrap.exitCode !== 0) {
+          return {
+            ok: false,
+            error: parsedBootstrap.log || "Box install command failed",
+            log: logs.join("\n"),
+            boxId: box.id,
+          };
+        }
+        preparation = await runBoxDetachedInstall(
+          options.loadApiKey,
+          box.id,
+          buildBoxHostingPreparationShell(),
+          secrets,
+          onEvent,
+          fetchImpl,
+          options.signal,
+        );
+      }
 
-      if (result.exitCode !== 0) {
+      const parsedPreparation = parseInstallerOutput(
+        `${preparation.stdout}\n${preparation.stderr}`,
+        secrets,
+      );
+      if (parsedPreparation.log) logs.push(parsedPreparation.log);
+      if (preparation.exitCode !== 0) {
         return {
           ok: false,
-          error: parsed.log || "Box install command failed",
-          log: parsed.log,
-          url,
-          pairing: parsed.pairing?.code ? parsed.pairing : undefined,
+          error: parsedPreparation.log || "Não consegui preparar a instalação existente na Box.",
+          log: logs.join("\n"),
+          boxId: box.id,
+        };
+      }
+
+      emitInstallerEvent(
+        onEvent,
+        {
+          step: "services",
+          status: "running",
+          message: "Publicando o Quibt com HTTPS pela Box",
+        },
+        secrets,
+      );
+      const hosted = await runBoxDetachedInstall(
+        options.loadApiKey,
+        box.id,
+        buildBoxHostCommand(),
+        secrets,
+        onEvent,
+        fetchImpl,
+        options.signal,
+      );
+      const parsedHosted = parseInstallerOutput(`${hosted.stdout}\n${hosted.stderr}`, secrets);
+      if (parsedHosted.log) logs.push(parsedHosted.log);
+      const publicUrl = parseBoxHostedUrl(`${hosted.stdout}\n${hosted.stderr}`);
+      if (hosted.exitCode !== 0 || !publicUrl) {
+        return {
+          ok: false,
+          error:
+            parsedHosted.log ||
+            "A Box não confirmou a URL HTTPS pública da instalação. A máquina foi preservada.",
+          log: logs.join("\n"),
+          boxId: box.id,
+        };
+      }
+
+      const configured = await runBoxDetachedInstall(
+        options.loadApiKey,
+        box.id,
+        buildBoxPublicConfigurationShell(publicUrl),
+        secrets,
+        onEvent,
+        fetchImpl,
+        options.signal,
+      );
+      const parsed = parseInstallerOutput(`${configured.stdout}\n${configured.stderr}`, secrets);
+      if (parsed.log) logs.push(parsed.log);
+
+      if (configured.exitCode !== 0) {
+        return {
+          ok: false,
+          error: parsed.log || "Não consegui concluir a configuração pública da Box.",
+          log: logs.join("\n"),
+          boxId: box.id,
+        };
+      }
+
+      const publiclyHealthy = await probeBoxHostedUrl(publicUrl, fetchImpl, {
+        signal: options.signal,
+      });
+      if (!publiclyHealthy) {
+        return {
+          ok: false,
+          error:
+            "A Box publicou o endereço, mas o Quibt ainda não respondeu pela internet. A máquina e os dados foram preservados; tente novamente.",
+          log: logs.join("\n"),
           boxId: box.id,
         };
       }
@@ -433,18 +576,169 @@ export function createBoxInstallTransport(
         {
           step: "health",
           status: "succeeded",
-          message: "Box install finished",
+          message: `Quibt disponível em ${publicUrl}`,
         },
         secrets,
       );
 
       return {
         ok: true,
-        url,
-        pairing: parsed.pairing?.code ? parsed.pairing : undefined,
-        log: parsed.log,
+        url: publicUrl,
+        pairing:
+          parsed.pairing?.code && parsed.pairing.url === publicUrl ? parsed.pairing : undefined,
+        log: logs.join("\n"),
         boxId: box.id,
       } satisfies InstallResult;
+    },
+    async runUpdate(onEvent) {
+      const fetchImpl = options.fetch ?? fetch;
+      const secrets: string[] = [];
+      const boxId = options.boxId;
+      if (!boxId || !isValidBoxId(boxId)) {
+        throw new Error(
+          "A máquina Box salva não foi encontrada. Abra Instalar no Box para recuperar a instalação existente.",
+        );
+      }
+
+      emitInstallerEvent(
+        onEvent,
+        {
+          step: "requirements",
+          status: "running",
+          message: "Abrindo a máquina Box salva",
+        },
+        secrets,
+      );
+      const box = await waitForBoxReady(options.loadApiKey, boxId, fetchImpl, options.signal);
+      activeBoxId = box.id;
+      emitInstallerEvent(
+        onEvent,
+        {
+          step: "requirements",
+          status: "succeeded",
+          message: "Máquina Box pronta para atualizar",
+        },
+        secrets,
+      );
+
+      const release = resolveEmbeddedReleaseArtifacts(options.release);
+      const updated = await runBoxDetachedInstall(
+        options.loadApiKey,
+        box.id,
+        buildRemoteUpdateShell(release),
+        secrets,
+        onEvent,
+        fetchImpl,
+        options.signal,
+      );
+      const combinedUpdate = `${updated.stdout}\n${updated.stderr}`;
+      const parsedUpdate = parseRemoteUpdateOutput(combinedUpdate, secrets);
+      if (updated.exitCode !== 0) {
+        return {
+          ok: false,
+          error:
+            parsedUpdate.log ||
+            "A atualização da Box falhou. A máquina e os dados foram preservados.",
+          log: parsedUpdate.log,
+        };
+      }
+      if (!parsedUpdate.ok || parsedUpdate.release !== release.release) {
+        return {
+          ...parsedUpdate,
+          ok: false,
+          error:
+            parsedUpdate.error ??
+            `A Box não confirmou a atualização para a versão ${release.release}.`,
+        };
+      }
+
+      emitInstallerEvent(
+        onEvent,
+        {
+          step: "services",
+          status: "running",
+          message: "Restaurando o acesso HTTPS público da Box",
+        },
+        secrets,
+      );
+      const prepared = await runBoxDetachedInstall(
+        options.loadApiKey,
+        box.id,
+        buildBoxHostingPreparationShell(),
+        secrets,
+        onEvent,
+        fetchImpl,
+        options.signal,
+      );
+      const preparedLog = parseInstallerOutput(
+        `${prepared.stdout}\n${prepared.stderr}`,
+        secrets,
+      ).log;
+      if (prepared.exitCode !== 0) {
+        return {
+          ...parsedUpdate,
+          ok: false,
+          error:
+            preparedLog ||
+            `A versão ${release.release} foi aplicada, mas não consegui reabrir o acesso público da Box.`,
+          log: [parsedUpdate.log, preparedLog].filter(Boolean).join("\n"),
+        };
+      }
+
+      const hosted = await runBoxDetachedInstall(
+        options.loadApiKey,
+        box.id,
+        buildBoxHostCommand(),
+        secrets,
+        onEvent,
+        fetchImpl,
+        options.signal,
+      );
+      const publicUrl = parseBoxHostedUrl(`${hosted.stdout}\n${hosted.stderr}`);
+      if (hosted.exitCode !== 0 || !publicUrl) {
+        return {
+          ...parsedUpdate,
+          ok: false,
+          error: `A versão ${release.release} foi aplicada, mas a Box não confirmou o endereço HTTPS público.`,
+          log: parsedUpdate.log,
+        };
+      }
+
+      const configured = await runBoxDetachedInstall(
+        options.loadApiKey,
+        box.id,
+        buildBoxPublicConfigurationShell(publicUrl),
+        secrets,
+        onEvent,
+        fetchImpl,
+        options.signal,
+      );
+      const configuredLog = parseInstallerOutput(
+        `${configured.stdout}\n${configured.stderr}`,
+        secrets,
+      ).log;
+      const publiclyHealthy =
+        configured.exitCode === 0 &&
+        (await probeBoxHostedUrl(publicUrl, fetchImpl, { signal: options.signal }));
+      if (!publiclyHealthy) {
+        return {
+          ...parsedUpdate,
+          ok: false,
+          error: `A versão ${release.release} foi aplicada, mas o Quibt ainda não respondeu no endereço público da Box.`,
+          log: [parsedUpdate.log, configuredLog].filter(Boolean).join("\n"),
+        };
+      }
+
+      emitInstallerEvent(
+        onEvent,
+        {
+          step: "health",
+          status: "succeeded",
+          message: `Box atualizada para ${release.release} e disponível em ${publicUrl}`,
+        },
+        secrets,
+      );
+      return parsedUpdate;
     },
     async close() {
       activeBoxId = undefined;

@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { BOX_PUBLIC_PROXY_ENV, normalizeBoxHostedUrl } from "@quibt/core";
 import { INSTALL_RELEASE } from "./compose.js";
 import { PUBLIC_HOST_ENV } from "./public-access.js";
 
@@ -87,8 +88,25 @@ export function ensureInstallEnvironment(
 
   // Um host público já gravado sobrevive a reinstalações: trocá-lo trocaria o
   // certificado e o endereço que o celular guardou. Só o primeiro install o define.
-  const publicHost = values[PUBLIC_HOST_ENV] || options.publicHost;
+  const publicProxyUrl = normalizeBoxHostedUrl(values[BOX_PUBLIC_PROXY_ENV] ?? "") ?? undefined;
+  if (publicProxyUrl) {
+    values[BOX_PUBLIC_PROXY_ENV] = publicProxyUrl;
+    delete values[PUBLIC_HOST_ENV];
+  } else {
+    delete values[BOX_PUBLIC_PROXY_ENV];
+  }
+  const publicHost = publicProxyUrl ? undefined : values[PUBLIC_HOST_ENV] || options.publicHost;
   if (publicHost) values[PUBLIC_HOST_ENV] = publicHost;
+
+  if (publicProxyUrl) {
+    // A Box termina o TLS no proxy on.ascii.dev e encaminha a porta 5173. A porta
+    // web precisa ouvir externamente no host; a API continua exclusivamente local.
+    values.QUIBT_WEB_BIND_HOST = "0.0.0.0";
+    values.QUIBT_API_BIND_HOST = "127.0.0.1";
+    values.WEB_ORIGIN = publicProxyUrl;
+    values.BETTER_AUTH_URL = publicProxyUrl;
+    values.API_URL = publicProxyUrl;
+  }
 
   assignDefault(
     values,
@@ -103,7 +121,7 @@ export function ensureInstallEnvironment(
   );
   if (publicHost) assignDefault(values, "QUIBT_API_BIND_HOST", "127.0.0.1");
 
-  const origin = publicHost ? `https://${publicHost}` : publicUrl;
+  const origin = publicProxyUrl ?? (publicHost ? `https://${publicHost}` : publicUrl);
   if (!values.WEB_ORIGIN) values.WEB_ORIGIN = origin;
   if (!values.BETTER_AUTH_URL) values.BETTER_AUTH_URL = origin;
   if (!values.API_URL) {

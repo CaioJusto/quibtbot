@@ -1,4 +1,5 @@
 import type { BillingSnapshot } from "@quibt/contracts";
+import { isTransientNetworkFailure } from "@quibt/core";
 import * as SecureStore from "expo-secure-store";
 import { defaultApiBase, type EndpointResult, normalizeApiBase } from "./endpoint";
 import {
@@ -32,11 +33,6 @@ function isTransientStatus(status: number) {
  */
 export function unreachableMessage(status: number) {
   return `Não foi possível alcançar o seu Quibt (HTTP ${status}).`;
-}
-
-function isTransientNetworkError(error: unknown) {
-  if (!(error instanceof Error)) return false;
-  return /network request failed|failed to fetch|networkerror|load failed/i.test(error.message);
 }
 
 function wait(ms: number) {
@@ -152,7 +148,7 @@ async function apiFetch(input: string, init: RequestInit): Promise<Response> {
       if (controller.signal.aborted) {
         throw new Error("A conexão demorou demais. Verifique sua internet e tente novamente.");
       }
-      if (!isTransientNetworkError(error) || attempt === MOBILE_RPC_RETRIES) throw error;
+      if (!isTransientNetworkFailure(error) || attempt === MOBILE_RPC_RETRIES) throw error;
       lastError = error;
     } finally {
       clearTimeout(timer);

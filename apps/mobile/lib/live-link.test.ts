@@ -176,6 +176,11 @@ describe("isConnectionProblem", () => {
   it("reconhece as falhas do fetch, as traduzidas pelo apiFetch e os 5xx do proxy", () => {
     expect(isConnectionProblem("Network request failed")).toBe(true);
     expect(isConnectionProblem("TypeError: Failed to fetch")).toBe(true);
+    expect(
+      isConnectionProblem(
+        "fetch failed: UnexpectedException: The network connection was lost. (at ExpoModulesCore/Promise.swift:56)",
+      ),
+    ).toBe(true);
     expect(isConnectionProblem("A conexão demorou demais. Verifique sua internet.")).toBe(true);
     expect(isConnectionProblem("HTTP 502")).toBe(true);
     expect(isConnectionProblem("connect ECONNREFUSED 127.0.0.1:3100")).toBe(true);

@@ -191,98 +191,144 @@ describe("installOverVerifiedSsh", () => {
   });
 });
 
-describe("installOnBox", () => {
-  it("uses detached command polling and validates server box metadata", async () => {
-    const requests: Array<{ method: string; path: string; body?: unknown }> = [];
-    let polls = 0;
-    let allocatedBoxId: string | undefined;
-    const fetchImpl = vi.fn(async (input: string | URL, init?: RequestInit) => {
-      const url = new URL(String(input));
-      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
-      requests.push({ method: init?.method ?? "GET", path: url.pathname, body });
-      if (init?.method === "GET" && url.pathname === "/api/box/v1/boxes") {
+const BOX_ID = "bx_23456789";
+const BOX_PUBLIC_URL = "https://quibt-owner-5173.on.ascii.dev";
+
+function desktopBoxFetch(options: { empty?: boolean; trial?: boolean } = {}) {
+  let processId = 0;
+  let preparationCount = 0;
+  let createAttempts = 0;
+  const commands = new Map<number, string>();
+  const requests: Array<{ method: string; path: string; body?: unknown }> = [];
+  const fetchImpl = vi.fn(async (input: string | URL, init?: RequestInit) => {
+    const url = new URL(String(input));
+    const body = init?.body ? (JSON.parse(String(init.body)) as unknown) : undefined;
+    const method = init?.method ?? "GET";
+    requests.push({ method, path: url.pathname, body });
+
+    if (url.origin === BOX_PUBLIC_URL && method === "POST" && url.pathname === "/rpc/health") {
+      return new Response(JSON.stringify({ json: { ok: true, needsFirstOwner: true } }), {
+        status: 200,
+      });
+    }
+    if (method === "GET" && url.pathname.endsWith("/boxes")) {
+      return new Response(
+        JSON.stringify({
+          boxes: options.empty
+            ? []
+            : [{ id: BOX_ID, name: "Quibt Bot server", state: "ready", environment: null }],
+        }),
+        { status: 200 },
+      );
+    }
+    if (method === "POST" && url.pathname.endsWith("/boxes")) {
+      createAttempts += 1;
+      if (options.trial && createAttempts === 1) {
         return new Response(
           JSON.stringify({
-            ok: true,
-            boxes: [
-              {
-                id: "bx_23456789",
-                name: "Quibt Bot server",
-                state: "ready",
-                url: "https://quibt.on.ascii.dev",
-                environment: null,
-              },
-            ],
+            code: "trial_auto_stop_required",
+            message: "Trial boxes require an auto-stop TTL",
+          }),
+          { status: 400 },
+        );
+      }
+      return new Response(
+        JSON.stringify({ box: { id: BOX_ID, name: null, state: "ready", environment: null } }),
+        { status: 200 },
+      );
+    }
+    if (method === "PATCH" && url.pathname.endsWith(`/boxes/${BOX_ID}`)) {
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }
+    if (method === "GET" && url.pathname.endsWith(`/boxes/${BOX_ID}`)) {
+      return new Response(
+        JSON.stringify({
+          box: { id: BOX_ID, name: "Quibt Bot server", state: "ready", environment: null },
+        }),
+        { status: 200 },
+      );
+    }
+    if (method === "POST" && url.pathname.endsWith(`/boxes/${BOX_ID}/commands`)) {
+      expect(body).toMatchObject({ detached: true });
+      processId += 1;
+      commands.set(processId, String((body as { command?: unknown }).command ?? ""));
+      return new Response(JSON.stringify({ success: true, processId }), { status: 200 });
+    }
+    const commandMatch = url.pathname.match(/\/commands\/(\d+)$/);
+    if (method === "GET" && commandMatch?.[1]) {
+      const command = commands.get(Number(commandMatch[1])) ?? "";
+      if (command.includes("QUIBT_BOX_INSTALL_READY")) {
+        preparationCount += 1;
+        return new Response(
+          JSON.stringify({
+            running: false,
+            exitCode: options.empty && preparationCount === 1 ? 42 : 0,
+            stdout: options.empty && preparationCount === 1 ? "" : "QUIBT_BOX_INSTALL_READY\n",
+            stderr: options.empty && preparationCount === 1 ? "QUIBT_BOX_INSTALL_MISSING\n" : "",
           }),
           { status: 200 },
         );
       }
-      if (init?.method === "GET" && url.pathname === "/api/box/v1/boxes/bx_23456789") {
+      if (command.startsWith("host 5173")) {
         return new Response(
           JSON.stringify({
-            ok: true,
-            box: {
-              id: "bx_23456789",
-              name: "Quibt Bot server",
-              state: "ready",
-              url: "https://quibt.on.ascii.dev",
-              environment: null,
-            },
-          }),
-          { status: 200 },
-        );
-      }
-      if (init?.method === "POST" && url.pathname === "/api/box/v1/boxes/bx_23456789/commands") {
-        expect(body).toMatchObject({ detached: true });
-        return new Response(JSON.stringify({ success: true, processId: 42 }), { status: 200 });
-      }
-      if (init?.method === "POST" && url.pathname === "/api/box/v1/boxes/bx_23456789/interrupt") {
-        expect(body).toBeUndefined();
-        return new Response(
-          JSON.stringify({ ok: true, type: "box.interrupted", id: "bx_23456789" }),
-          {
-            status: 200,
-          },
-        );
-      }
-      if (init?.method === "GET" && url.pathname === "/api/box/v1/boxes/bx_23456789/commands/42") {
-        polls += 1;
-        return new Response(
-          JSON.stringify({
-            success: true,
-            running: polls < 2,
-            exitCode: polls < 2 ? null : 0,
-            stdout:
-              polls < 2
-                ? "[images] running: bootstrap\n"
-                : "URL: https://quibt.on.ascii.dev\nCode: ZYXWV\n",
+            running: false,
+            exitCode: 0,
+            stdout: `Hosted publicly at ${BOX_PUBLIC_URL}\n`,
             stderr: "",
           }),
           { status: 200 },
         );
       }
-      return new Response("not found", { status: 404 });
-    });
+      if (command.includes("QUIBT_BOX_OWNER")) {
+        return new Response(
+          JSON.stringify({
+            running: false,
+            exitCode: 0,
+            stdout: `URL: ${BOX_PUBLIC_URL}\nCode: BC09NEQ8\nToken: secret-token\nExpires: 2026-09-01T10:00:00.000Z\n`,
+            stderr: "",
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          running: false,
+          exitCode: 0,
+          stdout: "URL: http://127.0.0.1:5173\nCode: OLDINVIT\n",
+          stderr: "",
+        }),
+        { status: 200 },
+      );
+    }
+    return new Response("not found", { status: 404 });
+  });
+  return { fetchImpl: fetchImpl as typeof fetch, requests, commands };
+}
 
-    let allocatedAt: string | undefined;
+describe("installOnBox", () => {
+  it("recovers an existing Box through its public HTTPS host without re-downloading", async () => {
+    const { fetchImpl, commands } = desktopBoxFetch();
+    let allocatedBoxId: string | undefined;
     const result = await installOnBox({ apiKey: "box_live_secret_key" }, () => {}, {
       fetch: fetchImpl,
-      releaseManifest: verified,
+      releaseManifest: releaseManifestFixture({ pipelineStatus: "pending" }),
       onBoxAllocated: (boxId) => {
         allocatedBoxId = boxId;
-        allocatedAt = "allocated";
       },
     });
+
     expect(result.ok).toBe(true);
-    expect(result.boxId).toBe("bx_23456789");
-    expect(allocatedBoxId).toBe("bx_23456789");
-    expect(allocatedAt).toBe("allocated");
-    expect(result.pairing?.code).toBe("ZYXWV");
+    expect(result.boxId).toBe(BOX_ID);
+    expect(allocatedBoxId).toBe(BOX_ID);
+    expect(result.url).toBe(BOX_PUBLIC_URL);
+    expect(result.pairing?.code).toBe("BC09NEQ8");
+    expect([...commands.values()].some((command) => command.includes("curl -fsSL"))).toBe(false);
     expect(JSON.stringify(result)).not.toContain("box_live_secret_key");
-    expect(isValidBoxId("bx_23456789")).toBe(true);
+    expect(isValidBoxId(BOX_ID)).toBe(true);
     expect(
       isServerBoxRecord({
-        id: "bx_23456789",
+        id: BOX_ID,
         name: "Quibt Bot server",
         state: "ready",
         environment: null,
@@ -290,160 +336,41 @@ describe("installOnBox", () => {
     ).toBe(true);
   });
 
-  it("creates server boxes with noEnv only and allocates before waiting", async () => {
+  it("creates and records a new server Box before waiting, then replaces loopback", async () => {
+    const { fetchImpl, commands, requests } = desktopBoxFetch({ empty: true });
     let allocated = false;
-    let waited = false;
-    const fetchImpl = vi.fn(async (input: string | URL, init?: RequestInit) => {
-      const url = new URL(String(input));
-      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
-      if (init?.method === "GET" && url.pathname === "/api/box/v1/boxes") {
-        return new Response(JSON.stringify({ ok: true, boxes: [] }), { status: 200 });
-      }
-      if (init?.method === "POST" && url.pathname === "/api/box/v1/boxes") {
-        expect(body).toEqual(createServerBoxRequest());
-        return new Response(
-          JSON.stringify({
-            ok: true,
-            box: {
-              id: "bx_23456789",
-              name: "Quibt Bot server",
-              state: "provisioning",
-              environment: null,
-            },
-          }),
-          { status: 200 },
-        );
-      }
-      if (init?.method === "PATCH" && url.pathname === "/api/box/v1/boxes/bx_23456789") {
-        return new Response(
-          JSON.stringify({ ok: true, box: { id: "bx_23456789", environment: null } }),
-          {
-            status: 200,
-          },
-        );
-      }
-      if (init?.method === "GET" && url.pathname === "/api/box/v1/boxes/bx_23456789") {
-        waited = true;
-        expect(allocated).toBe(true);
-        return new Response(
-          JSON.stringify({
-            ok: true,
-            box: {
-              id: "bx_23456789",
-              name: "Quibt Bot server",
-              state: "ready",
-              url: "https://quibt.on.ascii.dev",
-              environment: null,
-            },
-          }),
-          { status: 200 },
-        );
-      }
-      if (init?.method === "POST" && url.pathname === "/api/box/v1/boxes/bx_23456789/commands") {
-        return new Response(JSON.stringify({ success: true, processId: 7 }), { status: 200 });
-      }
-      if (init?.method === "GET" && url.pathname === "/api/box/v1/boxes/bx_23456789/commands/7") {
-        return new Response(
-          JSON.stringify({
-            success: true,
-            running: false,
-            exitCode: 0,
-            stdout: "URL: https://x\nCode: ABCDE\n",
-            stderr: "",
-          }),
-          { status: 200 },
-        );
-      }
-      return new Response("not found", { status: 404 });
-    });
-
-    await installOnBox({ apiKey: "box_key" }, () => {}, {
+    const result = await installOnBox({ apiKey: "box_key" }, () => {}, {
       fetch: fetchImpl,
       releaseManifest: verified,
       onBoxAllocated: () => {
         allocated = true;
       },
     });
+
+    expect(result.ok).toBe(true);
+    expect(result.url).toBe(BOX_PUBLIC_URL);
     expect(allocated).toBe(true);
-    expect(waited).toBe(true);
+    expect(
+      requests.find((request) => request.method === "POST" && request.path.endsWith("/boxes"))
+        ?.body,
+    ).toEqual(createServerBoxRequest());
+    expect([...commands.values()].some((command) => command.includes("curl -fsSL"))).toBe(true);
   });
 
   it("retries Box trial creation with a two-hour TTL and reports the fallback", async () => {
-    const requests: unknown[] = [];
     const events: InstallerEvent[] = [];
-    let createAttempts = 0;
-    const fetchImpl = vi.fn(async (input: string | URL, init?: RequestInit) => {
-      const url = new URL(String(input));
-      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
-      if (init?.method === "GET" && url.pathname === "/api/box/v1/boxes") {
-        return new Response(JSON.stringify({ boxes: [] }), { status: 200 });
-      }
-      if (init?.method === "POST" && url.pathname === "/api/box/v1/boxes") {
-        requests.push(body);
-        createAttempts += 1;
-        if (createAttempts === 1) {
-          return new Response(
-            JSON.stringify({
-              code: "trial_auto_stop_required",
-              message: "Trial boxes require an auto-stop TTL",
-            }),
-            { status: 400 },
-          );
-        }
-        return new Response(
-          JSON.stringify({
-            box: {
-              id: "bx_23456789",
-              name: "Quibt Bot server",
-              state: "ready",
-            },
-          }),
-          { status: 200 },
-        );
-      }
-      if (init?.method === "PATCH" && url.pathname === "/api/box/v1/boxes/bx_23456789") {
-        return new Response(JSON.stringify({ ok: true }), { status: 200 });
-      }
-      if (init?.method === "GET" && url.pathname === "/api/box/v1/boxes/bx_23456789") {
-        return new Response(
-          JSON.stringify({
-            box: {
-              id: "bx_23456789",
-              name: "Quibt Bot server",
-              state: "ready",
-            },
-          }),
-          { status: 200 },
-        );
-      }
-      if (init?.method === "POST" && url.pathname.endsWith("/commands")) {
-        return new Response(JSON.stringify({ success: true, processId: 7 }), { status: 200 });
-      }
-      if (init?.method === "GET" && url.pathname.endsWith("/commands/7")) {
-        return new Response(
-          JSON.stringify({
-            success: true,
-            running: false,
-            exitCode: 0,
-            stdout: "URL: https://x\nCode: ABCDE\n",
-            stderr: "",
-          }),
-          { status: 200 },
-        );
-      }
-      return new Response("not found", { status: 404 });
-    });
-
+    const { fetchImpl, requests } = desktopBoxFetch({ empty: true, trial: true });
     const result = await installOnBox({ apiKey: "box_key" }, (event) => events.push(event), {
       fetch: fetchImpl,
       releaseManifest: verified,
     });
 
     expect(result.ok).toBe(true);
-    expect(requests).toEqual([
-      createServerBoxRequest(),
-      createServerBoxRequest(BOX_TRIAL_SERVER_TTL_SECONDS),
-    ]);
+    expect(
+      requests
+        .filter((request) => request.method === "POST" && request.path.endsWith("/boxes"))
+        .map((request) => request.body),
+    ).toEqual([createServerBoxRequest(), createServerBoxRequest(BOX_TRIAL_SERVER_TTL_SECONDS)]);
     expect(events.some((event) => event.message.includes("até 2 horas"))).toBe(true);
   });
 });

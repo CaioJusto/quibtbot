@@ -492,6 +492,18 @@ describe("screen revocation", () => {
 });
 
 describe("mensagens por audiência", () => {
+  it("não expõe o JSON técnico quando a Box exige auto-stop no trial", () => {
+    const message = publicComputerBootMessage(
+      new Error(
+        'box api POST /boxes failed: 400 {"code":"trial_auto_stop_required","message":"Free-trial Boxes cannot run without auto-stop"}',
+      ),
+    );
+    expect(message).toMatch(/trial/i);
+    expect(message).toMatch(/2 horas/i);
+    expect(message).toMatch(/preserva/i);
+    expect(message).not.toMatch(/box api|\{"code"/i);
+  });
+
   it("o EAGAIN não entrega 'RLIMIT_NPROC do uid 1000' ao dono, nem com código junto", () => {
     // O revive prefixa a própria frase e marca `computer-stopped`; sem isto a mensagem
     // inteira passava pelo ramo do código e o diagnóstico de operador virava recado.

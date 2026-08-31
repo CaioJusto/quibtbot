@@ -48,6 +48,14 @@ describe("machineGuideFor", () => {
     expect(machineGuideFor("docker").keyUrl).toBeUndefined();
   });
 
+  it("explains the Box trial auto-stop and saved-key reuse before activation", () => {
+    const guide = machineGuideFor("box");
+    const copy = [guide.what, ...guide.youNeed, ...guide.steps, guide.cost].join("\n");
+    expect(copy).toMatch(/2 horas/i);
+    expect(copy).toMatch(/chave salva.*reutilizada|desbloqueie a chave salva/i);
+    expect(copy).toMatch(/preserva o disco/i);
+  });
+
   it("says Docker bots share one computer and E2B/Box do not", () => {
     expect(machineGuideFor("docker").botsShare).toMatch(/mesmo computador/i);
     expect(machineGuideFor("e2b").botsShare).toMatch(/Não compartilham/);
