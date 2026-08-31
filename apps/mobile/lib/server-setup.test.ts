@@ -15,10 +15,10 @@ describe("bootstrapCommand", () => {
     expect(bootstrapCommand("linux")).toContain("QUIBT_SHOW_SENSITIVE=1");
   });
   it("names the release assets exactly as the release workflow publishes them", () => {
-    expect(bootstrapCommand("linux")).toContain("QUIBT_RELEASE=0.2.17");
-    expect(bootstrapCommand("darwin")).toContain("QUIBT_RELEASE=0.2.17");
+    expect(bootstrapCommand("linux")).toContain("QUIBT_RELEASE=0.2.18");
+    expect(bootstrapCommand("darwin")).toContain("QUIBT_RELEASE=0.2.18");
     expect(bootstrapCommand("win32")).toContain("quibtbot-win32-x64.exe");
-    expect(bootstrapCommand("win32")).toContain("checksums-0.2.17.txt");
+    expect(bootstrapCommand("win32")).toContain("checksums-0.2.18.txt");
     expect(bootstrapCommand("win32")).toContain("api.github.com");
   });
   it("sends the person's own computer to the arch-detecting script the site shows", () => {

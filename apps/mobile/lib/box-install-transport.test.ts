@@ -160,7 +160,7 @@ function createBoxFetch(options: BoxFetchOptions = {}) {
             running: false,
             exitCode: 0,
             stdout:
-              '[database] succeeded: backup ready\n{\n  "release": "0.2.17",\n  "previousRelease": "0.2.16",\n  "backupPath": "/var/lib/quibt/backups/pre-update"\n}\n',
+              '[database] succeeded: backup ready\n{\n  "release": "0.2.18",\n  "previousRelease": "0.2.16",\n  "backupPath": "/var/lib/quibt/backups/pre-update"\n}\n',
             stderr: "",
           }),
           { status: 200 },
@@ -325,7 +325,7 @@ describe("createBoxInstallTransport", () => {
 
     expect(result).toMatchObject({
       ok: true,
-      release: "0.2.17",
+      release: "0.2.18",
       previousRelease: "0.2.16",
       backupPath: "/var/lib/quibt/backups/pre-update",
     });

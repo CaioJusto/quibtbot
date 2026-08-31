@@ -1,6 +1,6 @@
 import { PUBLIC_PROFILE } from "./public-access.js";
 
-export const INSTALL_RELEASE = "0.2.17";
+export const INSTALL_RELEASE = "0.2.18";
 
 export interface DesktopSigning {
   mac: { signed: boolean; notarized: boolean };
@@ -15,7 +15,7 @@ export interface DesktopSigning {
  * quando a faz). Site, README e docs escolhem a frase de download por este objeto — nunca
  * chame um build de assinado ou notarizado sem o status da tag dizer isso.
  *
- * v0.2.17: candidato ainda sem tag. O status permanece falso até o artefato exato ser
+ * v0.2.18: candidato ainda sem tag. O status permanece falso até o artefato exato ser
  * assinado, aceito pela Apple, grampeado e anexado à release com o status correspondente.
  * Na v0.2.14 (assim como v0.2.10 e v0.2.9) o mantenedor provou todas essas etapas.
  */

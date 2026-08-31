@@ -33,7 +33,7 @@ set -euo pipefail
 # Bring-your-own VPS: use the versioned Quibt installer. It verifies the
 # architecture-specific binary checksum and installs Docker through the distro path.
 curl -fsSL ${INSTALL_SCRIPT_RAW_URL} \
-  | QUIBT_RELEASE=0.2.17 sh
+  | QUIBT_RELEASE=0.2.18 sh
 `;
 
 export const MACHINE_CATALOG: MachineCatalogDefinition[] = [

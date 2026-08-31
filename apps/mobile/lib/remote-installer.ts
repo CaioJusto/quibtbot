@@ -465,7 +465,7 @@ export function createMockSshTransport(input: {
       }
       return parseRemoteUpdateOutput(
         input.installOutput ??
-          '[health] succeeded: API ready\n{\n  "release": "0.2.17",\n  "previousRelease": "0.2.12",\n  "backupPath": "/var/lib/quibt/backups/pre-update"\n}\n',
+          '[health] succeeded: API ready\n{\n  "release": "0.2.18",\n  "previousRelease": "0.2.12",\n  "backupPath": "/var/lib/quibt/backups/pre-update"\n}\n',
         secrets,
         onEvent,
       );

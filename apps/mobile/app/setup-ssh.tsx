@@ -354,37 +354,35 @@ export default function SetupSshScreen() {
         {stage === "form" ? (
           <View style={styles.card}>
             {mode === "box" ? (
-              <>
-                {operation === "update" ? (
-                  <>
-                    <Text style={styles.label}>Box salva neste iPhone</Text>
-                    <Text style={styles.hint}>
-                      O Face ID libera a chave Box já salva somente neste aparelho. A máquina, os
-                      bots e os dados serão preservados; antes da troca de versão, o Quibt cria um
-                      backup para rollback.
-                    </Text>
-                  </>
-                ) : (
-                  <>
-                    <Text style={styles.label}>Chave da API Box</Text>
-                    <TextInput
-                      value={boxApiKey}
-                      onChangeText={setBoxApiKey}
-                      secureTextEntry
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                      placeholder="box_live_..."
-                      placeholderTextColor={COLORS.tertiary}
-                      style={AUTH_FIELD_TEXT}
-                    />
-                    <Text style={styles.hint}>
-                      Use somente uma chave criada em box.ascii.dev — não é a chave da Hetzner. Ela
-                      fica no SecureStore deste aparelho e não é enviada para a API Quibt. No trial,
-                      o servidor de teste fica ligado por até 2 horas por vez.
-                    </Text>
-                  </>
-                )}
-              </>
+              operation === "update" ? (
+                <>
+                  <Text style={styles.label}>Box salva neste iPhone</Text>
+                  <Text style={styles.hint}>
+                    O Face ID libera a chave Box já salva somente neste aparelho. A máquina, os bots
+                    e os dados serão preservados; antes da troca de versão, o Quibt cria um backup
+                    para rollback.
+                  </Text>
+                </>
+              ) : (
+                <>
+                  <Text style={styles.label}>Chave da API Box</Text>
+                  <TextInput
+                    value={boxApiKey}
+                    onChangeText={setBoxApiKey}
+                    secureTextEntry
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    placeholder="box_live_..."
+                    placeholderTextColor={COLORS.tertiary}
+                    style={AUTH_FIELD_TEXT}
+                  />
+                  <Text style={styles.hint}>
+                    Use somente uma chave criada em box.ascii.dev — não é a chave da Hetzner. Ela
+                    fica no SecureStore deste aparelho e não é enviada para a API Quibt. No trial, o
+                    servidor de teste fica ligado por até 2 horas por vez.
+                  </Text>
+                </>
+              )
             ) : operation === "update" ? (
               <>
                 <Text style={styles.label}>Servidor salvo</Text>

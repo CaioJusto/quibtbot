@@ -25,17 +25,17 @@
 
 Each bot has one thread, one computer, memory, routines, and history. You run the stack on your machine. Packages live under `@quibt/*`. This repository is the complete product.
 
-> **Where this is:** `v0.2.17` is the source candidate; `v0.2.14` remains the latest public
+> **Where this is:** `v0.2.18` is the source candidate; `v0.2.14` remains the latest public
 > production release until the new tag, notarized Mac artifact, checksums and embedded CLI
 > manifest have all passed their independent gates. CI proves the Linux path on every release run —
 > a real Docker host boots a bot computer and the VPS Compose stack comes up and answers.
 >
-> What is **not** covered yet: the release pipeline first creates `v0.2.17` desktop installers
+> What is **not** covered yet: the release pipeline first creates `v0.2.18` desktop installers
 > **unsigned** on every platform. Until the maintainer replaces the Apple-silicon
 > `QuibtBot.dmg`, it is not notarized
 > (`signing-status-mac.json` says `signed: false, notarized: false`), so macOS warns the first
 > time — **right-click → Open**. The `v0.2.14`, `v0.2.10` and `v0.2.9` DMGs were replaced by
-> Developer ID signed, notarized and stapled builds; the same gate applies to `v0.2.17`.
+> Developer ID signed, notarized and stapled builds; the same gate applies to `v0.2.18`.
 > The Windows installer and the Linux AppImage are unsigned test builds (Intel Macs run from
 > source), and a public multi-user deployment still needs the isolation and TLS choices in
 > [Security model](#security-model) — Docker and `remote-supervisor` assume one trusted owner.
@@ -60,7 +60,7 @@ each installer follows `DESKTOP_SIGNING` in `packages/installer/src/compose.ts`,
 `signing-status-*.json` files attached to the tag. Details are in
 [`docs/desktop.md`](docs/desktop.md).
 
-The `v0.2.17` release candidate will publish those three desktop installers, standalone macOS/Linux/Windows
+The `v0.2.18` release candidate will publish those three desktop installers, standalone macOS/Linux/Windows
 `quibtbot` binaries, matching SHA-256 files, and public multi-architecture Docker images from
 the same tag. Until it is public, use the immutable latest-production command below:
 
