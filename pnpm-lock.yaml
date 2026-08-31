@@ -90,8 +90,8 @@ importers:
         specifier: ^4.9.6
         version: 4.13.1
       stripe:
-        specifier: ^22.5.0
-        version: 22.5.0(@types/node@24.13.3)
+        specifier: ^22.6.0
+        version: 22.6.0(@types/node@24.13.3)
       tsx:
         specifier: ^4.20.5
         version: 4.23.12
@@ -7663,8 +7663,8 @@ packages:
     resolution: {integrity: sha512-yDPMNjp4WyfYBkHnjIRLfca1i6KMyGCtsVgoKe/z1+6vukgaENdgGBZt+ZmKPc4gavvEZ5OgHfHdrazhgNyG7w==}
     engines: {node: '>=12'}
 
-  stripe@22.5.0:
-    resolution: {integrity: sha512-QVwMwriC0bbySx6R4dpsvJ0W//GojC1kwWVS6rPSoVqDUIZX4Hy3TaUrd2AZeXEAaKbfWIjQjvo3vKAReHZ0vQ==}
+  stripe@22.6.0:
+    resolution: {integrity: sha512-Ezk+WYEEwX2DLxFrKfb6coznlCMZvCaCYMNPXNHFSZkBIEzF5Hgm7RLb38q/0h9Ol5jsUJGJRorvhzAvckgfhw==}
     engines: {node: '>=18'}
     peerDependencies:
       '@types/node': '>=18'
@@ -16756,7 +16756,7 @@ snapshots:
     dependencies:
       ansi-regex: 6.3.0
 
-  stripe@22.5.0(@types/node@24.13.3):
+  stripe@22.6.0(@types/node@24.13.3):
     optionalDependencies:
       '@types/node': 24.13.3
 
