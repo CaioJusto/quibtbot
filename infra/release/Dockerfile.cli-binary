@@ -4,7 +4,7 @@
 # The build happens inside the requested native Linux architecture and pins the
 # embedded Compose manifest to the exact release image digests without editing
 # the developer checkout.
-FROM node:22.19-bookworm@sha256:afff6d8c97964a438d2e6a9c96509367e45d8bf93f790ad561a1eaea926303d9 AS build
+FROM node:26.8-bookworm@sha256:9f94d34c787165dca03b74e5bf9c3bf90e8de79b19aa3d87fe1fa1694bf75c89 AS build
 
 ENV ONNXRUNTIME_NODE_INSTALL=skip
 RUN corepack enable
