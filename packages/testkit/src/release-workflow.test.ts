@@ -135,6 +135,13 @@ describe("release workflow artifacts", () => {
       );
     }
   });
+
+  it("does not include the aggregate checksum file in its own digest list", () => {
+    const checksumRunBodies = (jobs.checksums?.steps ?? [])
+      .map((step) => String(step.run ?? ""))
+      .join("\n");
+    expect(checksumRunBodies).toMatch(/! -name "\$OUT"/);
+  });
 });
 
 describe("release workflow signing", () => {

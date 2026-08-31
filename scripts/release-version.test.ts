@@ -92,6 +92,8 @@ describe("releaseManifest", () => {
 describe("one version, every consumer", () => {
   it("resolves the installer, desktop, CLI, site and image tags from the same release version", () => {
     const desktopPkg = readJson("apps/desktop/package.json") as { version: string };
+    const mobilePkg = readJson("apps/mobile/package.json") as { version: string };
+    const mobileConfig = readJson("apps/mobile/app.json") as { expo?: { version?: string } };
     const sitePath = path.join(root, "apps/www/src/site.ts");
     const siteSource = readFileSync(sitePath, "utf8");
     const desktopVersionMatch = /export const DESKTOP_VERSION = ([A-Za-z0-9_]+);/.exec(siteSource);
@@ -110,6 +112,8 @@ describe("one version, every consumer", () => {
     expect(rootPkg.version).toBe(release);
     expect(cliPkg.version).toBe(release);
     expect(desktopPkg.version).toBe(release);
+    expect(mobilePkg.version).toBe(release);
+    expect(mobileConfig.expo?.version).toBe(release);
 
     const manifest = releaseManifest(release);
     const images = allQuibtImages(

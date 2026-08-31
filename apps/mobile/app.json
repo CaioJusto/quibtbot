@@ -4,7 +4,7 @@
     "slug": "quibt-bot",
     "owner": "quibt",
     "scheme": "quibt",
-    "version": "0.1.2",
+    "version": "0.2.18",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "icon": "./assets/icon.png",
@@ -86,7 +86,7 @@
     ],
     "ios": {
       "bundleIdentifier": "app.quibt.bot",
-      "buildNumber": "3",
+      "buildNumber": "18",
       "userInterfaceStyle": "automatic",
       "supportsTablet": true,
       "icon": "./assets/icon.png",
@@ -103,7 +103,7 @@
     },
     "android": {
       "package": "app.quibt.bot",
-      "versionCode": 3,
+      "versionCode": 18,
       "userInterfaceStyle": "light",
       "icon": "./assets/icon.png",
       "adaptiveIcon": {

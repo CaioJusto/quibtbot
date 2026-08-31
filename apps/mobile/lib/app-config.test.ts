@@ -51,9 +51,9 @@ describe("mobile native app config", () => {
 
   it("isolates OTA updates whenever the native dependency fingerprint changes", () => {
     expect(config.expo.runtimeVersion).toEqual({ policy: "fingerprint" });
-    expect(config.expo.version).toBe("0.1.2");
-    expect(config.expo.ios?.buildNumber).toBe("3");
-    expect(config.expo.android?.versionCode).toBe(3);
+    expect(config.expo.version).toBe("0.2.18");
+    expect(config.expo.ios?.buildNumber).toBe("18");
+    expect(config.expo.android?.versionCode).toBe(18);
   });
 
   it("enables the complete iOS dark palette without exposing a partial Android theme", () => {
