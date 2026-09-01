@@ -3118,7 +3118,7 @@ export function ShellPage() {
                 <button
                   type="button"
                   className="qb-dash__screen"
-                  aria-label={holdsControl ? "Abrir computador" : "Assumir controle do computador"}
+                  aria-label="Abrir a tela do computador"
                   onClick={() => void openComputer()}
                 >
                   {computerOpen ? (
@@ -3215,6 +3215,7 @@ export function ShellPage() {
                   <button
                     type="button"
                     className="qb-dash__screen-action"
+                    aria-label={holdsControl ? "Liberar controle" : "Assumir controle"}
                     onClick={() =>
                       holdsControl ? void releaseComputer() : void takeOverComputer()
                     }
@@ -3737,6 +3738,7 @@ export function ShellPage() {
                   type="button"
                   variant="outline"
                   size="sm"
+                  aria-label="Assumir controle na tela cheia"
                   onClick={() => void takeOverComputer()}
                 >
                   Assumir controle
@@ -3859,7 +3861,7 @@ export function ShellPage() {
                   <button
                     type="button"
                     className="qb-screen-claim"
-                    aria-label="Assumir controle do computador"
+                    aria-label="Assumir controle pela tela cheia do computador"
                     onClick={() => void takeOverComputer()}
                   >
                     <span className="qb-screen-claim__pill">
@@ -3895,7 +3897,7 @@ export function ShellPage() {
                   <button
                     type="button"
                     className="qb-screen-claim"
-                    aria-label="Assumir controle do computador"
+                    aria-label="Assumir controle pela tela cheia do computador"
                     onClick={() => void takeOverComputer()}
                   >
                     <span className="qb-screen-claim__pill">
@@ -3952,6 +3954,7 @@ export function ShellPage() {
                       type="button"
                       variant="outline"
                       size="sm"
+                      aria-label="Assumir controle e iniciar a tela cheia"
                       onClick={() => void takeOverComputer()}
                     >
                       Assumir controle

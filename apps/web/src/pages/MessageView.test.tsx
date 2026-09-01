@@ -185,7 +185,8 @@ describe("MessageView", () => {
 
     expect(html).toContain("Precisa de você");
     expect(html).toContain("Prévia da tela do computador");
-    expect(html).toContain("Assumir controle");
+    expect(html).toMatch(/>Assumir controle<\/button>/);
+    expect(html).toContain('aria-label="Assumir controle e abrir o computador dentro do Quibt"');
     expect(html).toContain("Abrir dentro do Quibt");
     expect(html).not.toContain("href=");
     expect(html).not.toContain("target=");

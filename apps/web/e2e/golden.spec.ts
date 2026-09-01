@@ -53,7 +53,7 @@ test("takeover, routine, plugins, and export are reachable", async ({ page }) =>
     timeout: 30_000,
   });
   await page.getByTitle(/Computador|Shared computer/).click();
-  // The landing-style preview is also a button named "Assumir controle do computador".
+  // The exact accessible name belongs only to the dashboard action that takes control.
   await page.getByRole("button", { name: "Assumir controle", exact: true }).click();
   await expect(page.getByText(/signed in|session stays|Você tem o controle/i).first()).toBeVisible({
     timeout: 30_000,

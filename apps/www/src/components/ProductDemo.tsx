@@ -107,7 +107,6 @@ const DEMO_UI = {
     botSettings: "Bot settings",
     closePanel: "Close panel",
     openComputer: "Open computer",
-    takeControlComputer: "Take control of the computer",
     youHaveControl: "You have control",
     screenOf: (name: string) => `${name}'s screen`,
     release: "Release",
@@ -194,7 +193,6 @@ const DEMO_UI = {
     botSettings: "Ajustes do bot",
     closePanel: "Fechar painel",
     openComputer: "Abrir computador",
-    takeControlComputer: "Assumir controle do computador",
     youHaveControl: "Você tem o controle",
     screenOf: (name: string) => `tela de ${name}`,
     release: "Liberar",
@@ -970,7 +968,7 @@ export function ProductDemo({ locale = "en" }: { locale?: Locale }) {
                   type="button"
                   className="product-demo__screen"
                   onClick={takeControl}
-                  aria-label={hasControl ? ui.openComputer : ui.takeControlComputer}
+                  aria-label={ui.openComputer}
                 >
                   <ComputerPreview />
                 </button>
