@@ -30,6 +30,11 @@ describe("approvalKey", () => {
       /^mcp__my_server__bash:exact:[a-f0-9]{64}$/,
     );
   });
+
+  it("strips the OpenAPI source and method prefix", () => {
+    expect(bareToolName("oa__pet_store__get__listPets")).toBe("listpets");
+    expect(bareToolName("oa__pet_store__post__createPet")).toBe("createpet");
+  });
 });
 
 describe("autoDecision", () => {
@@ -95,6 +100,18 @@ describe("autoDecision", () => {
     // Mas o que bate nas listas de destrutivo/sensível para sempre, auto-aprovar ou não.
     expect(autoDecision({ autoApprove: true }, "shell", "rm -rf ./build")).toBeNull();
     expect(autoDecision({ autoApprove: true }, "shell", "cat .env")).toBeNull();
+  });
+
+  it("treats OpenAPI reads as safe and mutations as approval-gated", () => {
+    const get = "oa__pets__get__listPets";
+    const post = "oa__pets__post__createPet";
+    expect(autoDecision({ autoApprove: false }, get, "{}")).toBe(`safe ${get}`);
+    expect(autoDecision({ autoApprove: false }, post, "{}")).toBeNull();
+    expect(autoDecision({ autoApprove: true }, post, "{}")).toMatch(/auto-approved/);
+    expect(autoDecision({ autoApprove: true }, post, "{}", { unattended: true })).toBeNull();
+    expect(autoDecision({ autoApprove: false }, get, "{}", { unattended: true })).toBe(
+      `safe ${get}`,
+    );
   });
 
   it("auto-approves ordinary shell — interpreters, pipes, chains — when auto-approve is on", () => {

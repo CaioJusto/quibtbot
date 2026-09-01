@@ -41,6 +41,7 @@ import {
   createGroupRoutineWakes,
   createPeerWake,
   disableBotMcpServer,
+  disableBotOpenApiSource,
   installCapability,
   isImage,
   MAX_ARTIFACT_BYTES,
@@ -52,6 +53,12 @@ import {
 } from "@quibt/db";
 import { ApprovalPause, approvalCheckpoint, promptForRun } from "./approval-wait.js";
 import { type BotMcpRuntime, botMcpSecretValues, connectBotMcpServers } from "./bot-mcp.js";
+import {
+  type BotOpenApiRuntime,
+  loadBotOpenApiTools,
+  openApiValueForTranscript,
+  parseOpenApiToolName,
+} from "./bot-openapi.js";
 import { browserOpenCommand } from "./browser-url.js";
 import { builtinAgentTools, collaborationAgentTools } from "./builtin-tools.js";
 import { deleteSpawnedBot, spawnBot } from "./child-bots.js";
@@ -263,6 +270,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         },
       });
       let botMcpRuntime: BotMcpRuntime | undefined;
+      let botOpenApiRuntime: BotOpenApiRuntime | undefined;
 
       // Every exit from here on — the parked returns, a boot that throws, the stream — gives
       // the timer back. A watcher left running would renew the lease of a dead turn forever.
@@ -358,7 +366,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           email: "",
           isDeploymentOwner: false,
         };
-        const [connectedPlugins, installs, botMcpServers] = await Promise.all([
+        const [connectedPlugins, installs, botMcpServers, botOpenApiSources] = await Promise.all([
           deps.prisma.connection.findMany({
             where: {
               userId: run.userId,
@@ -385,6 +393,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
               args: true,
               url: true,
               env: true,
+              enabled: true,
+            },
+            orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+            take: 10,
+          }),
+          deps.prisma.botOpenApiSource.findMany({
+            where: { botId: bot.id, workspaceId: run.workspaceId, enabled: true },
+            select: {
+              id: true,
+              workspaceId: true,
+              botId: true,
+              name: true,
+              url: true,
               enabled: true,
             },
             orderBy: [{ createdAt: "asc" }, { id: "asc" }],
@@ -436,6 +457,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
               reason,
             }),
         });
+        botOpenApiRuntime = await loadBotOpenApiTools(botOpenApiSources, {
+          signal: runAbort.signal,
+          disable: (source, reason) =>
+            disableBotOpenApiSource(deps.prisma, {
+              id: source.id,
+              workspaceId: source.workspaceId,
+              botId: source.botId,
+              reason,
+            }),
+        });
         if (runAbort.signal.aborted) void botMcpRuntime.dispose();
         else
           runAbort.signal.addEventListener("abort", () => void botMcpRuntime?.dispose(), {
@@ -456,6 +487,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ),
         );
         const activeBotMcpToolNames = new Set(activeBotMcpTools.map((tool) => tool.name));
+        const activeBotOpenApiTools = botOpenApiRuntime.tools.filter(
+          (tool) =>
+            ![
+              ...builtinAgentTools,
+              ...localTools,
+              ...discovered,
+              ...mcpTools,
+              ...activeBotMcpTools,
+            ].some((existing) => existing.name === tool.name),
+        );
+        const activeBotOpenApiToolNames = new Set(activeBotOpenApiTools.map((tool) => tool.name));
         const allTools = [
           ...builtinAgentTools,
           ...localTools,
@@ -466,6 +508,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             (tool) => ![...builtinAgentTools, ...localTools].some((b) => b.name === tool.name),
           ),
           ...activeBotMcpTools,
+          ...activeBotOpenApiTools,
         ];
         // Native Pi effects cannot be meaningfully resumed from a webhook approval card: there
         // is no person behind the run, and the first model turn has already ended. Make those
@@ -551,7 +594,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
         ) => {
           // Retries look up the effect by executionId: it only counts as done once the tool
           // actually returned, so a crash mid-tool re-runs it instead of faking success.
-          const recordedArgs = name === "web_fetch" ? webFetchRequestForTranscript(args) : args;
+          const recordedArgs =
+            name === "web_fetch"
+              ? webFetchRequestForTranscript(args)
+              : parseOpenApiToolName(name)
+                ? (openApiValueForTranscript(args) as Record<string, unknown>)
+                : args;
           const applied = await recordEffect(deps, run, name, executionId, recordedArgs);
           if (applied.duplicate) return applied.effect.result ?? { duplicate: true };
           try {
@@ -1004,6 +1052,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (!source) return { error: `MCP source not found for ${name}` };
             return callMcpTool(source, mcpCall.tool, args);
           }
+          if (parseOpenApiToolName(name)) {
+            if (activeBotOpenApiToolNames.has(name) && botOpenApiRuntime?.has(name)) {
+              return botOpenApiRuntime.call(name, args);
+            }
+            return { error: `OpenAPI source not found for ${name}` };
+          }
           if (deps.connector) {
             let result: unknown = { error: `unknown tool ${name}` };
             for await (const event of deps.connector.execute(
@@ -1060,6 +1114,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
           executionId: string,
         ) => {
           const serializedArgs = JSON.stringify(args);
+          const openApiArgs = parseOpenApiToolName(name)
+            ? (openApiValueForTranscript(args) as Record<string, unknown>)
+            : null;
+          if (openApiArgs && JSON.stringify(openApiArgs) !== serializedArgs) {
+            throw new Error("OpenAPI tool calls cannot include credentials or secret values");
+          }
           if (containsSecret(serializedArgs, runSecrets)) {
             throw new Error("refusing to execute a tool request containing a secret");
           }
@@ -1067,7 +1127,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             where: { id: bot.id },
             select: { autoApprove: true, alwaysAllow: true },
           });
-          const summary = redactSecrets(toolSummary(name, args), runSecrets);
+          const summary = redactSecrets(toolSummary(name, openApiArgs ?? args), runSecrets);
           // A webhook run (and any peer/spawn hop it causes, via `unattended` above) has nobody
           // watching for the approval card, so it never inherits the bot's standing "always
           // allow"/auto-approve consent.
@@ -1153,6 +1213,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
           userMcpNames.length || botMcpNames.length
             ? `MCP servers are live tools whose names start with mcp__. User-level servers: ${userMcpNames.join(", ") || "none"}. This bot's servers: ${botMcpNames.join(", ") || "none"}. Never reveal server environment variables or credentials.`
             : "";
+        const openApiNames = botOpenApiSources.map((row) => row.name);
+        const openApiLine = openApiNames.length
+          ? `OpenAPI tools for this bot start with oa__. Sources: ${openApiNames.join(", ")}. GET, HEAD, and OPTIONS are read-only; mutating methods use the normal approval flow. Never reveal credentials or secret response fields.`
+          : "";
         const memoryLine = formatMemoryPrompt(
           (
             await Promise.all([
@@ -1302,6 +1366,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   pluginLine,
                   skillLine,
                   mcpLine,
+                  openApiLine,
                   memoryLine,
                   "Never print API keys, access tokens, or secret values. Prefer tools over claiming you already did the work.",
                   // Bots já criados carregam o roteiro de "primeira conversa" nas instruções; sem

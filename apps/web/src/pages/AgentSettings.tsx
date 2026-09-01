@@ -1,4 +1,10 @@
-import type { Bot, BotMcpServer, MemoryDocument, Routine } from "@quibt/contracts";
+import type {
+  Bot,
+  BotMcpServer,
+  BotOpenApiSource,
+  MemoryDocument,
+  Routine,
+} from "@quibt/contracts";
 import {
   formatCron,
   formatMemoryUsageFromRaw,
@@ -308,6 +314,7 @@ export function AgentSettings({
         </p>
 
         <BotMcpSettings botId={bot.id} />
+        <BotOpenApiSettings botId={bot.id} />
 
         <div className="mt-8 flex flex-col items-start gap-3">
           <button
@@ -646,6 +653,157 @@ function BotMcpSettings({ botId }: { botId: string }) {
           type="button"
           disabled={adding}
           onClick={() => void addServer()}
+          className="rounded-full bg-[var(--qb-ink-strong)] px-4 py-2 text-[14px] font-semibold text-[var(--qb-canvas)] disabled:opacity-40"
+        >
+          {adding ? "Adicionando…" : "Adicionar"}
+        </button>
+        {error ? <p className="text-[12.5px] text-[var(--qb-danger)]">{error}</p> : null}
+      </div>
+    </section>
+  );
+}
+
+function BotOpenApiSettings({ botId }: { botId: string }) {
+  const [sources, setSources] = useState<BotOpenApiSource[]>([]);
+  const [name, setName] = useState("");
+  const [url, setUrl] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void rpc.botOpenApi
+      .list({ botId })
+      .then((rows) => {
+        if (!cancelled) setSources(rows);
+      })
+      .catch((reason: unknown) => {
+        if (!cancelled) {
+          setError(reason instanceof Error ? reason.message : "Não foi possível listar as fontes");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [botId]);
+
+  async function addSource() {
+    setError(null);
+    const cleanName = name.trim();
+    const cleanUrl = url.trim();
+    if (!cleanName) {
+      setError("Informe um nome para a fonte OpenAPI");
+      return;
+    }
+    try {
+      if (!cleanUrl.startsWith("https://")) throw new Error();
+      const parsed = new URL(cleanUrl);
+      if (parsed.protocol !== "https:" || parsed.username || parsed.password) throw new Error();
+      if (
+        [...parsed.searchParams.keys()].some((key) =>
+          /(^|[_-])(api[_-]?key|auth|credential|password|secret|signature|token)([_-]|$)/i.test(
+            key,
+          ),
+        )
+      ) {
+        throw new Error();
+      }
+    } catch {
+      setError("A URL precisa começar com https://; HTTP é recusado");
+      return;
+    }
+    setAdding(true);
+    try {
+      const added = await rpc.botOpenApi.add({ botId, name: cleanName, url: cleanUrl });
+      setSources((current) => [...current, added]);
+      setName("");
+      setUrl("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível adicionar a fonte");
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  async function removeSource(id: string) {
+    setRemoving(id);
+    setError(null);
+    try {
+      await rpc.botOpenApi.remove({ botId, id });
+      setSources((current) => current.filter((source) => source.id !== id));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível remover a fonte");
+    } finally {
+      setRemoving(null);
+    }
+  }
+
+  return (
+    <section>
+      <SectionTitle>Ferramentas OpenAPI</SectionTitle>
+      <p className="mb-3 px-1 text-[13px] leading-[1.45] text-[var(--qb-muted-2)]">
+        Adicione ferramentas extras por uma URL JSON/YAML OpenAPI 3. Somente HTTPS; HTTP é recusado.
+        GET é leitura; POST e outras alterações passam pelos cards de aprovação. Não há campos para
+        chaves de API.
+      </p>
+
+      {sources.length ? (
+        <div className={`${CARD} mb-3`}>
+          {sources.map((source, index) => (
+            <div
+              key={source.id}
+              className="flex items-start gap-3 px-3.5 py-3"
+              style={index ? { borderTop: "1px solid var(--qb-hairline)" } : undefined}
+            >
+              <span className="min-w-0 flex-1">
+                <span className="block text-[14.5px] font-medium text-[var(--qb-ink)]">
+                  {source.name}
+                  {!source.enabled ? " · desativada" : ""}
+                </span>
+                <span className="mt-0.5 block break-all text-[12px] leading-[1.4] text-[var(--qb-muted-2)]">
+                  {source.url}
+                </span>
+                {source.disabledReason ? (
+                  <span className="mt-1 block text-[12px] text-[var(--qb-danger)]">
+                    {source.disabledReason}
+                  </span>
+                ) : null}
+              </span>
+              <button
+                type="button"
+                disabled={removing === source.id}
+                onClick={() => void removeSource(source.id)}
+                className="text-[13px] text-[var(--qb-danger)] disabled:opacity-40"
+              >
+                Remover
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      <div className={`${CARD} space-y-3 px-3.5 py-3`}>
+        <label className="qb-dash__field">
+          Nome
+          <input
+            value={name}
+            placeholder="Catálogo"
+            onChange={(event) => setName(event.target.value)}
+          />
+        </label>
+        <label className="qb-dash__field">
+          URL HTTPS do OpenAPI 3
+          <input
+            value={url}
+            placeholder="https://exemplo.com/openapi.yaml"
+            onChange={(event) => setUrl(event.target.value)}
+          />
+        </label>
+        <button
+          type="button"
+          disabled={adding}
+          onClick={() => void addSource()}
           className="rounded-full bg-[var(--qb-ink-strong)] px-4 py-2 text-[14px] font-semibold text-[var(--qb-canvas)] disabled:opacity-40"
         >
           {adding ? "Adicionando…" : "Adicionar"}
