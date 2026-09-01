@@ -12,7 +12,7 @@
   "dependencies": {
     "@hono/node-server": "^1.19.1",
     "@quibt/core": "workspace:*",
-    "dockerode": "^4.0.7",
+    "dockerode": "^5.0.1",
     "hono": "^4.9.6",
     "pino": "^9.9.0",
     "tsx": "^4.20.5",
