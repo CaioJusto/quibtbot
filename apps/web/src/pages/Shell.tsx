@@ -115,6 +115,7 @@ import {
 } from "../lib/thread-history";
 import { stepMatch, threadMatches } from "../lib/thread-search";
 import type { TranscribeStatus } from "../lib/transcribe";
+import { createSpeechPlayer, type SpeechPlayer, type SpeechState } from "../lib/tts";
 import { isAnsweringMessage } from "../lib/turn-start";
 import { createVoiceRecorder, extensionFor, formatDuration, voiceSupported } from "../lib/voice";
 import { AccountSheet } from "./AccountSheet";
@@ -130,6 +131,7 @@ import { BurstSummary, MessageView } from "./MessageView";
 import { PluginsOverlay } from "./PluginsOverlay";
 import { RoutineSchedule } from "./RoutineSchedule";
 import { type SettingsPage, SettingsPanel } from "./SettingsPanel";
+import { TeamImportPanel } from "./TeamImportPanel";
 import { WebhooksPanel } from "./WebhooksPanel";
 
 type Panel =
@@ -142,6 +144,7 @@ type Panel =
   | "create"
   | "members"
   | "create-group"
+  | "import-team"
   | null;
 
 type MentionCandidate = {
@@ -184,6 +187,20 @@ function routineRunBadgeClass(status: RoutineRun["status"]): string {
   if (status === "failed") return "bg-[var(--qb-danger-soft)] text-[var(--qb-danger)]";
   if (status === "completed") return "bg-[var(--qb-accent-soft)] text-[var(--qb-accent)]";
   return "bg-[var(--qb-surface-2)] text-[var(--qb-muted)]";
+}
+
+/**
+ * O "tópico" do grupo no cabeçalho: a primeira linha das ordens
+ * permanentes — ou, sem ordens, o elenco. É o que faz as instruções compartilhadas
+ * existirem à vista, e não só atrás do painel de ajustes.
+ */
+function groupTopic(group: BotGroup): string {
+  const firstLine = group.instructions
+    .split("\n")
+    .map((line) => line.replace(/^[>#\s-]+/, "").trim())
+    .find(Boolean);
+  if (firstLine) return firstLine;
+  return group.members.map((member) => member.name).join(", ");
 }
 
 /** Idempotency key for a send; `crypto.randomUUID` is missing on plain-http LAN origins. */
@@ -335,6 +352,25 @@ export function ShellPage() {
   });
   const recorderRef = useRef<ReturnType<typeof createVoiceRecorder> | null>(null);
   const canRecord = voiceSupported();
+  /** Há login ChatGPT/Codex na conta? Sem ele, nenhum botão de ouvir aparece. */
+  const [voiceReady, setVoiceReady] = useState(false);
+  /** Os dois streams (1:1 e grupo) consultam o mesmo retrato atual dos toggles por bot. */
+  const autoSpeakBotIdsRef = useRef(new Set<string>());
+  autoSpeakBotIdsRef.current = new Set(
+    voiceReady
+      ? bots.filter((bot) => bot.voiceEnabled && bot.voiceAutoSpeak).map((bot) => bot.id)
+      : [],
+  );
+  const [speech, setSpeech] = useState<SpeechState>({ status: "idle", messageId: null });
+  const speechRef = useRef<SpeechPlayer | null>(null);
+  const speechUnsubscribeRef = useRef<(() => void) | null>(null);
+  const speechPlayer = () => {
+    if (!speechRef.current) {
+      speechRef.current = createSpeechPlayer();
+      speechUnsubscribeRef.current = speechRef.current.subscribe(setSpeech);
+    }
+    return speechRef.current;
+  };
 
   /**
    * Toda escrita no campo passa por aqui com a conversa dita por escrito. As funções abaixo
@@ -382,6 +418,14 @@ export function ShellPage() {
   }, [dictating]);
 
   useEffect(() => () => recorderRef.current?.cancel(), []);
+
+  useEffect(
+    () => () => {
+      speechUnsubscribeRef.current?.();
+      speechRef.current?.stop();
+    },
+    [],
+  );
 
   async function attachFiles(files: FileList | File[]) {
     const bot = active;
@@ -651,6 +695,20 @@ export function ShellPage() {
     });
   }
 
+  // A voz usa o login ChatGPT/Codex dos modelos; confira no mount e de novo quando
+  // os ajustes fecham, pois é ali que o login por assinatura pode ser conectado.
+  useEffect(() => {
+    void rpc.voice
+      .status()
+      .then((status) => setVoiceReady(status.configured))
+      .catch(() => setVoiceReady(false));
+  }, [accountOpen, settingsModal]);
+
+  // Trocar de conversa corta a fala no ato: ouvir o bot antigo por cima do novo é ruído.
+  useEffect(() => {
+    speechRef.current?.stop();
+  }, [chatKey]);
+
   useEffect(() => {
     if (panel !== "routine" || !routineDraft.id) {
       setRoutineRuns([]);
@@ -753,6 +811,21 @@ export function ShellPage() {
         for await (const event of events) {
           if (signal.aborted) break;
           applyGroupThreadEvent(event, setGroupSnapshot);
+          if (event.type === "thread.message.created" && event.payload.role === "bot") {
+            const authorBotId =
+              typeof event.payload.authorBotId === "string" ? event.payload.authorBotId : "";
+            const blocks = (event.payload.blocks as Array<{ kind?: string; text?: string }>) ?? [];
+            const text = blocks
+              .filter((block) => block.kind === "text" && block.text)
+              .map((block) => block.text)
+              .join("\n\n");
+            const messageId = String(event.payload.messageId ?? "");
+            if (authorBotId && autoSpeakBotIdsRef.current.has(authorBotId) && text && messageId) {
+              void speechPlayer()
+                .speak({ messageId, botId: authorBotId, text })
+                .catch(() => undefined);
+            }
+          }
           if (threadEventNeedsSnapshotRefresh(event.type)) {
             void reload();
           }
@@ -796,9 +869,27 @@ export function ShellPage() {
             void refreshBots().catch(() => undefined);
           }
           if (event.type === "thread.message.created") {
-            const blocks = (event.payload.blocks as Array<{ kind?: string }>) ?? [];
+            const blocks = (event.payload.blocks as Array<{ kind?: string; text?: string }>) ?? [];
             if (blocks.some((block) => block.kind === "child_bot")) {
               void refreshBots().catch(() => undefined);
+            }
+            if (
+              event.payload.role === "bot" &&
+              event.payload.authorBotId === botId &&
+              autoSpeakBotIdsRef.current.has(botId)
+            ) {
+              const text = blocks
+                .filter((block) => block.kind === "text" && block.text)
+                .map((block) => block.text)
+                .join("\n\n");
+              const messageId = String(event.payload.messageId ?? "");
+              if (text && messageId) {
+                // Auto-falar é conforto, não contrato: se falhar (sem crédito, sem
+                // rede), o chat segue mudo em vez de abrir um erro.
+                void speechPlayer()
+                  .speak({ messageId, botId, text })
+                  .catch(() => undefined);
+              }
             }
           }
           if (threadEventNeedsSnapshotRefresh(event.type)) {
@@ -1982,6 +2073,10 @@ export function ShellPage() {
             setQuery("");
             setPanel("create-group");
           }}
+          onImportTeam={() => {
+            setQuery("");
+            setPanel("import-team");
+          }}
           onPin={(bot) => {
             void rpc.bots
               .update({ botId: bot.id, pinned: !bot.pinned })
@@ -2078,6 +2173,12 @@ export function ShellPage() {
               >
                 <GroupAvatar members={activeGroup.members} size={28} />
                 <span className="qb-dash__active-name">{activeGroup.name}</span>
+                <span className="hidden min-w-0 flex-1 truncate text-left text-[12.5px] font-normal text-[var(--qb-muted-2)] sm:block">
+                  {groupTopic(activeGroup)}
+                </span>
+                <span className="hidden shrink-0 text-[11px] text-[var(--qb-muted-2)] sm:block">
+                  {activeGroup.members.length} {activeGroup.members.length === 1 ? "bot" : "bots"}
+                </span>
               </button>
             </GlassSurface>
           ) : (
@@ -2330,6 +2431,13 @@ export function ShellPage() {
                 snapshot?.run?.id === message.runId &&
                 snapshot?.run?.status === "waiting_takeover",
             );
+            // No grupo cada resposta fala com a voz do bot que a escreveu; no 1:1, com a do
+            // bot ativo. O botão só existe com login ChatGPT/Codex e voz ligada no bot.
+            const speakBotId = activeGroup ? (author?.id ?? null) : (active?.id ?? null);
+            const speakBot = speakBotId ? bots.find((bot) => bot.id === speakBotId) : null;
+            const canSpeak = Boolean(
+              voiceReady && speakBot?.voiceEnabled && message.role !== "user",
+            );
             return (
               <div
                 key={message.id}
@@ -2436,6 +2544,22 @@ export function ShellPage() {
                             .catch((err) => setActionFailure(err, "Não foi possível reagir"));
                         }
                       : undefined
+                  }
+                  onSpeak={
+                    canSpeak && speakBotId
+                      ? (text) => {
+                          void speechPlayer()
+                            .speak({ messageId: message.id, botId: speakBotId, text })
+                            .catch((err) =>
+                              setActionFailure(err, "Não foi possível gerar o áudio"),
+                            );
+                        }
+                      : undefined
+                  }
+                  speakingStatus={
+                    speech.messageId === message.id && speech.status !== "idle"
+                      ? speech.status
+                      : null
                   }
                   onOpenBot={(id) => navigate(`/app/${id}`)}
                   onAnswer={(text) => {
@@ -2827,6 +2951,27 @@ export function ShellPage() {
       {panel ? (
         <div className="qb-dash__panel absolute inset-0 z-20 md:relative md:inset-auto md:z-auto md:w-[320px] md:grow-0 md:shrink-0">
           <div className="mx-auto min-h-full w-full max-w-[430px] md:max-w-none">
+            {panel === "import-team" ? (
+              <TeamImportPanel
+                client={{
+                  createBot: (input) => rpc.bots.create(input),
+                  createGroup: (input) => rpc.botGroups.create(input),
+                  updateGroup: (input) => rpc.botGroups.update(input),
+                  createRoutine: (input) => rpc.routines.create(input),
+                }}
+                onCancel={() => setPanel(null)}
+                onDone={(report) => {
+                  setPanel(null);
+                  void refreshBots().catch(() => undefined);
+                  void refreshGroups().catch(() => undefined);
+                  if (report.groupId) {
+                    navigate(`/app/g/${report.groupId}`);
+                  } else if (report.createdBots[0]) {
+                    navigate(`/app/${report.createdBots[0].id}`);
+                  }
+                }}
+              />
+            ) : null}
             {panel === "create-group" ? (
               <NewGroupForm
                 bots={bots}
@@ -3106,6 +3251,7 @@ export function ShellPage() {
                 key={active.id}
                 bot={active}
                 routines={routines}
+                voiceConfigured={voiceReady}
                 onOpenInstructions={() => setPanel("instructions")}
                 onOpenMemory={() => setPanel("memory")}
                 onOpenWebhooks={() => setPanel("webhooks")}

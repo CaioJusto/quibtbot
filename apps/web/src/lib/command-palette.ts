@@ -13,7 +13,10 @@ export type PaletteAction =
   | { kind: "bot"; id: string }
   | { kind: "group"; id: string }
   | { kind: "message"; botId: string | null; groupId: string | null; messageId: string }
-  | { kind: "panel"; panel: "create" | "create-group" | "settings" | "computer" | "routine" }
+  | {
+      kind: "panel";
+      panel: "create" | "create-group" | "import-team" | "settings" | "computer" | "routine";
+    }
   | { kind: "route"; path: string };
 
 export type PaletteItem = {
@@ -112,6 +115,13 @@ export const PALETTE_ACTIONS: PaletteItem[] = [
     detail: "Vários bots na mesma conversa",
     keywords: ["novo", "equipe", "time"],
     action: { kind: "panel", panel: "create-group" },
+  },
+  {
+    id: "action:import-team",
+    label: "Importar equipe",
+    detail: "Um arquivo Markdown vira bots, grupo e rotinas",
+    keywords: ["markdown", "pacote", "time", "importar"],
+    action: { kind: "panel", panel: "import-team" },
   },
   {
     id: "action:computer",

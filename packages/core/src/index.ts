@@ -28,5 +28,6 @@ export * from "./secrets-guard.js";
 export * from "./signup-policy.js";
 export * from "./skills.js";
 export * from "./subscription-sign-in.js";
+export * from "./team-pack.js";
 export * from "./trackpad.js";
 export * from "./worker-presence.js";

@@ -36,6 +36,7 @@ import {
   UpdateRoutineInput,
   UpdateWebhookInput,
   UsageRecordSchema,
+  VoiceStatusSchema,
   WebhookAttemptSchema,
   WebhookCredentialSchema,
   WebhookPublicUrlInput,
@@ -175,6 +176,10 @@ export const appContract = {
     setDefault: oc
       .input(z.object({ provider: z.string(), modelId: z.string() }))
       .output(z.object({ ok: z.literal(true) })),
+  },
+  /** Voz reutiliza o login ChatGPT/Codex de `models`; o áudio sai em bytes por POST /tts. */
+  voice: {
+    status: oc.output(VoiceStatusSchema),
   },
   bots: {
     list: oc.output(z.array(BotSchema)),

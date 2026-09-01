@@ -282,6 +282,12 @@ async function createMessage(
       data: { activeLeafId: created.id, updatedAt: new Date() },
     });
   }
+  // A lista ordena grupos por `updatedAt`; sem este toque, só renomear movia o grupo
+  // para cima — conversar não. Num fio 1:1 o filtro não acha grupo e nada acontece.
+  await tx.botGroup.updateMany({
+    where: { thread: { is: { id: input.threadId } } },
+    data: { updatedAt: new Date() },
+  });
   return created;
 }
 

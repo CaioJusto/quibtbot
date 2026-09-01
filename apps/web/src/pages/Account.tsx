@@ -116,6 +116,11 @@ export function AccountSettingsBody({
     | { state: "waiting"; loginId: string; userCode: string; verificationUri: string }
     | { state: "error"; error: string }
   >({ state: "idle" });
+  // Voz (TTS): capacidade derivada do mesmo login ChatGPT/Codex dos modelos.
+  const [voice, setVoice] = useState<{
+    configured: boolean;
+    provider: "openai-codex" | null;
+  } | null>(null);
 
   useEffect(() => {
     if (user?.name) setName(user.name);
@@ -130,6 +135,10 @@ export function AccountSettingsBody({
       rpc.health().catch(() => null),
       rpc.me().catch(() => null),
     ]).then(([snap, week, creds, catalog, health, me]) => {
+      void rpc.voice
+        .status()
+        .then(setVoice)
+        .catch(() => setVoice(null));
       setBilling(snap);
       setEdition(resolveClientEdition({ health, me, billing: snap }));
       setUsage(week);
@@ -234,6 +243,7 @@ export function AccountSettingsBody({
           setOauthFlow({ state: "idle" });
           setNotice(`Conectado como ${result.credential.label}.`);
           setCredentials(await rpc.models.credentials());
+          setVoice(await rpc.voice.status());
         } else if (result.status === "error") {
           setOauthFlow({ state: "error", error: result.error });
         }
@@ -573,6 +583,29 @@ export function AccountSettingsBody({
                 {pending === "models" ? "Trocando…" : planSwitchLabel(edition)}
               </button>
             ) : null}
+          </div>
+
+          <div className="qb-account__block">
+            <div className="flex items-baseline justify-between gap-3">
+              <h3>Voz</h3>
+              <span className="qb-account__hint">
+                {voice?.configured ? "Pronta · ChatGPT/Codex" : "Precisa de ChatGPT Plus/Pro"}
+              </span>
+            </div>
+            <p className="qb-account__hint">
+              Os bots leem respostas usando o mesmo login por assinatura já conectado em Modelos.
+              Não existe chave de voz separada e nenhum token desce para o navegador.
+            </p>
+            {voice?.configured ? (
+              <p className="qb-account__hint">
+                Ligue a voz e escolha uma voz da OpenAI nos ajustes de cada bot.
+              </p>
+            ) : (
+              <p className="qb-account__hint">
+                Use “Entrar com ChatGPT Plus/Pro” em Modelos acima. A voz fica disponível assim que
+                esse mesmo login estiver conectado.
+              </p>
+            )}
           </div>
         </div>
       ) : null}

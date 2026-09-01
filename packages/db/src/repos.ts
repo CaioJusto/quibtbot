@@ -30,6 +30,9 @@ function mapBot(
     alwaysAllow?: string[];
     chiefOfStaff?: boolean;
     hidden?: boolean;
+    voiceEnabled?: boolean;
+    voiceAutoSpeak?: boolean;
+    voiceId?: string;
     activeConversationId?: string | null;
     createdAt: Date;
     updatedAt: Date;
@@ -58,6 +61,9 @@ function mapBot(
     alwaysAllow: bot.alwaysAllow ?? [],
     chiefOfStaff: bot.chiefOfStaff ?? false,
     hidden: bot.hidden ?? false,
+    voiceEnabled: bot.voiceEnabled ?? false,
+    voiceAutoSpeak: bot.voiceAutoSpeak ?? false,
+    voiceId: bot.voiceId ?? "",
     activeConversationId: bot.activeConversationId ?? null,
     threadId: bot.thread.id,
     preview,
@@ -99,18 +105,21 @@ async function botCardExtras(
   };
 }
 
-function mapGroup(group: {
-  id: string;
-  workspaceId: string;
-  name: string;
-  instructions: string;
-  createdAt: Date;
-  updatedAt: Date;
-  thread: { id: string } | null;
-  members: Array<{
-    bot: { id: string; name: string; title: string; color: string; shape: string };
-  }>;
-}): BotGroup {
+function mapGroup(
+  group: {
+    id: string;
+    workspaceId: string;
+    name: string;
+    instructions: string;
+    createdAt: Date;
+    updatedAt: Date;
+    thread: { id: string } | null;
+    members: Array<{
+      bot: { id: string; name: string; title: string; color: string; shape: string };
+    }>;
+  },
+  preview = "",
+): BotGroup {
   if (!group.thread) throw new IsolationError("Bot group is missing its thread");
   return {
     id: group.id,
@@ -119,9 +128,24 @@ function mapGroup(group: {
     instructions: group.instructions,
     threadId: group.thread.id,
     members: group.members.map(({ bot }) => bot),
+    preview,
     createdAt: group.createdAt.toISOString(),
     updatedAt: group.updatedAt.toISOString(),
   };
+}
+
+/** O último recado do fio do grupo, na mesma forma do preview dos bots. */
+async function groupPreview(
+  prisma: PrismaClient,
+  group: { thread: { id: string } | null },
+): Promise<string> {
+  if (!group.thread) return "";
+  const last = await prisma.message.findFirst({
+    where: { threadId: group.thread.id },
+    orderBy: { seq: "desc" },
+  });
+  const blocks = (last?.blocks as Array<{ kind?: string; text?: string }> | undefined) ?? [];
+  return blocks.find((block) => block.text)?.text ?? "";
 }
 
 export function createRepos(prisma: PrismaClient) {
@@ -409,7 +433,8 @@ export function createRepos(prisma: PrismaClient) {
         },
         orderBy: { updatedAt: "desc" },
       });
-      return groups.map(mapGroup);
+      const previews = await Promise.all(groups.map((group) => groupPreview(prisma, group)));
+      return groups.map((group, i) => mapGroup(group, previews[i] ?? ""));
     },
 
     async getBotGroup(actor: Actor, groupId: string): Promise<BotGroup> {

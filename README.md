@@ -277,6 +277,8 @@ infra/    compose  sandboxes
 | [`docs/entrar-sem-senha.md`](docs/entrar-sem-senha.md) | Sign in with a short code instead of e-mail and password: why, and how it is kept safe |
 | [`docs/architecture.md`](docs/architecture.md) | Clients, server stack, computer providers, trust boundaries, network flow |
 | [`docs/webhooks.md`](docs/webhooks.md) | Wake a bot from another system: URLs, auth, retries, limits |
+| [`docs/voice.md`](docs/voice.md) | Bots reading replies out loud through the existing ChatGPT/Codex login |
+| [`docs/team-packs.md`](docs/team-packs.md) | Import a whole team (bots, group, paused routines) from one Markdown file |
 | [`CLAUDE.md`](CLAUDE.md) | Current purpose and computer model for Claude Code / agents |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to work in this repo |
 | [`SECURITY.md`](SECURITY.md) | How to report vulnerabilities |

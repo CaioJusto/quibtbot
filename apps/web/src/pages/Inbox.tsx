@@ -37,6 +37,7 @@ export function Inbox({
   onPlugins,
   onCreateBot,
   onCreateGroup,
+  onImportTeam,
   onPin,
   onMarkUnread,
   onEditBot,
@@ -58,6 +59,8 @@ export function Inbox({
   onPlugins?: () => void;
   onCreateBot: () => void;
   onCreateGroup: () => void;
+  /** Importa uma equipe inteira de um arquivo Markdown (docs/team-packs.md). */
+  onImportTeam?: () => void;
   onPin?: (bot: Bot) => void;
   onMarkUnread?: (bot: Bot) => void;
   onEditBot?: (bot: Bot) => void;
@@ -256,6 +259,21 @@ export function Inbox({
                     </span>
                     <span className="flex-1">Criar novo grupo</span>
                   </button>
+                  {onImportTeam ? (
+                    <button
+                      type="button"
+                      className="qb-dash__new-option qb-dash__new-group"
+                      onClick={() => {
+                        setCreateOpen(false);
+                        onImportTeam();
+                      }}
+                    >
+                      <span className="qb-dash__new-option-icon">
+                        <Icon name="download" size={15} />
+                      </span>
+                      <span className="flex-1">Importar equipe (.md)</span>
+                    </button>
+                  ) : null}
                 </div>
                 <div className="qb-dash__new-hint">
                   <span>
@@ -370,7 +388,11 @@ export function Inbox({
                   </span>
                 </span>
                 <span className="qb-dash__bot-preview">
-                  {row.group.members.map((member) => member.name).join(", ") || "Grupo"}
+                  {/* Com conversa, a lista mostra o último recado, como nos bots;
+                      o elenco só aparece enquanto o grupo ainda está mudo. */}
+                  {row.group.preview ||
+                    row.group.members.map((member) => member.name).join(", ") ||
+                    "Grupo"}
                 </span>
               </span>
             </button>

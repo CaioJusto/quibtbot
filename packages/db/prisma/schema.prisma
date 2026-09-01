@@ -278,6 +278,11 @@ model Bot {
   alwaysAllow      String[]         @default([])
   chiefOfStaff     Boolean          @default(false)
   hidden           Boolean          @default(false)
+  /// Voz do bot: com `voiceEnabled` a conversa ganha o botão de ouvir; `voiceAutoSpeak`
+  /// lê cada resposta nova em voz alta; `voiceId` escolhe a voz no provedor (vazio = padrão).
+  voiceEnabled     Boolean          @default(false)
+  voiceAutoSpeak   Boolean          @default(false)
+  voiceId          String           @default("")
   activeConversationId String?
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt

@@ -3,6 +3,7 @@ import { onError } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
 import type { SandboxProvider, WakeupDriver } from "@quibt/adapter-kit";
 import {
+  CHATGPT_OAUTH_PROVIDER,
   type ComposioConnector,
   createConnectorStack,
   createRoutingSandboxProvider,
@@ -16,13 +17,18 @@ import {
   isComposioEnabled,
   LocalAgentHomeStore,
   loadFolderGrantsByUser,
+  MAX_TTS_INPUT_CHARS,
   PiAgentRuntime,
   PiOAuthLogins,
+  parseModelSecret,
+  resolveModelApiKey,
   revokeControlScreenOrSchedule,
   ScriptedAgentRuntime,
   sandboxOptionsFromSettings,
+  scriptedTtsAudio,
   sleepComputerIfIdle,
   storedComposioKeyLoader,
+  synthesizeSpeech,
 } from "@quibt/adapters";
 import { blockedAuthPaths, createAuth, mailerEnabled, takeLocalResetLink } from "@quibt/auth";
 import {
@@ -853,6 +859,118 @@ export async function createApp(overrides: CreateAppOverrides = {}): Promise<App
       "Cache-Control": "private, max-age=3600",
     });
   });
+
+  /**
+   * Voz (TTS): texto entra, áudio sai. Fora do oRPC pelo mesmo motivo dos arquivos —
+   * a resposta são bytes crus que o `<audio>` do navegador toca direto. O token OAuth
+   * ChatGPT/Codex já salvo para os modelos fica no cofre e nunca desce ao cliente.
+   */
+  app.post(
+    "/tts",
+    bodyLimit({
+      maxSize: 64 * 1024,
+      onError: (c) => c.json({ message: "A requisição é grande demais." }, 413),
+    }),
+    async (c) => {
+      const actor = await fileActor(c);
+      if (!actor) return c.json({ message: "Entre na sua conta." }, 401);
+      // TTS cobra por caractere no provedor; um laço de cliente não pode virar fatura.
+      const ip = requestClientIp(c, env.trustedProxyIps);
+      if (!allowRequest(clientKey(ip, "tts"), 30, 60_000)) {
+        return c.json({ message: "Muitas leituras seguidas. Espere um minuto." }, 429);
+      }
+      const body = (await c.req.json().catch(() => null)) as {
+        text?: unknown;
+        botId?: unknown;
+      } | null;
+      const text = typeof body?.text === "string" ? body.text.trim() : "";
+      const botId = typeof body?.botId === "string" ? body.botId : null;
+      if (!text) return c.json({ message: "Mande o texto a falar." }, 400);
+
+      let voiceId = "";
+      if (botId) {
+        const bot = await prisma.bot.findFirst({
+          where: { id: botId, workspaceId: actor.workspaceId, userId: actor.userId },
+          select: { voiceEnabled: true, voiceId: true },
+        });
+        if (!bot) return c.json({ message: "Bot não encontrado." }, 404);
+        if (!bot.voiceEnabled) return c.json({ message: "A voz deste bot está desligada." }, 409);
+        if (bot.voiceId) voiceId = bot.voiceId;
+      }
+      if (env.agentRuntime === "scripted") {
+        // O emulador dos testes não fala com provedor nenhum; um WAV de silêncio
+        // deixa o caminho inteiro (auth, credencial, limites) rodar sem rede.
+        const stub = scriptedTtsAudio();
+        return c.body(stub.audio, 200, {
+          "Content-Type": stub.mimeType,
+          "Cache-Control": "no-store",
+        });
+      }
+      const credential = await prisma.userModelCredential.findFirst({
+        where: {
+          userId: actor.userId,
+          workspaceId: actor.workspaceId,
+          provider: CHATGPT_OAUTH_PROVIDER,
+        },
+        orderBy: { updatedAt: "desc" },
+      });
+      if (!credential) {
+        return c.json({ message: "Entre com ChatGPT Plus/Pro nos ajustes de modelos." }, 409);
+      }
+      const secretRow = await prisma.secret.findUnique({
+        where: { id: credential.secretId },
+      });
+      if (!secretRow) {
+        return c.json(
+          { message: "Entre de novo com ChatGPT Plus/Pro nos ajustes de modelos." },
+          409,
+        );
+      }
+      const plaintext = secrets.load(secretRow.ciphertext);
+      const parsed = parseModelSecret(plaintext);
+      if (parsed.kind !== "oauth") {
+        return c.json({ message: "A voz precisa do login ChatGPT Plus/Pro por assinatura." }, 409);
+      }
+      let accessToken: string;
+      try {
+        accessToken = await resolveModelApiKey(plaintext, CHATGPT_OAUTH_PROVIDER, {
+          persist: async (next) => {
+            const stored = await secrets.put(next, {
+              operationId: "tts",
+              traceId: "tts-refresh",
+              workspaceId: actor.workspaceId,
+              userId: actor.userId,
+              signal: new AbortController().signal,
+            });
+            await prisma.secret.update({
+              where: { id: secretRow.id },
+              data: { ciphertext: stored.ciphertext },
+            });
+          },
+        });
+      } catch {
+        return c.json(
+          { message: "O login ChatGPT/Codex expirou. Entre de novo nos ajustes de modelos." },
+          502,
+        );
+      }
+      const accountId =
+        typeof parsed.credential.accountId === "string" ? parsed.credential.accountId : undefined;
+      const result = await synthesizeSpeech({
+        accessToken,
+        accountId,
+        voiceId,
+        text: text.slice(0, MAX_TTS_INPUT_CHARS),
+      });
+      if (!result.ok) {
+        return c.json({ message: result.message }, result.status as ContentfulStatusCode);
+      }
+      return c.body(result.audio, 200, {
+        "Content-Type": result.mimeType,
+        "Cache-Control": "no-store",
+      });
+    },
+  );
 
   if (billing) {
     // Stripe webhooks are signed over the raw request body, so this route

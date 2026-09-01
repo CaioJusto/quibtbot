@@ -232,6 +232,32 @@ describe("MessageView", () => {
     expect(html).toContain("<video");
   });
 
+  it("offers the listen button on a bot reply only when speaking is wired", () => {
+    const reply = message({ role: "bot" });
+    const withVoice = renderToStaticMarkup(
+      <MessageView message={reply} onAnswer={() => undefined} onSpeak={() => undefined} />,
+    );
+    expect(withVoice).toContain("Ouvir mensagem");
+
+    const withoutVoice = renderToStaticMarkup(
+      <MessageView message={reply} onAnswer={() => undefined} />,
+    );
+    expect(withoutVoice).not.toContain("Ouvir mensagem");
+  });
+
+  it("swaps the listen button for a visible stop while this message plays", () => {
+    const html = renderToStaticMarkup(
+      <MessageView
+        message={message({ role: "bot" })}
+        onAnswer={() => undefined}
+        onSpeak={() => undefined}
+        speakingStatus="playing"
+      />,
+    );
+    expect(html).toContain("Parar de falar");
+    expect(html).toContain("opacity-100");
+  });
+
   it("summarizes a multi-agent burst in Portuguese", () => {
     const html = renderToStaticMarkup(
       <BurstSummary

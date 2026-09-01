@@ -53,14 +53,37 @@ function MessageActions({
   text,
   onReply,
   onReact,
+  onSpeak,
+  speaking,
 }: {
   text: string;
   onReply?: () => void;
   onReact?: (emoji: string) => void;
+  /** Fala esta mensagem em voz alta; falar de novo enquanto toca é parar. */
+  onSpeak?: () => void;
+  speaking?: boolean;
 }) {
   const [picker, setPicker] = useState(false);
   return (
-    <div className="relative flex items-center gap-0.5 self-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+    <div
+      className={`relative flex items-center gap-0.5 self-center transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 ${
+        // Enquanto o áudio toca, o botão de parar não pode sumir com o mouse.
+        speaking ? "opacity-100" : "opacity-0"
+      }`}
+    >
+      {onSpeak ? (
+        <button
+          type="button"
+          aria-label={speaking ? "Parar de falar" : "Ouvir mensagem"}
+          title={speaking ? "Parar" : "Ouvir"}
+          onClick={onSpeak}
+          className={`rounded-md p-1.5 hover:bg-[var(--qb-surface)] hover:text-[var(--qb-ink)] ${
+            speaking ? "text-[var(--qb-ink)]" : "text-[var(--qb-muted-2)]"
+          }`}
+        >
+          <Icon name={speaking ? "stop" : "volume"} size={14} />
+        </button>
+      ) : null}
       {onReact ? (
         <button
           type="button"
@@ -504,6 +527,8 @@ export function MessageView({
   computerBusy,
   onOpenComputer,
   onTakeOverComputer,
+  onSpeak,
+  speakingStatus,
 }: {
   message: ThreadMessage;
   author?: MessageAuthor | null;
@@ -536,8 +561,13 @@ export function MessageView({
   onOpenComputer?: () => void;
   /** Toma o lease e abre o viewer interno; nunca navega para uma aba externa. */
   onTakeOverComputer?: () => void;
+  /** Lê o texto desta mensagem em voz alta (só respostas de bot, com voz ligada). */
+  onSpeak?: (text: string) => void;
+  /** Estado da fala DESTA mensagem: carregando/tocando, ou nada. */
+  speakingStatus?: "loading" | "playing" | null;
 }) {
   const [viewer, setViewer] = useState<ViewerFile | null>(null);
+  const speaking = Boolean(speakingStatus);
   return (
     <>
       {viewer ? <FileOverlay file={viewer} onClose={() => setViewer(null)} /> : null}
@@ -568,8 +598,17 @@ export function MessageView({
         if (block.kind === "text" && author && groupLayout) {
           return (
             <GroupReply key={i} author={author}>
-              <div className={BUBBLE}>
-                <ChatMarkdown>{stripPeerCue(block.text)}</ChatMarkdown>
+              <div className="group flex items-start gap-1.5">
+                <div className={BUBBLE}>
+                  <ChatMarkdown>{stripPeerCue(block.text)}</ChatMarkdown>
+                </div>
+                {onSpeak ? (
+                  <MessageActions
+                    text={stripPeerCue(block.text)}
+                    onSpeak={() => onSpeak(stripPeerCue(block.text))}
+                    speaking={speaking}
+                  />
+                ) : null}
               </div>
             </GroupReply>
           );
@@ -654,7 +693,13 @@ export function MessageView({
                 </div>
                 <Reactions reactions={message.reactions} onReact={onReact} />
               </div>
-              <MessageActions text={block.text} onReply={onReply} onReact={onReact} />
+              <MessageActions
+                text={block.text}
+                onReply={onReply}
+                onReact={onReact}
+                onSpeak={onSpeak ? () => onSpeak(block.text) : undefined}
+                speaking={speaking}
+              />
             </div>
           );
         }

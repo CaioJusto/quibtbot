@@ -15,6 +15,7 @@ function groupHarness(options?: { existingRuns?: Array<{ id: string; clientNonce
   const events: unknown[] = [];
   let seq = 0;
   const existing = options?.existingRuns ?? [];
+  const groupTouches: unknown[] = [];
   const prisma = {
     botGroup: {
       findFirst: vi.fn(async () => ({
@@ -25,6 +26,10 @@ function groupHarness(options?: { existingRuns?: Array<{ id: string; clientNonce
           { botId: "bot-2", bot: { name: "Scout" } },
         ],
       })),
+      updateMany: vi.fn(async (args: unknown) => {
+        groupTouches.push(args);
+        return { count: 1 };
+      }),
     },
     run: {
       findMany: vi.fn(async () => (created.length ? created : existing)),
@@ -63,12 +68,12 @@ function groupHarness(options?: { existingRuns?: Array<{ id: string; clientNonce
       }),
     },
   };
-  return { prisma: prisma as unknown as PrismaClient, created, events };
+  return { prisma: prisma as unknown as PrismaClient, created, events, groupTouches };
 }
 
 describe("createGroupWakes", () => {
   it("creates one run per mentioned member and records the user message", async () => {
-    const { prisma, created, events } = groupHarness();
+    const { prisma, created, events, groupTouches } = groupHarness();
     const result = await createGroupWakes(prisma, actor, {
       groupId: "group-1",
       text: "olá @Ada",
@@ -78,6 +83,8 @@ describe("createGroupWakes", () => {
     expect(result.seq).toBe(0);
     expect(created).toHaveLength(1);
     expect(events).toHaveLength(1);
+    // A lista ordena por `updatedAt`: cada recado novo tem que mover o grupo para cima.
+    expect(groupTouches).toHaveLength(1);
   });
 
   it("returns the existing runs without creating another message on a retry", async () => {
@@ -108,6 +115,9 @@ function peerHarness() {
         { id: "bot-2", name: "Scout", activeConversationId: null, thread: { id: "thread-2" } },
       ]),
       update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+    },
+    botGroup: {
+      updateMany: vi.fn(async () => ({ count: 0 })),
     },
     conversation: {
       findFirst: vi.fn(async () => null),

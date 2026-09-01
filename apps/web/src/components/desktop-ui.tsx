@@ -146,6 +146,12 @@ const ICON_PATHS = {
       <path d="M6.5 11a5.5 5.5 0 0 0 11 0M12 16.5V21M9 21h6" />
     </>
   ),
+  volume: (
+    <>
+      <path d="M11 5 6.5 8.5H3v7h3.5L11 19V5z" />
+      <path d="M15 9a4.2 4.2 0 0 1 0 6M17.7 6.5a8 8 0 0 1 0 11" />
+    </>
+  ),
   clock: <path d="M12 7v5l3 2M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z" />,
   close: <path d="M6 6l12 12M18 6L6 18" />,
   check: <path d="M5 12l5 5 9-10" />,

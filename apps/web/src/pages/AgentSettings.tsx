@@ -27,11 +27,15 @@ export type AgentPatch = {
   notifyOnFinish?: boolean;
   autoApprove?: boolean;
   chiefOfStaff?: boolean;
+  voiceEnabled?: boolean;
+  voiceAutoSpeak?: boolean;
+  voiceId?: string;
 };
 
 export function AgentSettings({
   bot,
   routines,
+  voiceConfigured,
   onSave,
   onOpenInstructions,
   onOpenMemory,
@@ -47,6 +51,8 @@ export function AgentSettings({
 }: {
   bot: Bot;
   routines: Routine[];
+  /** Há login ChatGPT/Codex na conta? Sem ele os toggles avisam onde conectar. */
+  voiceConfigured?: boolean;
   onSave: (patch: AgentPatch) => Promise<void>;
   onOpenInstructions: () => void;
   onOpenMemory: () => void;
@@ -66,6 +72,9 @@ export function AgentSettings({
   const [appearance, setAppearance] = useState<Appearance>(resolveAppearance(bot.color, bot.shape));
   const [notify, setNotify] = useState(bot.notifyOnFinish);
   const [autoApprove, setAutoApprove] = useState(bot.autoApprove !== false);
+  const [voiceOn, setVoiceOn] = useState(bot.voiceEnabled === true);
+  const [autoSpeak, setAutoSpeak] = useState(bot.voiceAutoSpeak === true);
+  const [voiceId, setVoiceId] = useState(bot.voiceId ?? "");
   const [confirming, setConfirming] = useState(false);
   const [confirmingClear, setConfirmingClear] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -173,6 +182,59 @@ export function AgentSettings({
           }}
         />
       </div>
+
+      <div className="qb-dash__toggle-card">
+        <span className="min-w-0 flex-1">
+          <span className="block text-[14px] font-medium text-[var(--qb-ink)]">Voz</span>
+          <span className="mt-0.5 block text-[12px] leading-[1.35] text-[var(--qb-muted)]">
+            {voiceConfigured
+              ? "Ouvir as respostas deste bot em voz alta"
+              : "Entre com ChatGPT Plus/Pro em Modelos para ouvir as respostas"}
+          </span>
+        </span>
+        <Switch
+          className="qb-grok-switch"
+          checked={voiceOn}
+          onCheckedChange={(next) => {
+            setVoiceOn(next);
+            void onSave({ voiceEnabled: next }).catch(() => setVoiceOn(!next));
+          }}
+        />
+      </div>
+      {voiceOn ? (
+        <>
+          <div className="qb-dash__toggle-card">
+            <span className="min-w-0 flex-1">
+              <span className="block text-[14px] font-medium text-[var(--qb-ink)]">
+                Falar respostas
+              </span>
+              <span className="mt-0.5 block text-[12px] leading-[1.35] text-[var(--qb-muted)]">
+                Ler em voz alta cada resposta nova, sem apertar nada
+              </span>
+            </span>
+            <Switch
+              className="qb-grok-switch"
+              checked={autoSpeak}
+              onCheckedChange={(next) => {
+                setAutoSpeak(next);
+                void onSave({ voiceAutoSpeak: next }).catch(() => setAutoSpeak(!next));
+              }}
+            />
+          </div>
+          <label className="qb-dash__field">
+            Voz (opcional)
+            <input
+              value={voiceId}
+              placeholder="alloy, coral, fable…; vazio usa alloy"
+              onChange={(e) => setVoiceId(e.target.value)}
+              onBlur={() => {
+                if ((bot.voiceId ?? "") === voiceId.trim()) return;
+                void onSave({ voiceId: voiceId.trim() }).catch(() => setVoiceId(bot.voiceId ?? ""));
+              }}
+            />
+          </label>
+        </>
+      ) : null}
 
       <details className="qb-dash__advanced">
         <summary>Mais opções</summary>
