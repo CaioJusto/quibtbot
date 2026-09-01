@@ -78,7 +78,7 @@
     "@testcontainers/postgresql": "^11.5.1",
     "@types/node": "^24.3.0",
     "@types/react": "^19.1.12",
-    "typescript": "^6.0.3",
+    "typescript": "^7.0.2",
     "vitest": "^4.1.10"
   }
 }
