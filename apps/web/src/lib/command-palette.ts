@@ -12,7 +12,7 @@ import type { ThreadSearchResult } from "@quibt/contracts";
 export type PaletteAction =
   | { kind: "bot"; id: string }
   | { kind: "group"; id: string }
-  | { kind: "message"; botId: string | null; groupId: string | null }
+  | { kind: "message"; botId: string | null; groupId: string | null; messageId: string }
   | { kind: "panel"; panel: "create" | "create-group" | "settings" | "computer" | "routine" }
   | { kind: "route"; path: string };
 
@@ -201,6 +201,7 @@ export function messagePaletteItems(results: ThreadSearchResult[]): PaletteItem[
         kind: "message",
         botId: result.botId,
         groupId: result.groupId,
+        messageId: result.messageId,
       },
     };
   });

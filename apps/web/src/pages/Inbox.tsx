@@ -70,6 +70,7 @@ export function Inbox({
   const navigate = useNavigate();
   const [createOpen, setCreateOpen] = useState(false);
   const [createQuery, setCreateQuery] = useState("");
+  const [createIndex, setCreateIndex] = useState(0);
   const [showHidden, setShowHidden] = useState(false);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const initials =
@@ -102,6 +103,40 @@ export function Inbox({
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [createOpen]);
+
+  // Uma busca nova encurta a lista: o destaque volta ao começo para o ↵ não abrir
+  // outra coisa que não está mais na tela.
+  useEffect(() => {
+    setCreateIndex(0);
+  }, [createQuery, createOpen]);
+
+  // As opções do diálogo, na ordem desenhada: criar bot, cada bot filtrado, criar grupo.
+  const createOptionCount = createBots.length + 2;
+  function pickCreateOption(index: number) {
+    setCreateOpen(false);
+    if (index === 0) {
+      onCreateBot();
+      return;
+    }
+    const bot = createBots[index - 1];
+    if (bot) {
+      navigate(`/app/${bot.id}`);
+      return;
+    }
+    onCreateGroup();
+  }
+  function onCreateKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const delta = event.key === "ArrowDown" ? 1 : -1;
+      setCreateIndex((current) => Math.min(Math.max(current + delta, 0), createOptionCount - 1));
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      pickCreateOption(createIndex);
+    }
+  }
 
   const rows = useMemo(() => {
     const match = (value: string) => matchesInboxQuery(value, query);
@@ -155,34 +190,39 @@ export function Inbox({
                 <label className="qb-dash__new-recipient">
                   <span>Para:</span>
                   <input
+                    // biome-ignore lint/a11y/noAutofocus: o diálogo abre por um clique no "+"; a busca é o único campo.
+                    autoFocus
                     value={createQuery}
                     onChange={(event) => setCreateQuery(event.target.value)}
+                    onKeyDown={onCreateKeyDown}
                     placeholder="Buscar ou escolher um bot"
                   />
                 </label>
                 <div className="qb-dash__new-list" role="listbox" aria-label="Bots">
                   <button
                     type="button"
-                    className="qb-dash__new-option is-selected"
-                    onClick={() => {
-                      setCreateOpen(false);
-                      onCreateBot();
-                    }}
+                    role="option"
+                    aria-selected={createIndex === 0}
+                    className={`qb-dash__new-option${createIndex === 0 ? " is-selected" : ""}`}
+                    onMouseMove={() => setCreateIndex(0)}
+                    onClick={() => pickCreateOption(0)}
                   >
                     <span className="qb-dash__new-option-icon">
                       <Icon name="plus" size={15} />
                     </span>
                     <span className="flex-1">Criar novo bot</span>
                   </button>
-                  {createBots.map((bot) => (
+                  {createBots.map((bot, index) => (
                     <button
                       key={bot.id}
                       type="button"
-                      className="qb-dash__new-option"
-                      onClick={() => {
-                        setCreateOpen(false);
-                        navigate(`/app/${bot.id}`);
-                      }}
+                      role="option"
+                      aria-selected={createIndex === index + 1}
+                      className={`qb-dash__new-option${
+                        createIndex === index + 1 ? " is-selected" : ""
+                      }`}
+                      onMouseMove={() => setCreateIndex(index + 1)}
+                      onClick={() => pickCreateOption(index + 1)}
                     >
                       <BotAvatar
                         color={bot.color}
@@ -203,11 +243,13 @@ export function Inbox({
                   ) : null}
                   <button
                     type="button"
-                    className="qb-dash__new-option qb-dash__new-group"
-                    onClick={() => {
-                      setCreateOpen(false);
-                      onCreateGroup();
-                    }}
+                    role="option"
+                    aria-selected={createIndex === createOptionCount - 1}
+                    className={`qb-dash__new-option qb-dash__new-group${
+                      createIndex === createOptionCount - 1 ? " is-selected" : ""
+                    }`}
+                    onMouseMove={() => setCreateIndex(createOptionCount - 1)}
+                    onClick={() => pickCreateOption(createOptionCount - 1)}
                   >
                     <span className="qb-dash__new-option-icon">
                       <Icon name="users" size={15} />

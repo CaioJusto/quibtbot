@@ -31,6 +31,22 @@ export function oldestMessageSeq(messages: readonly ThreadMessage[]): number | n
   return null;
 }
 
+/**
+ * "Tem página anterior?" vem do servidor. Um servidor antigo não manda o campo; aí o
+ * palpite conta só mensagens duráveis, porque projeções vivas incham o tamanho da janela.
+ */
+export function pageHasMore(
+  hasMore: boolean | undefined,
+  messages: readonly ThreadMessage[],
+): boolean {
+  if (hasMore !== undefined) return hasMore;
+  let durable = 0;
+  for (const message of messages) {
+    if (!message.id.startsWith("progress:") && !message.id.startsWith("subagent:")) durable += 1;
+  }
+  return durable >= HISTORY_PAGE_LIMIT;
+}
+
 /** Resume as mensagens posteriores ao último ponto que esta conta viu. */
 export function unreadDivider(
   messages: readonly ThreadMessage[],

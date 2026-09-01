@@ -1,9 +1,11 @@
 import type { ThreadMessage } from "@quibt/contracts";
 import { describe, expect, it } from "vitest";
 import {
+  HISTORY_PAGE_LIMIT,
   lastUserMessageSeq,
   mergeThreadMessages,
   oldestMessageSeq,
+  pageHasMore,
   readThreadCursors,
   unreadDivider,
   writeThreadCursor,
@@ -51,6 +53,22 @@ describe("thread history", () => {
         message("m4", 4),
       ]),
     ).toBe(3);
+  });
+
+  it("trusts the server about older pages and ignores live projections in the fallback", () => {
+    expect(pageHasMore(true, [])).toBe(true);
+    expect(
+      pageHasMore(
+        false,
+        Array.from({ length: 80 }, (_, seq) => message(`m${seq}`, seq)),
+      ),
+    ).toBe(false);
+    // Servidor antigo, sem o campo: uma janela cheia de projeções vivas não é página cheia.
+    const durable = Array.from({ length: HISTORY_PAGE_LIMIT - 1 }, (_, seq) =>
+      message(`m${seq}`, seq),
+    );
+    expect(pageHasMore(undefined, [...durable, message("progress:r", 99)])).toBe(false);
+    expect(pageHasMore(undefined, [...durable, message("m-full", 99)])).toBe(true);
   });
 
   it("keeps cursors isolated by account and tolerates corrupt storage", () => {

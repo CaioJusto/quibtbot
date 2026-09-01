@@ -2962,6 +2962,9 @@ async function snapshot(
   ]);
   const run = await reconcileStrandedRun(deps, queued);
   const projected = projectMessages(events);
+  // Uma linha além do limite responde "tem página anterior?" sem depender do tamanho
+  // da janela devolvida — projeções vivas e o filtro de ramo mudam esse tamanho.
+  const take = "take" in window ? window.take : undefined;
   const rows = await deps.prisma.message.findMany({
     where: {
       threadId,
@@ -2969,9 +2972,11 @@ async function snapshot(
       OR: [{ conversationId: conversation.id }, { conversationId: null }],
     },
     orderBy: window.orderBy,
-    ...("take" in window ? { take: window.take } : {}),
+    ...(take !== undefined ? { take: take + 1 } : {}),
   });
-  const orderedRows = window.reverse ? [...rows].reverse() : rows;
+  const hasMore = take !== undefined && rows.length > take;
+  const pageRows = take !== undefined && rows.length > take ? rows.slice(0, take) : rows;
+  const orderedRows = window.reverse ? [...pageRows].reverse() : pageRows;
   const persisted = orderedRows.map((row) => ({
     id: row.id,
     threadId: row.threadId,
@@ -3006,6 +3011,7 @@ async function snapshot(
     threadId,
     cursor: last?.seq ?? -1,
     messages,
+    hasMore,
     run: run
       ? {
           id: run.id,
@@ -3039,6 +3045,7 @@ async function groupSnapshot(
 ): Promise<GroupThreadSnapshot> {
   const group = await createRepos(deps.prisma).getBotGroup(actor, groupId);
   const window = historyWindow(page);
+  const take = "take" in window ? window.take : undefined;
   const [rows, last, runs] = await Promise.all([
     deps.prisma.message.findMany({
       where: {
@@ -3046,7 +3053,7 @@ async function groupSnapshot(
         ...("seq" in window ? { seq: window.seq } : {}),
       },
       orderBy: window.orderBy,
-      ...("take" in window ? { take: window.take } : {}),
+      ...(take !== undefined ? { take: take + 1 } : {}),
     }),
     deps.prisma.event.findFirst({
       where: { threadId: group.threadId },
@@ -3062,11 +3069,14 @@ async function groupSnapshot(
       orderBy: { createdAt: "asc" },
     }),
   ]);
-  const orderedRows = window.reverse ? [...rows].reverse() : rows;
+  const hasMore = take !== undefined && rows.length > take;
+  const pageRows = take !== undefined && rows.length > take ? rows.slice(0, take) : rows;
+  const orderedRows = window.reverse ? [...pageRows].reverse() : pageRows;
   return {
     groupId,
     threadId: group.threadId,
     cursor: last?.seq ?? -1,
+    hasMore,
     messages: orderedRows.map((row) => ({
       id: row.id,
       threadId: row.threadId,

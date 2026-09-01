@@ -313,6 +313,8 @@ export const ThreadSnapshotSchema = z.object({
   threadId: Id,
   cursor: z.number().int().min(-1),
   messages: z.array(ThreadMessageSchema),
+  /** Existe página anterior à janela devolvida? Ausente em servidores antigos. */
+  hasMore: z.boolean().optional(),
   run: RunSchema.nullable(),
   computer: ComputerStatusSchema,
   conversations: z.array(ConversationSchema).default([]),
@@ -337,6 +339,8 @@ export const GroupThreadSnapshotSchema = z.object({
   threadId: Id,
   cursor: z.number().int().min(-1),
   messages: z.array(ThreadMessageSchema),
+  /** Existe página anterior à janela devolvida? Ausente em servidores antigos. */
+  hasMore: z.boolean().optional(),
   runs: z.array(RunSchema),
 });
 export type GroupThreadSnapshot = z.infer<typeof GroupThreadSnapshotSchema>;

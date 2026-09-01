@@ -32,8 +32,12 @@ export function CommandPalette({
   const localRows = useMemo(() => filterPalette(items, query), [items, query]);
   const rows = useMemo(() => [...localRows, ...remoteItems], [localRows, remoteItems]);
 
+  // Quem abriu com ⌘K estava provavelmente escrevendo: fechar devolve o foco para lá,
+  // como o ⌘F já faz, em vez de largar o teclado no vazio.
   useEffect(() => {
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     inputRef.current?.focus();
+    return () => previous?.focus();
   }, []);
 
   useEffect(() => {
@@ -70,9 +74,12 @@ export function CommandPalette({
     setHighlight(0);
   }, [query]);
 
-  // A linha destacada tem de estar visível quando se anda só com o teclado.
+  // A linha destacada tem de estar visível quando se anda só com o teclado. O seletor
+  // pula os cabeçalhos de seção, que não contam no índice das linhas.
   useEffect(() => {
-    listRef.current?.children[highlight]?.scrollIntoView({ block: "nearest" });
+    listRef.current
+      ?.querySelector(`[data-row-index="${highlight}"]`)
+      ?.scrollIntoView({ block: "nearest" });
   }, [highlight]);
 
   function onKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
@@ -133,9 +140,17 @@ export function CommandPalette({
           <ul ref={listRef} className="max-h-[320px] overflow-y-auto py-1.5">
             {rows.map((item, index) => (
               <li key={item.id}>
+                {remoteItems.length > 0 && index === localRows.length ? (
+                  <div className="px-3 pt-2 pb-1 text-[11px] font-semibold tracking-wide text-[var(--qb-muted)] uppercase">
+                    Mensagens
+                  </div>
+                ) : null}
                 <button
                   type="button"
-                  onMouseEnter={() => setHighlight(index)}
+                  data-row-index={index}
+                  // mousemove, não mouseenter: rolar a lista com as setas passa linhas por
+                  // baixo do cursor parado, e isso não pode roubar o destaque do teclado.
+                  onMouseMove={() => setHighlight(index)}
                   onClick={() => onPick(item)}
                   aria-current={index === highlight}
                   className={`flex w-full items-center gap-2 px-3 py-2 text-left ${
@@ -155,6 +170,15 @@ export function CommandPalette({
                 </button>
               </li>
             ))}
+            {searching ? (
+              <li
+                className="px-3 py-2 text-[12px] text-[var(--qb-muted)]"
+                role="status"
+                aria-live="polite"
+              >
+                Buscando mensagens…
+              </li>
+            ) : null}
           </ul>
         )}
       </div>

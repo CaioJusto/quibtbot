@@ -140,7 +140,7 @@ describe("messagePaletteItems", () => {
       id: "message:m1",
       label: "Decisão da reunião",
       detail: "Mensagem em Equipe",
-      action: { kind: "message", botId: null, groupId: "g1" },
+      action: { kind: "message", botId: null, groupId: "g1", messageId: "m1" },
     });
   });
 });

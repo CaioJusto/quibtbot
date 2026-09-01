@@ -173,9 +173,11 @@ describe("server history pagination", () => {
     expect(first.messages.map((message) => message.seq)).toEqual(
       Array.from({ length: 50 }, (_, index) => index + 70),
     );
+    expect(first.hasMore).toBe(true);
+    // Uma linha além do limite responde "tem mais?" sem uma segunda consulta.
     expect(messageQueries[0]).toMatchObject({
       orderBy: { seq: "desc" },
-      take: 50,
+      take: 51,
     });
 
     const older = await call(
@@ -186,11 +188,20 @@ describe("server history pagination", () => {
     expect(older.messages.map((message) => message.seq)).toEqual(
       Array.from({ length: 10 }, (_, index) => index + 60),
     );
+    expect(older.hasMore).toBe(true);
     expect(messageQueries[1]).toMatchObject({
       where: { threadId: "thread-1", seq: { lt: 70 } },
       orderBy: { seq: "desc" },
-      take: 10,
+      take: 11,
     });
+
+    const start = await call(
+      router.threads.get,
+      { botId: "bot-1", beforeSeq: 5, limit: 10 },
+      { context: { actor: owner } },
+    );
+    expect(start.messages.map((message) => message.seq)).toEqual([0, 1, 2, 3, 4]);
+    expect(start.hasMore).toBe(false);
 
     const group = await call(
       router.botGroups.thread,
@@ -198,6 +209,7 @@ describe("server history pagination", () => {
       { context: { actor: owner } },
     );
     expect(group.messages.map((message) => message.seq)).toEqual([15, 16, 17, 18, 19]);
+    expect(group.hasMore).toBe(true);
   });
 
   it("keeps incremental recovery unbounded instead of advancing past omitted messages", () => {
