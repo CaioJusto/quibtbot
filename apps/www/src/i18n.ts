@@ -298,7 +298,7 @@ export const COPY = {
         },
         {
           title: "Escolha o computador",
-          copy: "Docker nesta máquina por padrão, ou sua própria VPS, E2B ou Box — cada bot mantém a própria tela.",
+          copy: "Docker nesta máquina por padrão, ou sua própria VPS, E2B, Box ou Daytona — cada bot mantém a própria tela.",
         },
         {
           title: "Crie um bot",

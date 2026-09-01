@@ -214,6 +214,9 @@ export async function createApp(overrides: CreateAppOverrides = {}): Promise<App
     supervisorToken: env.sandboxSupervisorToken,
     e2bApiKey: env.e2bApiKey,
     boxApiKey: env.boxApiKey,
+    daytonaApiKey: env.daytonaApiKey,
+    daytonaApiUrl: env.daytonaApiUrl,
+    daytonaTarget: env.daytonaTarget,
     dataDir: env.dataDir,
     desktopGrantsByUser,
   };
@@ -412,6 +415,7 @@ export async function createApp(overrides: CreateAppOverrides = {}): Promise<App
       sandboxSupervisorToken: env.sandboxSupervisorToken,
       e2bApiKey: env.e2bApiKey,
       boxApiKey: env.boxApiKey,
+      daytonaApiKey: env.daytonaApiKey,
       webOrigin: env.webOrigin,
       apiUrl: env.apiUrl,
       authUrl: env.authUrl,

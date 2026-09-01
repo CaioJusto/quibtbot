@@ -951,7 +951,7 @@ async function uninstallFromDesktop(): Promise<void> {
     message: "Tirar o Quibt Bot deste computador?",
     detail: [
       `Isto remove os serviços do Quibt no Docker, os computadores dos bots, as imagens baixadas (uns 6 GB) e a pasta de dados (${userData}) — conversas, memória e segredos inclusos.`,
-      "Manter as imagens só acelera uma reinstalação. O Docker continua instalado. Bots numa VPS, E2B ou Box não são tocados.",
+      "Manter as imagens só acelera uma reinstalação. O Docker continua instalado. Bots numa VPS, E2B, Box ou Daytona não são tocados.",
     ].join("\n\n"),
     checkboxLabel: "Manter meus dados (banco e arquivos dos bots) para reinstalar depois",
     checkboxChecked: false,

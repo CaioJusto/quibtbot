@@ -164,6 +164,7 @@ export interface RouterDeps {
     sandboxSupervisorToken?: string;
     e2bApiKey?: string;
     boxApiKey?: string;
+    daytonaApiKey?: string;
     /** COMPOSIO_API_KEY do deploy; quando existe, a chave colada no app não é usada. */
     composioApiKey?: string;
     /** Sem mailer o `health` avisa, e a senha se redefine no próprio computador. */
@@ -3485,13 +3486,15 @@ async function saveDeploymentMachine(
       const envCovers =
         (boot === "e2b" && (available.includes("e2b") || Boolean(deps.env.e2bApiKey))) ||
         (boot === "box" && (available.includes("box") || Boolean(deps.env.boxApiKey))) ||
+        (boot === "daytona" &&
+          (available.includes("daytona") || Boolean(deps.env.daytonaApiKey))) ||
         (boot === "remote-supervisor" && Boolean(deps.env.sandboxSupervisorToken));
       if (!input.sandboxApiKey?.trim() && !hasSavedKey && !envCovers) {
         throw new ORPCError("BAD_REQUEST", {
           message:
             boot === "remote-supervisor"
               ? "Cole o token do supervisor da sua VPS."
-              : `Cole a chave da sua conta ${boot === "e2b" ? "E2B" : "Box"}.`,
+              : `Cole a chave da sua conta ${boot === "e2b" ? "E2B" : boot === "box" ? "Box" : "Daytona"}.`,
         });
       }
     }
@@ -3568,6 +3571,7 @@ async function computerCatalog(deps: RouterDeps, query: string) {
   return filterCatalog(query, {
     e2bApiKey: deps.env.e2bApiKey ?? (kind === "e2b" ? savedKey : undefined),
     boxApiKey: deps.env.boxApiKey ?? (kind === "box" ? savedKey : undefined),
+    daytonaApiKey: deps.env.daytonaApiKey ?? (kind === "daytona" ? savedKey : undefined),
     remoteSupervisorUrl:
       kind === "remote-supervisor" ? (settings?.sandboxEndpoint ?? undefined) : undefined,
     remoteSupervisorToken: kind === "remote-supervisor" ? savedKey : undefined,

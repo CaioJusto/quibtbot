@@ -51,7 +51,7 @@ describe("mobile onboarding screen", () => {
     expect(screen).toContain("Você paga por uso na sua conta OpenRouter");
   });
 
-  it("lets the owner pick Docker, VPS, E2B or Box before the first bot", () => {
+  it("lets the owner pick Docker, VPS, E2B, Box or Daytona before the first bot", () => {
     expect(screen).toContain("MachineSettingsBody");
     expect(screen).toContain('step === "machine"');
   });

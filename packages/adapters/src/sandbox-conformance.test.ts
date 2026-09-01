@@ -5,6 +5,7 @@ import path from "node:path";
 import type { ComputerRef, SandboxProvider } from "@quibt/adapter-kit";
 import { afterAll, describe, expect, it } from "vitest";
 import { BoxSandboxEmulator } from "./box-emulator.js";
+import { DaytonaSandboxEmulator } from "./daytona-emulator.js";
 import { DesktopSandboxProvider } from "./desktop-sandbox.js";
 import { DockerSandboxProvider } from "./docker-sandbox.js";
 import { ManagedSandboxEmulator } from "./e2b-emulator.js";
@@ -28,23 +29,28 @@ async function drain(provider: SandboxProvider, computer: ComputerRef) {
 }
 
 describe("sandbox conformance", () => {
-  it("runs the same graphical command on fake, managed-sandbox emulator, and desktop", async () => {
+  it("runs the same graphical command on fake, managed emulators, and desktop", async () => {
     const fake = new FakeSandboxProvider();
     const managed = new ManagedSandboxEmulator();
+    const daytona = new DaytonaSandboxEmulator();
     const desktop = new DesktopSandboxProvider();
     const a = await fake.provision({ botId: "bot-a", homePath: "/tmp/a" }, ctx);
     const b = await managed.provision({ botId: "bot-b", homePath: "/tmp/b" }, ctx);
-    const c = await desktop.provision({ botId: "bot-c", homePath: "/tmp/c" }, ctx);
+    const c = await daytona.provision({ botId: "bot-c", homePath: "/tmp/c" }, ctx);
+    const d = await desktop.provision({ botId: "bot-d", homePath: "/tmp/d" }, ctx);
     const outA = await drain(fake, a);
     const outB = await drain(managed, b);
-    const outC = await drain(desktop, c);
+    const outC = await drain(daytona, c);
+    const outD = await drain(desktop, d);
     expect(outA).toContain("graphical-ok");
     expect(outB).toContain("graphical-ok");
     expect(outC).toContain("graphical-ok");
-    expect([a.kind, b.kind, c.kind]).toEqual(["fake", "e2b", "desktop"]);
+    expect(outD).toContain("graphical-ok");
+    expect([a.kind, b.kind, c.kind, d.kind]).toEqual(["fake", "e2b", "daytona", "desktop"]);
     await fake.destroy(a, ctx);
     await managed.destroy(b, ctx);
-    await desktop.destroy(c, ctx);
+    await daytona.destroy(c, ctx);
+    await desktop.destroy(d, ctx);
   });
 
   it("desktop executor refuses paths outside granted folders", async () => {

@@ -2,18 +2,24 @@ import { describe, expect, it } from "vitest";
 import { sandboxOptionsFromEnv, workerBillingEnabled, workerRuntimeConfig } from "./config.js";
 
 describe("worker configuration", () => {
-  it("passes Box and supervisor credentials to the sandbox factory", () => {
+  it("passes cloud sandbox and supervisor credentials to the sandbox factory", () => {
     const options = sandboxOptionsFromEnv(
       {
         NODE_ENV: "production",
         BETTER_AUTH_SECRET: "auth-secret-that-is-long-enough-for-production",
         SANDBOX_SUPERVISOR_TOKEN: "supervisor-token-that-is-long-enough-prod",
         BOX_API_KEY: "box_live_worker_key",
+        DAYTONA_API_KEY: "daytona_live_worker_key",
+        DAYTONA_API_URL: "https://daytona.example.test",
+        DAYTONA_TARGET: "eu",
       },
       "/data",
       { "user-1": ["/shared"] },
     );
     expect(options.boxApiKey).toBe("box_live_worker_key");
+    expect(options.daytonaApiKey).toBe("daytona_live_worker_key");
+    expect(options.daytonaApiUrl).toBe("https://daytona.example.test");
+    expect(options.daytonaTarget).toBe("eu");
     expect(options.supervisorToken).toBe("supervisor-token-that-is-long-enough-prod");
   });
 

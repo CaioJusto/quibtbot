@@ -55,7 +55,7 @@ const LOCAL_HOST: ServerHostOption = {
   ],
   cost: "Grátis neste aparelho. Você só paga o modelo (OpenRouter, Ollama local ou a sua assinatura).",
   botsLater:
-    "Este passo liga o servidor. O computador dos bots é outra escolha: pode ser o mesmo Docker, uma VPS, E2B ou Box — cada um com regras diferentes de compartilhamento.",
+    "Este passo liga o servidor. O computador dos bots é outra escolha: pode ser o mesmo Docker, uma VPS, E2B, Box ou Daytona — cada um com regras diferentes de compartilhamento.",
   showBootstrapCommand: true,
 };
 
@@ -80,7 +80,7 @@ const VPS_HOST: ServerHostOption = {
   ],
   cost: "Você paga a VPS no Hetzner, DigitalOcean etc. A Quibt não cobra a máquina.",
   botsLater:
-    "O mesmo comando já sobe o computador dos bots nessa VPS: Linux com tela gráfica e navegador, um monitor por bot, pronto para você ver e assumir pelo celular. Trocar por E2B ou Box continua possível em Ajustes → Máquina, mas não é preciso para começar.",
+    "O mesmo comando já sobe o computador dos bots nessa VPS: Linux com tela gráfica e navegador, um monitor por bot, pronto para você ver e assumir pelo celular. Trocar por E2B, Box ou Daytona continua possível em Ajustes → Máquina, mas não é preciso para começar.",
   providerLinks: [
     {
       label: "Como criar um servidor na Hetzner",

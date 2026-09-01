@@ -40,7 +40,7 @@ as the latest public release; its desktop installers are unsigned and its DMG is
 ## Known architectural limits
 
 - The Docker/remote-supervisor provider uses one computer container per workspace. Separate bot
-  desktops are not hostile process boundaries; use E2B or Box for mutually untrusted bots.
+  desktops are not hostile process boundaries; use E2B, Box, or Daytona for mutually untrusted bots.
 - An already-open noVNC connection is bounded by its short-lived capability but is not yet revoked
   synchronously when a control lease is released. This remains a release-hardening item.
 - Same-LAN HTTP pairing is not safe against an active hostile network. Prefer HTTPS or Tailscale.

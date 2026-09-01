@@ -134,6 +134,34 @@ const BOX_GUIDE: MachineGuide = {
   keyLabel: "Abrir as chaves da Box",
 };
 
+const DAYTONA_GUIDE: MachineGuide = {
+  kind: "daytona",
+  family: "daytona",
+  title: OSS_MACHINE_COPY.daytona.title,
+  body: OSS_MACHINE_COPY.daytona.body,
+  headline: "Cada bot ganha um sandbox com desktop na Daytona",
+  what: "A Daytona cria um Linux isolado por bot. O Quibt usa o SDK oficial, inicia o desktop VNC da imagem padrão e abre uma URL temporária assinada no painel do computador.",
+  who: "Quem quer terminal, arquivos e desktop gráfico na nuvem sem instalar Docker no servidor Quibt.",
+  youNeed: [
+    "Uma conta em daytona.io.",
+    "A DAYTONA_API_KEY criada no dashboard. DAYTONA_API_URL e DAYTONA_TARGET só são necessários em instalações self-host/customizadas.",
+    "Crédito ou plano na Daytona. A Quibt não cobra nem revende o sandbox.",
+  ],
+  steps: [
+    "Abra app.daytona.io, entre na sua conta e crie uma API key.",
+    "Cole a DAYTONA_API_KEY nesta tela e toque em Testar.",
+    "Salve e crie o bot. A primeira mensagem cria o sandbox e inicia o desktop.",
+    "Use Assumir controle para abrir o noVNC por uma URL assinada; o link expira e é revogado ao fechar.",
+  ],
+  botsShare:
+    "Não compartilham computador. É um sandbox Daytona por bot, com filesystem, processos e desktop próprios. Não é aba de navegador. Parar preserva o disco; excluir o bot apaga o sandbox.",
+  cost: "A Daytona cobra o sandbox na sua conta. A Quibt não revende essa infraestrutura.",
+  signupUrl: "https://app.daytona.io/",
+  signupLabel: "Abrir a Daytona",
+  keyUrl: "https://app.daytona.io/dashboard/keys",
+  keyLabel: "Abrir as chaves da Daytona",
+};
+
 const HETZNER_GUIDE: MachineGuide = {
   ...REMOTE_GUIDE,
   kind: "vps-hetzner",
@@ -188,6 +216,7 @@ const GUIDES: Record<string, MachineGuide> = {
   "remote-supervisor": REMOTE_GUIDE,
   e2b: E2B_GUIDE,
   box: BOX_GUIDE,
+  daytona: DAYTONA_GUIDE,
   "vps-hetzner": HETZNER_GUIDE,
   "vps-digitalocean": DIGITALOCEAN_GUIDE,
   "vps-generic": GENERIC_VPS_GUIDE,
@@ -198,6 +227,7 @@ const FAMILY_GUIDES: Record<OssMachine, MachineGuide> = {
   "remote-supervisor": REMOTE_GUIDE,
   e2b: E2B_GUIDE,
   box: BOX_GUIDE,
+  daytona: DAYTONA_GUIDE,
 };
 
 /** Exact catalog kind first, then the bootable family, then Docker. */

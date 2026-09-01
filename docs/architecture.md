@@ -7,7 +7,7 @@ answers them separately:
 supervisor) runs. **Onde os bots trabalham?** — where each **bot's own computer** (the Linux
 desktop it clicks around in) runs. The two answers are picked independently and can differ:
 a server on a VPS can still hand its bots Docker desktops on that same VPS, or E2B sandboxes,
-or Box VMs.
+Box VMs, or Daytona sandboxes.
 
 This document is the long-form map for engineers. [`docs/mobile.md`](./mobile.md) covers the
 phone client specifically; [`docs/self-host.md`](./self-host.md), [`docs/computers.md`](./computers.md),
@@ -38,20 +38,20 @@ function:
 - **Postgres** — every workspace, bot, thread, message, memory, and `deployment_settings`
   row (including the saved machine choice).
 - **Sandbox supervisor** — the process that actually owns Docker socket access and computer
-  lifecycle for the `docker` / `remote-supervisor` family. E2B and Box calls go straight from
+  lifecycle for the `docker` / `remote-supervisor` family. E2B, Box, and Daytona calls go straight from
   the API/worker to their APIs; there is no local supervisor for them.
 
 **Server hosts:** your own machine (source checkout or the `quibtbot install` CLI), a VPS you
 provision yourself (the `remote-supervisor` bootstrap script), or a persistent Box VM
 (`quibtbot install` run inside it).
 
-E2B never hosts the Quibt server. E2B is a bot-computer provider only, never a place the
+E2B never hosts the Quibt server. Daytona never hosts it either. Both are bot-computer providers only, never places the
 API/worker/Postgres run. This mirrors `apps/mobile/lib/server-setup.ts`, whose
 `ServerHostKind` union is deliberately `"local" | "vps" | "box"` with no `"e2b"` member.
 
 ## Computer providers
 
-Separate from the server, each bot needs a Linux desktop to click around in. Four families,
+Separate from the server, each bot needs a Linux desktop to click around in. Five families,
 picked in onboarding or **Settings → Máquina**, saved in `deployment_settings`:
 
 | Provider | Sharing model | Notes |
@@ -60,6 +60,7 @@ picked in onboarding or **Settings → Máquina**, saved in `deployment_settings
 | `remote-supervisor` | Same as `docker`, on a host you run | Same supervisor software, pointed at a VPS instead of `localhost`. The phone keeps working when your laptop is off. |
 | `e2b` | **One sandbox per bot** | Bot computer only — never a Quibt server host (see above). Isolated: no shared files, no shared display, not a browser tab. |
 | `box` | **One VM per bot** | `ttlSeconds: null` (no provider auto-stop; Quibt's own idle timer stops it), `noEnv: true` (operator secrets never enter the VM). Persistent disk survives a stop/resume cycle. |
+| `daytona` | **One sandbox per bot** | Default graphical image; Computer Use starts VNC/noVNC, the panel gets a signed port-6080 preview, and stop/start preserves the sandbox filesystem. |
 | `desktop` / `fake` | Disabled / in-process emulator | Tests only (`pnpm verify:fast`). Refused in production. |
 
 The router (`createRoutingSandboxProvider`) never migrates a computer that already booted to a
@@ -70,7 +71,7 @@ different provider; a computer stays in the family that created it until it is d
 | Data | Where | Notes |
 | --- | --- | --- |
 | Workspaces, bots, threads, messages, memory, `deployment_settings` | Postgres | The only source of truth; every client reads it through the API. |
-| Bot home directories | `DATA_DIR` on the sandbox host (or inside the E2B/Box VM) | Local filesystem today; object-storage-backed homes are not wired yet. |
+| Bot home directories | `DATA_DIR` on the sandbox host (or inside the E2B/Box/Daytona computer) | Local filesystem today; object-storage-backed homes are not wired yet. |
 | Chat attachments (screenshots, PDFs, voice notes) | `ARTIFACTS_DIR` | Local filesystem, defaults to `./data/artifacts`. |
 | Mobile session token, SSH/Box credentials, push token | Device SecureStore (Keychain / Keystore) | Never touches Postgres; see [`docs/mobile.md`](./mobile.md). |
 | Encrypted secrets (model keys, provider tokens) | Postgres, encrypted with `ENCRYPTION_KEY` | Decrypted only inside the API/worker process. |
@@ -82,12 +83,12 @@ different provider; a computer stays in the family that created it until it is d
 - The **sandbox supervisor** is the one process with Docker socket access. The API/worker
   never get an unrestricted socket; they call the supervisor over an internal, token-authenticated
   connection (`SANDBOX_SUPERVISOR_TOKEN`).
-- Every bot computer (Docker container, E2B sandbox, or Box VM) is untrusted relative to the
+- Every bot computer (Docker container, E2B/Daytona sandbox, or Box VM) is untrusted relative to the
   host that owns it. Docker containers are resource-limited and, with
   `SANDBOX_SCREEN_NETWORK=internal`, isolated onto a dedicated Docker network away from
   Postgres and the application network.
 - Box VMs are created with `noEnv: true`: the operator's Quibt secrets are never copied into
-  them. E2B sandboxes never see the API's encryption key either — they only receive the
+  them. E2B and Daytona sandboxes never see the API's encryption key either — they only receive the
   commands a bot's turn issues.
 - The live screen (noVNC) is served through short-lived, signed `/novnc/<host>/<port>/<expiresAt>.<sig>`
   capabilities minted by the API. Nothing proxies an unrestricted port straight onto the
@@ -114,6 +115,7 @@ flowchart LR
         Docker[Docker container\none desktop per bot]
         E2B[E2B sandbox\none per bot]
         Box[Box VM\none per bot]
+        Daytona[Daytona sandbox\none per bot]
     end
 
     Web -->|HTTPS / oRPC| API
@@ -128,12 +130,13 @@ flowchart LR
     Supervisor --> Docker
     Worker -->|E2B_API_KEY| E2B
     Worker -->|BOX_API_KEY, noEnv| Box
+    Worker -->|DAYTONA_API_KEY| Daytona
 ```
 
 The same API answers every client. Bot computers never talk to Postgres directly and never
 receive the operator's encryption key; they only receive the shell/browser commands a bot's
 turn issues and stream a screen back through the supervisor (Docker) or the provider's own
-stream (E2B/Box).
+stream (E2B/Box/Daytona).
 
 ## Pairing
 
@@ -161,9 +164,9 @@ phone's "Conectar a um Quibt existente" flow consumes it.
 | Mode | Server host | Typical computer | Who it fits |
 | --- | --- | --- | --- |
 | Local | This machine (`pnpm dev` or `quibtbot install`) | `docker` | One person, one machine, no cloud account. |
-| VPS | Your own Ubuntu VPS (`remote-supervisor` bootstrap script) | `docker` on the same VPS, or `e2b`/`box` | Always-on server without leaving a laptop open. |
+| VPS | Your own Ubuntu VPS (`remote-supervisor` bootstrap script) | `docker` on the same VPS, or `e2b`/`box`/`daytona` | Always-on server without leaving a laptop open. |
 | Box-hosted server | A persistent Box VM (`quibtbot install` run inside it) | Usually a different Box VM per bot | Always-on server without managing a VPS. |
-| Public / multi-user | VPS or Box, `QUIBT_EDITION=cloud` for operators only | `e2b` or `box` (never shared `docker`) | Anyone exposing the product to users they do not fully trust; `assertEditionMachine` refuses shared Docker in that mode. |
+| Public / multi-user | VPS or Box, `QUIBT_EDITION=cloud` for operators only | `e2b`, `box`, or `daytona` (never shared `docker`) | Anyone exposing the product to users they do not fully trust; `assertEditionMachine` refuses shared Docker in that mode. |
 
 A multi-tenant billing engine remains inside the API for operators who run it themselves
 (`docs/editions.md`), but the public install path — this document, the README, and every

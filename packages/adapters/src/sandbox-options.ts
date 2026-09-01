@@ -20,6 +20,7 @@ export function sandboxOptionsFromSettings(
     : undefined;
   if (kind === "e2b" && key) extra.e2bApiKey = key;
   if (kind === "box" && key) extra.boxApiKey = key;
+  if (kind === "daytona" && key) extra.daytonaApiKey = key;
   if (kind === "remote-supervisor") {
     if (settings?.sandboxEndpoint) extra.remoteSupervisorUrl = settings.sandboxEndpoint;
     if (key) extra.remoteSupervisorToken = key;

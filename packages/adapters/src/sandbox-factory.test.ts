@@ -15,13 +15,20 @@ describe("createSandboxProvider", () => {
 
   it("throws on unknown provider", () => {
     expect(() => createSandboxProvider("bogus", {})).toThrow(
-      'Unknown SANDBOX_PROVIDER "bogus". Use docker | remote-supervisor | e2b | e2b-emulator | box | box-emulator | desktop | fake.',
+      'Unknown SANDBOX_PROVIDER "bogus". Use docker | remote-supervisor | e2b | e2b-emulator | box | box-emulator | daytona | daytona-emulator | desktop | fake.',
     );
   });
 
   it("requires and wires the Box API key", () => {
     expect(() => createSandboxProvider("box", {})).toThrow(/BOX_API_KEY is required/);
     expect(createSandboxProvider("box", { boxApiKey: "box_test_key" }).describe().id).toBe("box");
+  });
+
+  it("requires and wires the Daytona API key", () => {
+    expect(() => createSandboxProvider("daytona", {})).toThrow(/DAYTONA_API_KEY is required/);
+    expect(
+      createSandboxProvider("daytona", { daytonaApiKey: "daytona_test_key" }).describe().id,
+    ).toBe("daytona");
   });
 
   it("builds a remote supervisor as Docker with a distinct kind", () => {
@@ -87,7 +94,7 @@ describe("createRoutingSandboxProvider", () => {
     saved?: string | null;
     canChooseMachine?: boolean;
     computerKind?: string | null;
-    keys?: { e2bApiKey?: string; boxApiKey?: string };
+    keys?: { e2bApiKey?: string; boxApiKey?: string; daytonaApiKey?: string };
   }) {
     const calls: Call[] = [];
     const errors: unknown[] = [];

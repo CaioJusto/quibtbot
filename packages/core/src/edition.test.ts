@@ -74,6 +74,9 @@ describe("assertEditionMachine", () => {
     expect(() =>
       assertEditionMachine({ edition: "cloud", sandboxProvider: "box", nodeEnv: "production" }),
     ).not.toThrow();
+    expect(() =>
+      assertEditionMachine({ edition: "cloud", sandboxProvider: "daytona", nodeEnv: "production" }),
+    ).not.toThrow();
   });
 
   it("never blocks the self-host case Docker exists for", () => {
@@ -110,11 +113,13 @@ describe("allowsSharedDocker", () => {
 describe("availableOssMachines", () => {
   it("always offers docker and unlocks remotes when keys exist", () => {
     expect(availableOssMachines({})).toEqual(["docker"]);
-    expect(availableOssMachines({ e2bApiKey: "e2b", boxApiKey: "box" })).toEqual([
-      "docker",
-      "e2b",
-      "box",
-    ]);
+    expect(
+      availableOssMachines({
+        e2bApiKey: "e2b",
+        boxApiKey: "box",
+        daytonaApiKey: "daytona",
+      }),
+    ).toEqual(["docker", "e2b", "box", "daytona"]);
   });
 });
 
@@ -150,6 +155,7 @@ describe("resolveDeploymentMachine", () => {
   it("reports the emulators as the family they stand in for", () => {
     expect(machineFamily("e2b-emulator")).toBe("e2b");
     expect(machineFamily("box-emulator")).toBe("box");
+    expect(machineFamily("daytona-emulator")).toBe("daytona");
     expect(machineFamily("fake")).toBeNull();
     expect(
       resolveDeploymentMachine({ envProvider: "fake", canChooseMachine: true }).machine,
@@ -158,10 +164,11 @@ describe("resolveDeploymentMachine", () => {
 });
 
 describe("parseOssMachine", () => {
-  it("accepts the three self-host computers", () => {
+  it("accepts the self-host computer providers", () => {
     expect(parseOssMachine("docker")).toBe("docker");
     expect(parseOssMachine("E2B")).toBe("e2b");
     expect(parseOssMachine("remote-supervisor")).toBe("remote-supervisor");
+    expect(parseOssMachine("DAYTONA")).toBe("daytona");
     expect(parseOssMachine("desktop")).toBeNull();
   });
 });

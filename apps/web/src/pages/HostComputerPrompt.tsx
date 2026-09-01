@@ -65,8 +65,8 @@ export function HostComputerPrompt() {
         </h2>
         <p className="mt-2 text-[14px] leading-relaxed text-[var(--qb-muted)]">
           Em {hostLabel} o padrão é Docker. Toque numa opção e leia o quadro: o que instalar, onde
-          copiar a chave e se os bots compartilham o computador. VPS, E2B e Box usam a sua conta — a
-          Quibt não cobra a máquina.
+          copiar a chave e se os bots compartilham o computador. VPS, E2B, Box e Daytona usam a sua
+          conta — a Quibt não cobra a máquina.
         </p>
         <div className="mt-5">
           <MachinePicker

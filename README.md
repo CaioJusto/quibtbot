@@ -143,13 +143,13 @@ pnpm desktop:pack:linux # x64 AppImage → apps/desktop/out/
 | --- | --- |
 | **A bot** | One thread, one graphical Linux desktop of its own, memory, routines, history. Talk to it in the app; it browses, downloads, writes files and runs commands on that desktop. |
 | **Your model** | An OpenRouter key, a local Ollama / LM Studio URL, or the ChatGPT / Copilot / SuperGrok subscription you already pay for. Quibt sells no tokens and takes no cut. |
-| **Your machine** | Docker on this computer (default), your own VPS, E2B, or Box. The choice is made in onboarding and can change later in Ajustes → Máquina. |
+| **Your machine** | Docker on this computer (default), your own VPS, E2B, Box, or Daytona. The choice is made in onboarding and can change later in Ajustes → Máquina. |
 | **Three clients** | Web, desktop (Electron, macOS/Windows/Linux) and phone (iOS/Android) — all clients of the same API, so a bot started on the laptop keeps working from the phone. |
 | **Your data** | Postgres and the bot home directories live on the machine you installed onto. Uninstall takes them with it if you want. |
 
 ## Run locally
 
-**Requirements for source development:** Node.js >= 22.19, pnpm 10.34.5, and Docker Desktop or Engine (Postgres + the graphical bot computer). The packaged macOS app detects Docker Desktop, Colima, and Homebrew even when launched from Finder; if no Docker engine exists, it downloads the official architecture-matched Docker Desktop DMG, validates Docker Inc.'s signature and Apple notarization, asks for the macOS administrator password once, opens Docker, and resumes the Quibt installation automatically. The app you open is native to the host; the bot computer is always a Linux desktop (Docker / E2B / Box), not your Mac or Windows session.
+**Requirements for source development:** Node.js >= 22.19, pnpm 10.34.5, and Docker Desktop or Engine (Postgres + the graphical bot computer). The packaged macOS app detects Docker Desktop, Colima, and Homebrew even when launched from Finder; if no Docker engine exists, it downloads the official architecture-matched Docker Desktop DMG, validates Docker Inc.'s signature and Apple notarization, asks for the macOS administrator password once, opens Docker, and resumes the Quibt installation automatically. The app you open is native to the host; the bot computer is always a Linux desktop (Docker / E2B / Box / Daytona), not your Mac or Windows session.
 
 ```bash
 cp .env.example .env
@@ -197,12 +197,14 @@ The app you open and the computer provider are separate. Web, Electron, and mobi
 | `remote-supervisor` | Same Docker supervisor on a host you already run, **one graphical desktop per bot** | BYO VPS (`SANDBOX_REMOTE_SUPERVISOR_URL` or Settings → Máquina) |
 | `e2b` | Remote E2B sandbox, **one sandbox per bot** | Public or multi-user (env or BYOK); bot computer only, never a server host |
 | `box` | Persistent Ubuntu VM, **one VM per bot** | Public or multi-user (env or BYOK) |
+| `daytona` | Private Daytona sandbox with Computer Use, **one sandbox per bot** | Public or multi-user (env or BYOK) |
 | `desktop` / `fake` | Disabled / in-process emulator | Tests only |
 
-You can pick Docker, E2B, or Box in onboarding. Keys can be pasted directly in the UI (BYOK) at
-Settings → Máquina, or set once in `.env` for E2B (`E2B_API_KEY`) and Box (`BOX_API_KEY`) so
-every deploy inherits them — the UI path does not require editing `.env` at all. The choice is
-saved in `deployment_settings`; `SANDBOX_PROVIDER` is the fallback.
+You can pick Docker, a VPS, E2B, Box, or Daytona in onboarding. Keys can be pasted directly in the
+UI (BYOK) at Settings → Máquina, or set once in `.env` for E2B (`E2B_API_KEY`), Box
+(`BOX_API_KEY`), and Daytona (`DAYTONA_API_KEY`) so every deploy inherits them — the UI path
+does not require editing `.env` at all. The choice is saved in `deployment_settings`;
+`SANDBOX_PROVIDER` is the fallback.
 
 With `SANDBOX_SCREEN_NETWORK=internal` (what `infra/compose` sets) each workspace computer gets a dedicated Docker network and cannot join the database/application network. Plain `pnpm dev` leaves it on Docker's default bridge. Keep the supervisor private.
 
@@ -229,7 +231,7 @@ With `SANDBOX_SCREEN_NETWORK=internal` (what `infra/compose` sets) each workspac
   `host.docker.internal`) or a public address. Private ranges and cloud metadata are refused before
   any connection, and every failure returns the same message.
 - Docker and `remote-supervisor` are for a trusted, single-owner workspace. Bots in one workspace
-  share a Unix/container boundary. Use one sandbox/VM per bot (E2B or Box) when bots or tenants are
+  share a Unix/container boundary. Use one sandbox/VM per bot (E2B, Box, or Daytona) when bots or tenants are
   mutually untrusted.
 - Use HTTPS for every VPS or internet-facing endpoint. Same-Wi-Fi HTTP pairing is a convenience,
   not protection against a hostile LAN; prefer a valid HTTPS origin or Tailscale.
@@ -260,7 +262,7 @@ infra/    compose  sandboxes
 | API / worker | Hono + oRPC, Graphile Worker, Prisma, Postgres |
 | Clients | Vite + React (web), Electron (desktop), Expo (mobile) |
 | Site | Astro (`apps/www`) at [quibt.com.br](https://quibt.com.br) |
-| Computer | Docker (default), E2B, or Box |
+| Computer | Docker (default), a VPS, E2B, Box, or Daytona |
 
 `apps/www` is the public site. The signed-in product is `apps/web`.
 
@@ -269,7 +271,7 @@ infra/    compose  sandboxes
 | Doc | What it covers |
 | --- | --- |
 | [`docs/onboarding.md`](docs/onboarding.md) | First run in plain language (install, model, machine, first bot) |
-| [`docs/computers.md`](docs/computers.md) | Docker, VPS, E2B, Box — what to do, how bots share a computer |
+| [`docs/computers.md`](docs/computers.md) | Docker, VPS, E2B, Box, Daytona — what to do, how bots share a computer |
 | [`docs/desktop.md`](docs/desktop.md) | Mac DMG / Windows installer, local-first desktop |
 | [`docs/mobile.md`](docs/mobile.md) | Expo app: server setup, QR/code claim, off-LAN HTTPS tunnel, SecureStore, remote install security |
 | [`docs/self-host.md`](docs/self-host.md) | Run Quibt Bot on your machine or VPS |

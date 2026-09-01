@@ -4,7 +4,7 @@ Este guia é para quem nunca mexeu em servidor, Docker ou chave de API. O Quibt 
 
 Duas perguntas guiam este guia: **Onde o Quibt fica ligado?** (o passo 1 abaixo — este
 computador, sua VPS ou uma VM da Box) e **Onde os bots trabalham?** (o passo 4 — Docker, VPS,
-E2B ou Box). São escolhas independentes.
+E2B, Box ou Daytona). São escolhas independentes.
 
 Não existe plano de tokens da Quibt no caminho público. Você paga o modelo (OpenRouter, Ollama no seu PC, ou a assinatura que já tem) e, se escolher nuvem, paga a E2B ou a Box na conta **deles**.
 
@@ -84,6 +84,7 @@ Esta tela só aparece para quem é dono do install. Toque numa opção e **leia 
 | Minha VPS | Os bots usam o seu servidor. | URL + token do supervisor |
 | E2B | Cada bot ganha um desktop isolado na nuvem da E2B. | Conta e chave em e2b.dev |
 | Box | Cada bot ganha uma VM Ubuntu na Box. | Conta e chave em box.ascii.dev |
+| Daytona | Cada bot ganha um sandbox com terminal e desktop VNC. | Conta e chave em daytona.io |
 
 Receitas Hetzner / DigitalOcean / “qualquer VPS” são atalhos para a opção Minha VPS.
 
@@ -106,7 +107,7 @@ Escolha uma cara, um nome e um cargo. Toque em **Abrir o Quibt Bot**. Mande uma 
 ## Como vários bots dividem o computador
 
 - **Docker ou VPS:** é o **mesmo** computador (a mesma imagem Linux). Cada bot tem a **própria tela** — um desktop, não uma aba do Chrome. Arquivos da casa são compartilhados. A parede parece igual; as janelas de cada bot são outras.
-- **E2B ou Box:** cada bot tem o **próprio** computador na nuvem. Nada é compartilhado entre eles.
+- **E2B, Box ou Daytona:** cada bot tem o **próprio** computador na nuvem. Nada é compartilhado entre eles.
 
 Isso não é o modelo do Crocbot (“Croc Pot”), que ou isola um container por agente ou controla abas do Chrome. No Quibt, no Docker, pense num escritório: um PC, um monitor por pessoa.
 
