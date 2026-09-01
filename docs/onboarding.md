@@ -15,7 +15,7 @@ Escolha um caminho.
 **App de desktop (mais fácil)**
 
 1. Baixe o instalador em [quibt.com.br](https://quibt.com.br) ou nas [Releases do GitHub](https://github.com/CaioJusto/quibtbot/releases/latest):
-   - Mac (Apple silicon): `QuibtBot.dmg` — confira o `signing-status-mac.json` da versão disponível. Se ele indicar um build sem assinatura, o macOS avisa; na primeira vez, clique com o botão direito → Abrir. Mac Intel: ainda sem instalador — só rodando a partir do código-fonte (veja o README).
+   - Mac (Apple silicon): `QuibtBot.dmg` — confira o `signing-status-mac.json` da versão disponível. O DMG da `v0.2.18` **não é assinado nem notarizado** (o mais novo notarizado ainda é o da `v0.2.14`), então o macOS avisa que "não pôde verificar" o app — esse aviso é esperado. Na primeira vez: clique com o botão direito no `QuibtBot.app` → **Abrir** → **Abrir**. No macOS 15 (Sequoia), se não aparecer o botão Abrir, vá em **Ajustes do Sistema → Privacidade e Segurança**, ache *"QuibtBot" foi bloqueado* e toque em **Abrir Mesmo Assim**. Alternativa no Terminal, depois de conferir o SHA-256 do DMG contra o `checksums-0.2.18.txt` da release: `xattr -d com.apple.quarantine /Applications/QuibtBot.app`. Só pule o Gatekeeper para um download cujo checksum você conferiu. Mac Intel: ainda sem instalador — só rodando a partir do código-fonte (veja o README).
    - Windows: `QuibtBot-setup.exe` — instalador de teste 64 bits, sem assinatura; o SmartScreen avisa: Mais informações → Executar assim mesmo. Instale o Docker Desktop por conta própria.
    - Linux: `QuibtBot.AppImage` — AppImage x64 de teste, sem assinatura; precisa de libfuse2, marque como executável e instale o Docker (Engine ou Desktop) por conta própria.
 2. Abra o Quibt Bot. Se o stack local ainda não estiver de pé, o app mostra um assistente.
@@ -31,6 +31,8 @@ curl -fsSL https://raw.githubusercontent.com/CaioJusto/quibtbot/f75c7c22b79a75cf
 Ele baixa o `quibtbot` certo para a sua máquina, confere o SHA-256 publicado e roda `quibtbot install`. No fim imprime o endereço e o código para o celular. Para sair: `quibtbot uninstall` (ou, no app, **Quibt Bot → Desinstalar**).
 
 **Pelo código** (se alguém da casa já programa): siga o “Run locally” do [README](../README.md).
+
+**Com um assistente de IA**: o [`SETUP_PROMPT.md`](../SETUP_PROMPT.md) é um prompt pronto (PT + EN) para colar no Claude ou no ChatGPT e ser guiado por esses mesmos comandos, um passo de cada vez.
 
 ## 2. Criar a sua conta
 

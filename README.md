@@ -61,6 +61,23 @@ each installer follows `DESKTOP_SIGNING` in `packages/installer/src/compose.ts`,
 `signing-status-*.json` files attached to the tag. Details are in
 [`docs/desktop.md`](docs/desktop.md).
 
+**Opening the unsigned Mac build.** The `v0.2.18` `QuibtBot.dmg` is **not signed or
+notarized** — macOS is right to warn; the newest notarized DMG is still `v0.2.14`. The
+first launch says the app "cannot be opened because Apple cannot check it for malicious
+software". That message is expected for this build:
+
+1. Right-click (or Control-click) `QuibtBot.app` → **Open** → **Open**.
+2. If macOS 15 (Sequoia) offers no Open button, go to **System Settings → Privacy &
+   Security**, find *"QuibtBot" was blocked*, and click **Open Anyway**.
+3. Terminal alternative, after verifying the DMG's SHA-256 against the release's
+   `checksums-0.2.18.txt`:
+
+   ```bash
+   xattr -d com.apple.quarantine /Applications/QuibtBot.app
+   ```
+
+Only bypass Gatekeeper for a download whose checksum you verified.
+
 The `v0.2.18` release publishes those three desktop installers, standalone macOS/Linux/Windows
 `quibtbot` binaries, matching SHA-256 files, and public multi-architecture Docker images from
 the same tag. The immutable install command:
@@ -94,7 +111,9 @@ curl -fsSL "https://raw.githubusercontent.com/CaioJusto/quibtbot/f75c7c22b79a75c
   | QUIBT_RELEASE="${release}" QUIBT_SHOW_SENSITIVE=1 sh
 ```
 
-See [`docs/self-host.md`](docs/self-host.md) for the VPS/Box walkthroughs.
+See [`docs/self-host.md`](docs/self-host.md) for the VPS/Box walkthroughs. Prefer being
+guided? [`SETUP_PROMPT.md`](SETUP_PROMPT.md) is a ready-made prompt (PT + EN) you can paste
+into an AI assistant to walk you through these same commands.
 
 Leaving is one command too. Installing puts containers, one computer container per workspace, three
 images and a data directory on the machine; deleting the app alone leaves all of that behind.
