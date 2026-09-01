@@ -875,6 +875,11 @@ export function OnboardingPage() {
             <p className="mt-3 max-w-[600px] text-[15.5px] leading-[1.55] text-[var(--qb-muted)]">
               Um nome e uma função bastam. O resto ele aprende conversando.
             </p>
+            <div className="mt-3 space-y-1 text-[13px] leading-[1.45] text-[var(--qb-muted)]">
+              <p>Importe um time inteiro de um arquivo Markdown.</p>
+              <p>O bot pode ler as respostas em voz alta.</p>
+              <p>Crie um grupo para os bots trabalharem juntos.</p>
+            </div>
             {/* Duas colunas: de um lado quem ele é, do outro o que se escreve sobre ele.
                 Empilhado, a etapa passava de mil pixels e pedia rolagem para tudo. */}
             <div className="mt-7 grid gap-7 md:grid-cols-[minmax(0,260px)_minmax(0,1fr)]">

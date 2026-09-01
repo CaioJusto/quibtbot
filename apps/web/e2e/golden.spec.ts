@@ -61,6 +61,8 @@ test("takeover, routine, plugins, and export are reachable", async ({ page }) =>
   await page.getByRole("button", { name: "Fechar computador" }).click();
 
   await page.getByRole("main").getByLabel("Ajustes do bot").click();
+  // Discovery only: live speech is intentionally outside the golden path.
+  await expect(page.getByText("Voz", { exact: true })).toBeVisible();
   await page.getByText("Mais opções", { exact: true }).click();
   await page.getByRole("button", { name: /Adicionar rotina/ }).click();
   const routineSwitch = page.getByRole("switch");
@@ -96,6 +98,7 @@ test("a bot group can be created and talked to", async ({ page }) => {
   await completeOnboarding(page);
 
   await page.getByLabel(/Nova conversa|Criar|Novo bot/).click();
+  await expect(page.getByRole("option", { name: "Importar equipe (.md)" })).toBeVisible();
   // O diálogo "Nova conversa" é um listbox; "Criar novo grupo" é role=option, não button.
   await page.getByRole("option", { name: /Novo grupo/i }).click();
   await page.getByLabel("Nome do grupo").fill("Launch crew");

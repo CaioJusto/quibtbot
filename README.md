@@ -23,7 +23,14 @@
   <a href="https://github.com/CaioJusto/quibtbot/releases/latest"><img src="https://img.shields.io/badge/release-v0.2.18-brightgreen.svg" alt="latest public release v0.2.18" /></a>
 </p>
 
-Each bot has one thread, one computer, memory, routines, and history. You run the stack on your machine. Packages live under `@quibt/*`. This repository is the complete product.
+Give Ada research, Nilo operations, and Dora the daily brief. Each named bot keeps one thread,
+memory, routines, and its own Linux computer on Docker, a VPS, E2B, Box, or Daytona. Put them in a
+group so they can work and reply together. Sign in with the ChatGPT login you already use and a bot
+can read its replies aloud. Import a whole team — bots, group instructions, and paused routines —
+from one Markdown pack, then pair the phone by scanning the computer's QR code.
+
+You run the stack on your machine. Packages live under `@quibt/*`. This repository is the complete
+product.
 
 > **Where this is:** `v0.2.18` is the latest public release (2026-08-31): tag, desktop
 > installers, standalone CLI binaries, SHA-256 checksums and digest-pinned Docker images all

@@ -99,7 +99,7 @@ describe("MessageView", () => {
     expect(html).toContain("items-start");
   });
 
-  it("renders allow, deny and always-allow on a tool approval card", () => {
+  it("renders keyboard-reachable Permitir, Recusar and Sempre actions like mobile", () => {
     const html = renderToStaticMarkup(
       <MessageView
         message={message({
@@ -113,6 +113,11 @@ describe("MessageView", () => {
               tool: "shell",
               allowKey: "shell:git",
               requestId: "exec-1",
+              actions: [
+                { id: "deny", label: "Recusar" },
+                { id: "always", label: "Sempre" },
+                { id: "allow", label: "Permitir" },
+              ],
             },
           ],
         })}
@@ -120,10 +125,39 @@ describe("MessageView", () => {
       />,
     );
     expect(html).toContain("Aprovação");
-    expect(html).toContain("Permitir");
-    expect(html).toContain("Recusar");
-    expect(html).toContain("Sempre permitir");
+    expect(html).toMatch(/<button[^>]*type="button"[^>]*>\s*Recusar\s*<\/button>/);
+    expect(html).toMatch(/<button[^>]*type="button"[^>]*>\s*Sempre\s*<\/button>/);
+    expect(html).toMatch(/<button[^>]*type="button"[^>]*>\s*Permitir\s*<\/button>/);
+    expect(html).not.toContain("Sempre permitir");
     expect(html).toContain("git status");
+  });
+
+  it("hides Sempre when the server only offers one-time approval", () => {
+    const html = renderToStaticMarkup(
+      <MessageView
+        message={message({
+          role: "bot",
+          runId: "run_1",
+          blocks: [
+            {
+              kind: "ask",
+              text: "Posso apagar este arquivo?",
+              tool: "shell",
+              requestId: "exec-2",
+              actions: [
+                { id: "deny", label: "Recusar" },
+                { id: "allow", label: "Permitir" },
+              ],
+            },
+          ],
+        })}
+        onAnswer={() => undefined}
+      />,
+    );
+
+    expect(html).toContain("Recusar");
+    expect(html).toContain("Permitir");
+    expect(html).not.toMatch(/>\s*Sempre\s*</);
   });
 
   it("renders an active computer handoff with preview and an internal takeover action", () => {

@@ -50,6 +50,12 @@ describe("onboarding wiring", () => {
     expect(src).toContain("Crie seu primeiro bot.");
   });
 
+  it("introduces team packs, spoken replies and groups before the first bot opens", () => {
+    expect(src).toContain("Importe um time inteiro de um arquivo Markdown.");
+    expect(src).toContain("O bot pode ler as respostas em voz alta.");
+    expect(src).toContain("Crie um grupo para os bots trabalharem juntos.");
+  });
+
   it("goes straight to the decisions: no introduction screens, no dead question step", () => {
     // A tela de entrada já contou o que o produto faz; repetir em três telas só atrasava.
     expect(src).not.toContain("introSeen");

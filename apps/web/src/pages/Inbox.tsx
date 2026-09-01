@@ -113,8 +113,11 @@ export function Inbox({
     setCreateIndex(0);
   }, [createQuery, createOpen]);
 
-  // As opções do diálogo, na ordem desenhada: criar bot, cada bot filtrado, criar grupo.
-  const createOptionCount = createBots.length + 2;
+  // As opções do diálogo, na ordem desenhada: criar bot, cada bot filtrado, criar grupo
+  // e, quando disponível, importar uma equipe. Todas entram no mesmo percurso ↑↓ / Enter.
+  const createGroupIndex = createBots.length + 1;
+  const importTeamIndex = onImportTeam ? createGroupIndex + 1 : null;
+  const createOptionCount = createGroupIndex + 1 + (onImportTeam ? 1 : 0);
   function pickCreateOption(index: number) {
     setCreateOpen(false);
     if (index === 0) {
@@ -126,7 +129,11 @@ export function Inbox({
       navigate(`/app/${bot.id}`);
       return;
     }
-    onCreateGroup();
+    if (index === createGroupIndex) {
+      onCreateGroup();
+      return;
+    }
+    if (index === importTeamIndex) onImportTeam?.();
   }
   function onCreateKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -247,26 +254,28 @@ export function Inbox({
                   <button
                     type="button"
                     role="option"
-                    aria-selected={createIndex === createOptionCount - 1}
+                    aria-selected={createIndex === createGroupIndex}
                     className={`qb-dash__new-option qb-dash__new-group${
-                      createIndex === createOptionCount - 1 ? " is-selected" : ""
+                      createIndex === createGroupIndex ? " is-selected" : ""
                     }`}
-                    onMouseMove={() => setCreateIndex(createOptionCount - 1)}
-                    onClick={() => pickCreateOption(createOptionCount - 1)}
+                    onMouseMove={() => setCreateIndex(createGroupIndex)}
+                    onClick={() => pickCreateOption(createGroupIndex)}
                   >
                     <span className="qb-dash__new-option-icon">
                       <Icon name="users" size={15} />
                     </span>
                     <span className="flex-1">Criar novo grupo</span>
                   </button>
-                  {onImportTeam ? (
+                  {onImportTeam && importTeamIndex !== null ? (
                     <button
                       type="button"
-                      className="qb-dash__new-option qb-dash__new-group"
-                      onClick={() => {
-                        setCreateOpen(false);
-                        onImportTeam();
-                      }}
+                      role="option"
+                      aria-selected={createIndex === importTeamIndex}
+                      className={`qb-dash__new-option qb-dash__new-group${
+                        createIndex === importTeamIndex ? " is-selected" : ""
+                      }`}
+                      onMouseMove={() => setCreateIndex(importTeamIndex)}
+                      onClick={() => pickCreateOption(importTeamIndex)}
                     >
                       <span className="qb-dash__new-option-icon">
                         <Icon name="download" size={15} />
