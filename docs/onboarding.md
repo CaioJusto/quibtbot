@@ -25,7 +25,7 @@ Escolha um caminho.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/CaioJusto/quibtbot/f75c7c22b79a75cf682e3e461e6d61ea58202101/scripts/install.sh \
-  | QUIBT_RELEASE=0.2.14 sh
+  | QUIBT_RELEASE=0.2.18 sh
 ```
 
 Ele baixa o `quibtbot` certo para a sua máquina, confere o SHA-256 publicado e roda `quibtbot install`. No fim imprime o endereço e o código para o celular. Para sair: `quibtbot uninstall` (ou, no app, **Quibt Bot → Desinstalar**).
