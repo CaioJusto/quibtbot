@@ -1,5 +1,6 @@
 import { eventIterator, oc } from "@orpc/contract";
 import * as z from "zod";
+import { AddBotMcpServerInput, BotMcpServerSchema } from "./bot-mcp.js";
 import { CAPABILITY_LIMITS, capabilityConfigIssue } from "./capabilities.js";
 import {
   ArtifactSchema,
@@ -191,6 +192,11 @@ export const appContract = {
     update: oc.input(UpdateBotInput).output(BotSchema),
     remove: oc.input(botId).output(z.object({ ok: z.literal(true) })),
     duplicate: oc.input(botId).output(BotSchema),
+  },
+  botMcp: {
+    list: oc.input(botId).output(z.array(BotMcpServerSchema)),
+    add: oc.input(AddBotMcpServerInput).output(BotMcpServerSchema),
+    remove: oc.input(z.object({ botId: Id, id: Id })).output(z.object({ ok: z.literal(true) })),
   },
   conversations: {
     list: oc.input(botId).output(z.array(ConversationSchema)),

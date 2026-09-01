@@ -11,7 +11,7 @@ import type {
   SandboxProvider,
   WakeupDriver,
 } from "@quibt/adapter-kit";
-import type { Actor, MessageBlock } from "@quibt/contracts";
+import { type Actor, CAPABILITY_LIMITS, type MessageBlock } from "@quibt/contracts";
 import {
   applyMemoryTool,
   approvalKey,
@@ -40,6 +40,7 @@ import {
   CapabilityInstallError,
   createGroupRoutineWakes,
   createPeerWake,
+  disableBotMcpServer,
   installCapability,
   isImage,
   MAX_ARTIFACT_BYTES,
@@ -50,6 +51,7 @@ import {
   putArtifact,
 } from "@quibt/db";
 import { ApprovalPause, approvalCheckpoint, promptForRun } from "./approval-wait.js";
+import { type BotMcpRuntime, botMcpSecretValues, connectBotMcpServers } from "./bot-mcp.js";
 import { browserOpenCommand } from "./browser-url.js";
 import { builtinAgentTools, collaborationAgentTools } from "./builtin-tools.js";
 import { deleteSpawnedBot, spawnBot } from "./child-bots.js";
@@ -260,6 +262,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           void stopRuntime();
         },
       });
+      let botMcpRuntime: BotMcpRuntime | undefined;
 
       // Every exit from here on — the parked returns, a boot that throws, the stream — gives
       // the timer back. A watcher left running would renew the lease of a dead turn forever.
@@ -355,7 +358,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           email: "",
           isDeploymentOwner: false,
         };
-        const [connectedPlugins, installs] = await Promise.all([
+        const [connectedPlugins, installs, botMcpServers] = await Promise.all([
           deps.prisma.connection.findMany({
             where: {
               userId: run.userId,
@@ -369,6 +372,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
             select: { kind: true, name: true, source: true, config: true },
             orderBy: [{ createdAt: "asc" }, { id: "asc" }],
             take: 100,
+          }),
+          deps.prisma.botMcpServer.findMany({
+            where: { botId: bot.id, workspaceId: run.workspaceId, enabled: true },
+            select: {
+              id: true,
+              workspaceId: true,
+              botId: true,
+              name: true,
+              transport: true,
+              command: true,
+              args: true,
+              url: true,
+              env: true,
+              enabled: true,
+            },
+            orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+            take: 10,
           }),
         ]);
         const connectedProviders = connectedProviderSlugs(connectedPlugins, installs);
@@ -406,6 +426,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
         });
         const mcpSources = installs.filter((row) => row.kind === "mcp").map((row) => row.source);
         const mcpTools = await discoverMcpTools(mcpSources);
+        botMcpRuntime = await connectBotMcpServers(botMcpServers, {
+          maxTools: Math.max(0, CAPABILITY_LIMITS.mcpToolsTotal - mcpTools.length),
+          disable: (server, reason) =>
+            disableBotMcpServer(deps.prisma, {
+              id: server.id,
+              workspaceId: server.workspaceId,
+              botId: server.botId,
+              reason,
+            }),
+        });
+        if (runAbort.signal.aborted) void botMcpRuntime.dispose();
+        else
+          runAbort.signal.addEventListener("abort", () => void botMcpRuntime?.dispose(), {
+            once: true,
+          });
         const discovered = deps.connector ? await deps.connector.discoverTools(context) : [];
         const runtimeSupportsTools = deps.runtime.describe().capabilities.tools;
         const localTools =
@@ -414,6 +449,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ? collaborationAgentTools.filter((tool) => tool.name !== "ask_bot")
               : collaborationAgentTools
             : [];
+        const activeBotMcpTools = botMcpRuntime.tools.filter(
+          (tool) =>
+            ![...builtinAgentTools, ...localTools, ...discovered, ...mcpTools].some(
+              (existing) => existing.name === tool.name,
+            ),
+        );
+        const activeBotMcpToolNames = new Set(activeBotMcpTools.map((tool) => tool.name));
         const allTools = [
           ...builtinAgentTools,
           ...localTools,
@@ -423,6 +465,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           ...mcpTools.filter(
             (tool) => ![...builtinAgentTools, ...localTools].some((b) => b.name === tool.name),
           ),
+          ...activeBotMcpTools,
         ];
         // Native Pi effects cannot be meaningfully resumed from a webhook approval card: there
         // is no person behind the run, and the first model turn has already ended. Make those
@@ -476,14 +519,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
         ]);
         let apiKey: string | undefined;
         let oauthCredential: string | undefined;
-        let runSecrets = deps.secrets;
+        let runSecrets = [...deps.secrets, ...botMcpSecretValues(botMcpServers)];
         let computer: ComputerRef;
         const scripted = deps.runtime.describe().capabilities.scripted;
         try {
           const resolved = await resolveModelKey(deps, run.userId, run.workspaceId, credential);
           apiKey = resolved.apiKey;
           oauthCredential = resolved.oauthCredential;
-          runSecrets = [...deps.secrets, ...resolved.redact];
+          runSecrets = [...deps.secrets, ...botMcpSecretValues(botMcpServers), ...resolved.redact];
           computer = await ensureComputer(deps, bot.id, context);
           if (!sandboxSupportsAgentInput(deps.sandbox, computer)) {
             tools = tools.filter((tool) => tool.name !== "computer");
@@ -954,6 +997,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           const mcpCall = parseMcpToolName(name);
           if (mcpCall) {
+            if (activeBotMcpToolNames.has(name) && botMcpRuntime?.has(name)) {
+              return botMcpRuntime.call(name, args);
+            }
             const source = matchMcpSource(mcpSources, mcpCall.sourceSlug);
             if (!source) return { error: `MCP source not found for ${name}` };
             return callMcpTool(source, mcpCall.tool, args);
@@ -1101,13 +1147,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   : {},
             })),
         );
-        const mcpLine = mcpSources.length
-          ? `MCP servers are live tools (names start with mcp__). Sources: ${mcpSources.join(", ")}.`
-          : installedSkills.some((row) => row.kind === "mcp")
-            ? `Installed MCP entries (instruction-only): ${installedSkills
-                .filter((row) => row.kind === "mcp")
-                .map((row) => row.name)
-                .join(", ")}.`
+        const userMcpNames = installs.filter((row) => row.kind === "mcp").map((row) => row.name);
+        const botMcpNames = botMcpServers.map((row) => row.name);
+        const mcpLine =
+          userMcpNames.length || botMcpNames.length
+            ? `MCP servers are live tools whose names start with mcp__. User-level servers: ${userMcpNames.join(", ") || "none"}. This bot's servers: ${botMcpNames.join(", ") || "none"}. Never reveal server environment variables or credentials.`
             : "";
         const memoryLine = formatMemoryPrompt(
           (
@@ -1538,6 +1582,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
         }
       } finally {
+        await botMcpRuntime?.dispose().catch(() => undefined);
         watcher.stop();
       }
     },

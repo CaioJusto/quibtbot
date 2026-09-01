@@ -108,6 +108,7 @@ model Organization {
   computerUsage  ComputerUsage[]
   orphanProvisions OrphanProvision[]
   webhooks    Webhook[]
+  botMcpServers BotMcpServer[]
 
   @@unique([slug])
   @@map("organization")
@@ -301,10 +302,33 @@ model Bot {
   sentPeerMessages Message[]         @relation("PeerMessageSender")
   authoredMessages Message[]         @relation("MessageAuthor")
   webhooks         Webhook[]
+  mcpServers       BotMcpServer[]
 
   @@index([workspaceId, userId])
   @@index([parentBotId])
   @@map("bots")
+}
+
+model BotMcpServer {
+  id             String       @id @default(cuid())
+  workspaceId    String
+  workspace      Organization @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  botId          String
+  bot            Bot          @relation(fields: [botId], references: [id], onDelete: Cascade)
+  name           String
+  transport      String
+  command        String?
+  args           String[]     @default([])
+  url            String?
+  env            Json?
+  enabled        Boolean      @default(true)
+  disabledReason String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([botId, name])
+  @@index([workspaceId, botId])
+  @@map("bot_mcp_servers")
 }
 
 model Thread {

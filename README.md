@@ -282,6 +282,7 @@ infra/    compose  sandboxes
 | --- | --- |
 | [`docs/onboarding.md`](docs/onboarding.md) | First run in plain language (install, model, machine, first bot) |
 | [`docs/cli-engines.md`](docs/cli-engines.md) | Use an authenticated Claude Code, Codex, or Grok CLI as the model engine |
+| [`docs/bot-mcp.md`](docs/bot-mcp.md) | Give one bot extra MCP tools through a safe stdio argv command or HTTPS endpoint |
 | [`docs/computers.md`](docs/computers.md) | Docker, VPS, E2B, Box, Daytona — what to do, how bots share a computer |
 | [`docs/desktop.md`](docs/desktop.md) | Mac DMG / Windows installer, local-first desktop |
 | [`docs/mobile.md`](docs/mobile.md) | Expo app: server setup, QR/code claim, off-LAN HTTPS tunnel, SecureStore, remote install security |

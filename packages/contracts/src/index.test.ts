@@ -26,6 +26,9 @@ describe("contracts", () => {
     expect(appContract.bots.create).toBeTruthy();
     expect(appContract.bots.remove).toBeTruthy();
     expect(appContract.bots.duplicate).toBeTruthy();
+    expect(appContract.botMcp.list).toBeTruthy();
+    expect(appContract.botMcp.add).toBeTruthy();
+    expect(appContract.botMcp.remove).toBeTruthy();
     expect(appContract.conversations.create).toBeTruthy();
     expect(appContract.threads.edit).toBeTruthy();
     expect(appContract.threads.clear).toBeTruthy();
