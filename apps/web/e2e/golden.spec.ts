@@ -96,7 +96,8 @@ test("a bot group can be created and talked to", async ({ page }) => {
   await completeOnboarding(page);
 
   await page.getByLabel(/Nova conversa|Criar|Novo bot/).click();
-  await page.getByRole("button", { name: /Novo grupo/i }).click();
+  // O diálogo "Nova conversa" é um listbox; "Criar novo grupo" é role=option, não button.
+  await page.getByRole("option", { name: /Novo grupo/i }).click();
   await page.getByLabel("Nome do grupo").fill("Launch crew");
   await page.getByRole("checkbox").first().check();
   await page.getByRole("button", { name: "Criar grupo" }).click();
