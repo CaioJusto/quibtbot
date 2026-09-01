@@ -221,6 +221,8 @@ describe("dashboard copies the landing product demo", () => {
     expect(shell).toContain('panel === "import-team"');
     expect(shell).toContain("TeamImportPanel");
     expect(inbox).toContain("Importar equipe (.md)");
+    expect(inbox).toContain("aria-selected={createIndex === importTeamIndex}");
+    expect(inbox).toContain("pickCreateOption(importTeamIndex)");
   });
 
   it("clears inbox search after creating a group and lands on it", () => {

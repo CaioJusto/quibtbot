@@ -147,7 +147,7 @@ function Quoted({ text, mine }: { text: string; mine?: boolean }) {
 }
 
 /**
- * "Sempre permitir" só aparece quando o servidor vai honrar: o card traz em `actions`
+ * "Sempre" só aparece quando o servidor vai honrar: o card traz em `actions`
  * o que vale para ele (um pedido destrutivo vem sem). Cards antigos não traziam `actions`;
  * neles o botão valia sempre que havia `allowKey`.
  */
@@ -876,7 +876,7 @@ export function MessageView({
                           onClick={() => onAnswer("always")}
                           className="rounded-full bg-[var(--qb-hairline)] px-4 py-2.5 text-[15px] text-[var(--qb-ink)]"
                         >
-                          Sempre permitir
+                          Sempre
                         </button>
                       ) : null}
                       <button
