@@ -24,16 +24,18 @@ describe("account model source card", () => {
 });
 
 describe("changing the AI provider from Conta", () => {
-  it("offers the three sources, a provider, a model and a key — not only the sign-in buttons", () => {
+  it("offers keys, local servers and detected host CLIs — not only sign-in buttons", () => {
     // Antes disso, trocar de provedor só existia no onboarding: quem já tinha passado por
     // ele ficava preso ao modelo daquele dia, sem lugar no app para colar outra chave.
     expect(src).toContain("pickTokenSource(mode)");
     expect(src).toContain("Chave OpenRouter");
     expect(src).toContain("Modelo local");
     expect(src).toContain("Minha assinatura");
+    expect(src).toContain("CLI no host");
     expect(src).toContain("pickProvider(e.target.value)");
     expect(src).toContain("setModelId(e.target.value)");
     expect(src).toContain("rpc.models.connect(");
+    expect(src).toContain("rpc.models.connectCli(");
   });
 
   it("points the bots at what was just connected, instead of only storing the key", () => {
@@ -47,14 +49,16 @@ describe("changing the AI provider from Conta", () => {
     expect(src).toContain("localModelUrl(provider)");
   });
 
-  it("segue a ordem do onboarding: assinatura, chave OpenRouter, modelo local", () => {
+  it("segue a ordem do onboarding: assinatura, CLI, chave OpenRouter, modelo local", () => {
     const subscription = src.indexOf('["subscription", "Minha assinatura"]');
+    const cli = src.indexOf('["cli", "CLI no host"]');
     const key = src.indexOf('["key", "Chave OpenRouter"]');
     const local = src.indexOf('["local", "Modelo local"]');
     expect(subscription).toBeGreaterThan(-1);
-    expect(subscription).toBeLessThan(key);
+    expect(subscription).toBeLessThan(cli);
+    expect(cli).toBeLessThan(key);
     expect(key).toBeLessThan(local);
-    expect(src).not.toContain("Claude");
+    expect(src).toContain("Claude Code, Codex ou Grok");
   });
 
   it("confirma a chave que o servidor conferiu e aponta onde ela nasce", () => {

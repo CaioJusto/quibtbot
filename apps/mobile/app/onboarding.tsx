@@ -56,7 +56,7 @@ type CatalogEntry = {
   providerName?: string;
   id: string;
   label: string;
-  auth?: "api-key" | "oauth" | "both";
+  auth?: "api-key" | "oauth" | "both" | "host-cli";
   oauthLabel?: string;
   subscription?: boolean;
   signIn?: "device-code";
@@ -221,7 +221,8 @@ export default function Onboarding() {
   );
 
   const selected = modelsForProvider.find((entry) => entry.id === modelId) ?? modelsForProvider[0];
-  const acceptsKey = selected?.auth !== "oauth";
+  const cliModels = catalog.filter((entry) => entry.provider === "local-cli");
+  const acceptsKey = selected?.auth !== "oauth" && selected?.auth !== "host-cli";
   const alreadyConnected = Boolean(selected && connectedProviders.has(selected.provider));
 
   function go(next: OnboardingStep) {
@@ -297,6 +298,9 @@ export default function Onboarding() {
           modelId: selected?.id ?? modelId,
           label: selected?.providerName ?? provider,
         });
+      }
+      if (action.kind === "cli") {
+        await rpc("models/connectCli", { binary: selected?.id ?? modelId });
       }
       if (action.kind !== "plan") {
         await rpc("models/setDefault", { provider, modelId: selected?.id ?? modelId });
@@ -431,6 +435,7 @@ export default function Onboarding() {
                 acceptsKey={acceptsKey}
                 oauthFlow={oauthFlow}
                 alreadyConnected={alreadyConnected}
+                cliModels={cliModels}
                 error={error}
                 pending={savingModel}
                 onTokenSource={pickTokenSource}
@@ -485,6 +490,7 @@ function ModelStep({
   acceptsKey,
   oauthFlow,
   alreadyConnected,
+  cliModels,
   error,
   pending,
   onTokenSource,
@@ -504,6 +510,7 @@ function ModelStep({
   acceptsKey: boolean;
   oauthFlow: OAuthFlow;
   alreadyConnected: boolean;
+  cliModels: CatalogEntry[];
   error: string | null;
   pending: boolean;
   onTokenSource: (mode: TokenSource) => void;
@@ -527,6 +534,13 @@ function ModelStep({
           selected={tokenSource === "subscription"}
           onPress={() => onTokenSource("subscription")}
         />
+        {cliModels.length ? (
+          <ModeCard
+            title="CLI no host"
+            selected={tokenSource === "cli"}
+            onPress={() => onTokenSource("cli")}
+          />
+        ) : null}
         <ModeCard
           title="Chave OpenRouter"
           selected={tokenSource === "key"}
@@ -538,6 +552,12 @@ function ModelStep({
           onPress={() => onTokenSource("local")}
         />
       </View>
+      {!cliModels.length ? (
+        <Text style={styles.keyHint}>
+          Nenhuma CLI Claude Code, Codex ou Grok foi encontrada no host da API. As outras opções
+          continuam disponíveis.
+        </Text>
+      ) : null}
       <View style={styles.providerList}>
         {providers.map((entry) => {
           const active = entry.provider === selectedProvider;
@@ -588,6 +608,11 @@ function ModelStep({
             </Text>
           ) : null}
         </>
+      ) : null}
+      {tokenSource === "cli" ? (
+        <Text style={styles.keyHint}>
+          Usa o login já feito nessa CLI no host da API/worker. Nenhuma chave é colada no Quibt.
+        </Text>
       ) : null}
       {tokenSource === "subscription" ? (
         <View style={styles.oauthCard}>

@@ -47,7 +47,7 @@ const DOCKER_GUIDE: MachineGuide = {
   ],
   botsShare:
     "É o mesmo computador (um Linux por workspace, a mesma imagem). Cada bot ganha a própria tela — um desktop gráfico por bot, não é uma aba do Chrome. Os arquivos e alguns logins do navegador são compartilhados. A parede é a mesma; as janelas de cada bot são outras.",
-  cost: "Grátis no seu aparelho. Você só paga o modelo (OpenRouter, Ollama local ou a sua assinatura).",
+  cost: "Grátis no seu aparelho. Você só paga o modelo (OpenRouter, Ollama local, a sua assinatura ou a sessão de uma CLI no host da API/worker).",
 };
 
 const REMOTE_GUIDE: MachineGuide = {

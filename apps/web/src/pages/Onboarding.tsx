@@ -62,6 +62,9 @@ const BILLING_PT: Record<string, string> = {
 
 function billingText(entry: CatalogEntry | undefined): string {
   if (!entry) return "";
+  if (entry.auth === "host-cli") {
+    return "Usa o login já feito nesta CLI no host da API/worker. Nenhuma chave é colada no Quibt.";
+  }
   const mapped = BILLING_PT[entry.provider];
   if (mapped) return mapped;
   return entry.signIn === "device-code"
@@ -88,7 +91,7 @@ type CatalogEntry = {
   id: string;
   label: string;
   billing: string;
-  auth?: "api-key" | "oauth" | "both";
+  auth?: "api-key" | "oauth" | "both" | "host-cli";
   oauthLabel?: string;
   subscription?: boolean;
   signIn?: "device-code";
@@ -247,7 +250,8 @@ export function OnboardingPage() {
   );
 
   const selected = modelsForProvider.find((entry) => entry.id === modelId) ?? modelsForProvider[0];
-  const acceptsKey = selected?.auth !== "oauth";
+  const cliModels = catalog.filter((entry) => entry.provider === "local-cli");
+  const acceptsKey = selected?.auth !== "oauth" && selected?.auth !== "host-cli";
   // Continuar sem concluir o login gravaria um provedor sem credencial e o primeiro
   // recado do bot viraria "provider is not configured".
   const alreadyConnected = Boolean(selected && connectedProviders.has(selected.provider));
@@ -306,6 +310,11 @@ export function OnboardingPage() {
       if (action.kind === "plan") {
         await switchModelsToPlan();
       } else {
+        if (action.kind === "cli") {
+          await rpc.models.connectCli({
+            binary: (selected?.id ?? modelId) as "claude" | "codex" | "grok",
+          });
+        }
         if (action.kind === "connect") {
           setKeyStatus(null);
           let verified = false;
@@ -602,6 +611,15 @@ export function OnboardingPage() {
                 body="ChatGPT Plus/Pro, Copilot ou SuperGrok — a que você já paga."
                 onSelect={() => pickTokenSource("subscription")}
               />
+              {cliModels.length ? (
+                <TokenCard
+                  selected={tokenSource === "cli"}
+                  source="cli"
+                  title="CLI no host"
+                  body={`${cliModels.map((entry) => entry.label).join(", ")}. Usa a assinatura já conectada.`}
+                  onSelect={() => pickTokenSource("cli")}
+                />
+              ) : null}
               <TokenCard
                 selected={tokenSource === "key"}
                 source="key"
@@ -619,10 +637,19 @@ export function OnboardingPage() {
                 />
               ) : null}
             </div>
+            {!cliModels.length ? (
+              <p className="mt-3 text-[13px] text-[var(--qb-muted)]">
+                Nenhuma CLI Claude Code, Codex ou Grok foi encontrada no host da API. As outras
+                opções continuam disponíveis.
+              </p>
+            ) : null}
             {/* Um painel só, com o que muda conforme o cartão marcado. A busca e a lista
                 rolável de provedores saíram: com o modo escolhido, o que resta cabe em
                 dois campos, e rolar dentro de uma etapa que já rola era o pior dos dois. */}
-            {tokenSource === "key" || tokenSource === "subscription" || tokenSource === "local" ? (
+            {tokenSource === "key" ||
+            tokenSource === "subscription" ||
+            tokenSource === "local" ||
+            tokenSource === "cli" ? (
               <div className="mt-5 rounded-[var(--qb-r-lg)] border border-[var(--qb-hairline)] bg-[var(--qb-canvas)] px-5 pt-4 pb-5">
                 <div className="grid gap-4 md:grid-cols-2">
                   <label className="block text-[var(--qb-t-xs)] text-[var(--qb-muted)]">
@@ -754,6 +781,11 @@ export function OnboardingPage() {
                       </p>
                     ) : null}
                   </div>
+                ) : selected?.auth === "host-cli" ? (
+                  <p className="mt-4 text-[13px] leading-[1.45] text-[var(--qb-muted)]">
+                    {selected.label} roda no host da API/worker e usa a sessão já conectada nessa
+                    CLI. Não é preciso colar chave.
+                  </p>
                 ) : selected?.signIn === "device-code" ? null : (
                   <p className="mt-4 text-[13px] leading-[1.45] text-[var(--qb-muted)]">
                     {selected?.oauthLabel ?? selected?.providerName ?? provider} usa OAuth ou
@@ -1133,6 +1165,13 @@ const TOKEN_ICONS: Record<TokenSource, ReactNode> = {
       <rect x="2.4" y="4.6" width="15.2" height="10.8" rx="2" />
       <path d="M2.4 8.2h15.2" />
       <path d="M5.6 12.2h3.2" />
+    </>
+  ),
+  cli: (
+    <>
+      <path d="M3 4.5h14v11H3z" />
+      <path d="m6 8 2 2-2 2" />
+      <path d="M10 12h4" />
     </>
   ),
 };

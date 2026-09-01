@@ -79,14 +79,15 @@ export function nextStepAfterModel(input: {
   return input.canChooseMachine && input.isOwner && machineStepNeeded(input) ? "machine" : "bot";
 }
 
-export type TokenSource = "plan" | "key" | "subscription" | "local";
+export type TokenSource = "plan" | "key" | "subscription" | "local" | "cli";
 
 const LOCAL_PROVIDERS = new Set(["ollama", "openai-compatible"]);
+const HOST_CLI_PROVIDER = "local-cli";
 
 export type ProviderEntry = {
   provider: string;
   id: string;
-  auth?: "api-key" | "oauth" | "both";
+  auth?: "api-key" | "oauth" | "both" | "host-cli";
   subscription?: boolean;
   signIn?: "device-code";
 };
@@ -106,10 +107,14 @@ export function providersForMode<T extends ProviderEntry>(providers: T[], mode: 
   if (mode === "local") {
     return providers.filter((entry) => LOCAL_PROVIDERS.has(entry.provider));
   }
+  if (mode === "cli") {
+    return providers.filter((entry) => entry.provider === HOST_CLI_PROVIDER);
+  }
   if (mode === "key") {
     return providers.filter(
       (entry) =>
         !LOCAL_PROVIDERS.has(entry.provider) &&
+        entry.provider !== HOST_CLI_PROVIDER &&
         (entry.auth !== "oauth" || entry.provider === "openrouter"),
     );
   }
@@ -122,6 +127,7 @@ export function providersForMode<T extends ProviderEntry>(providers: T[], mode: 
  * com um modelo que nunca escolheu. Espelha `providersForMode`.
  */
 export function modeForProvider(entry: ProviderEntry): TokenSource {
+  if (entry.provider === HOST_CLI_PROVIDER) return "cli";
   if (LOCAL_PROVIDERS.has(entry.provider)) return "local";
   if (entry.signIn === "device-code") return "subscription";
   return "key";
@@ -236,6 +242,7 @@ export function chooseMode<T extends ProviderEntry>(
 export type ModelSaveAction =
   | { kind: "plan" }
   | { kind: "connect" }
+  | { kind: "cli" }
   | { kind: "default" }
   | { kind: "blocked"; message: string };
 
@@ -251,6 +258,7 @@ export function modelSaveAction(input: {
   signedIn: boolean;
 }): ModelSaveAction {
   if (input.tokenSource === "plan") return { kind: "plan" };
+  if (input.tokenSource === "cli") return { kind: "cli" };
   const key = input.apiKey.trim();
   if (key && input.acceptsKey) return { kind: "connect" };
   if (input.tokenSource === "key" || input.tokenSource === "local") {

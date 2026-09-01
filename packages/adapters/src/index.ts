@@ -33,6 +33,8 @@ export * from "./home.js";
 export * from "./lesson.js";
 export * from "./lifecycle-cleanup-intent.js";
 export * from "./llm-retry.js";
+export * from "./local-cli.js";
+export * from "./local-cli-runtime.js";
 export * from "./mcp-emulator.js";
 export * from "./mcp-http.js";
 export * from "./model-probe.js";

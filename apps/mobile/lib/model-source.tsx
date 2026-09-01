@@ -3,6 +3,7 @@ import {
   chooseProvider,
   connectedModelNotice,
   localModelUrl,
+  modeForProvider,
   providersForMode,
   startPolling,
   type TokenSource,
@@ -86,6 +87,7 @@ export function ModelSourceSection() {
       if (preferred) {
         setProvider(preferred.provider);
         setModelId(preferred.id);
+        setTokenSource(modeForProvider(preferred));
       }
       setFlow((current) => (current.state === "error" ? { state: "idle" } : current));
     } catch (err) {
@@ -161,6 +163,7 @@ export function ModelSourceSection() {
   );
 
   const selected = modelsForProvider.find((entry) => entry.id === modelId) ?? modelsForProvider[0];
+  const cliModels = catalog.filter((entry) => entry.provider === "local-cli");
 
   function pickTokenSource(next: TokenSource) {
     setTokenSource(next);
@@ -199,6 +202,25 @@ export function ModelSourceSection() {
       setApiKey("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível conectar o modelo");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function connectHostCli() {
+    if (selected?.provider !== "local-cli") return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await rpc("models/connectCli", { binary: selected.id });
+      await rpc("models/setDefault", { provider: "local-cli", modelId: selected.id });
+      await load();
+      setNotice(
+        `${selected.label ?? selected.id} ativado. A sessão já conectada no host será usada.`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível ativar a CLI do host");
     } finally {
       setBusy(false);
     }
@@ -271,6 +293,13 @@ export function ModelSourceSection() {
           selected={tokenSource === "subscription"}
           onPress={() => pickTokenSource("subscription")}
         />
+        {cliModels.length ? (
+          <ModeChip
+            label="CLI"
+            selected={tokenSource === "cli"}
+            onPress={() => pickTokenSource("cli")}
+          />
+        ) : null}
         <ModeChip
           label="Chave"
           selected={tokenSource === "key"}
@@ -282,6 +311,12 @@ export function ModelSourceSection() {
           onPress={() => pickTokenSource("local")}
         />
       </View>
+      {!cliModels.length ? (
+        <Text style={ui.body}>
+          Nenhuma CLI Claude Code, Codex ou Grok foi encontrada no host da API. As outras opções
+          continuam disponíveis.
+        </Text>
+      ) : null}
 
       {tokenSource !== "subscription" ? (
         <>
@@ -299,26 +334,41 @@ export function ModelSourceSection() {
             onChange={setModelId}
             searchPlaceholder="Buscar modelo"
           />
-          <Text style={ui.fieldLabel}>
-            {tokenSource === "local" ? "URL do modelo" : "Chave de API"}
-          </Text>
-          <TextInput
-            value={apiKey}
-            onChangeText={setApiKey}
-            placeholder={tokenSource === "local" ? localModelUrl(provider) : "sk-…"}
-            placeholderTextColor={COLORS.tertiary}
-            autoCapitalize="none"
-            autoCorrect={false}
-            secureTextEntry={tokenSource !== "local"}
-            style={ui.input}
-          />
+          {tokenSource === "cli" ? (
+            <Text style={ui.body}>
+              Roda no host da API/worker com o login já salvo pela CLI. Nenhuma chave é colada no
+              Quibt e ela não roda dentro do computador do bot.
+            </Text>
+          ) : (
+            <>
+              <Text style={ui.fieldLabel}>
+                {tokenSource === "local" ? "URL do modelo" : "Chave de API"}
+              </Text>
+              <TextInput
+                value={apiKey}
+                onChangeText={setApiKey}
+                placeholder={tokenSource === "local" ? localModelUrl(provider) : "sk-…"}
+                placeholderTextColor={COLORS.tertiary}
+                autoCapitalize="none"
+                autoCorrect={false}
+                secureTextEntry={tokenSource !== "local"}
+                style={ui.input}
+              />
+            </>
+          )}
           <PrimaryButton
             label={
-              busy ? "Conectando…" : tokenSource === "local" ? "Usar este modelo" : "Salvar chave"
+              busy
+                ? "Conectando…"
+                : tokenSource === "cli"
+                  ? "Usar esta CLI"
+                  : tokenSource === "local"
+                    ? "Usar este modelo"
+                    : "Salvar chave"
             }
-            disabled={busy || !apiKey.trim()}
+            disabled={busy || !selected || (tokenSource !== "cli" && !apiKey.trim())}
             pending={busy}
-            onPress={() => void connectKey()}
+            onPress={() => (tokenSource === "cli" ? void connectHostCli() : void connectKey())}
             style={{ marginTop: 14 }}
           />
         </>

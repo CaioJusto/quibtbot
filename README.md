@@ -149,7 +149,7 @@ pnpm desktop:pack:linux # x64 AppImage → apps/desktop/out/
 | | |
 | --- | --- |
 | **A bot** | One thread, one graphical Linux desktop of its own, memory, routines, history. Talk to it in the app; it browses, downloads, writes files and runs commands on that desktop. |
-| **Your model** | An OpenRouter key, a local Ollama / LM Studio URL, or the ChatGPT / Copilot / SuperGrok subscription you already pay for. Quibt sells no tokens and takes no cut. |
+| **Your model** | An OpenRouter key, local Ollama / LM Studio, ChatGPT / Copilot / SuperGrok login, or a detected Claude Code / Codex / Grok CLI using its existing host session. Quibt sells no tokens and takes no cut. |
 | **Your machine** | Docker on this computer (default), your own VPS, E2B, Box, or Daytona. The choice is made in onboarding and can change later in Ajustes → Máquina. |
 | **Three clients** | Web, desktop (Electron, macOS/Windows/Linux) and phone (iOS/Android) — all clients of the same API, so a bot started on the laptop keeps working from the phone. |
 | **Your data** | Postgres and the bot home directories live on the machine you installed onto. Uninstall takes them with it if you want. |
@@ -278,6 +278,7 @@ infra/    compose  sandboxes
 | Doc | What it covers |
 | --- | --- |
 | [`docs/onboarding.md`](docs/onboarding.md) | First run in plain language (install, model, machine, first bot) |
+| [`docs/cli-engines.md`](docs/cli-engines.md) | Use an authenticated Claude Code, Codex, or Grok CLI as the model engine |
 | [`docs/computers.md`](docs/computers.md) | Docker, VPS, E2B, Box, Daytona — what to do, how bots share a computer |
 | [`docs/desktop.md`](docs/desktop.md) | Mac DMG / Windows installer, local-first desktop |
 | [`docs/mobile.md`](docs/mobile.md) | Expo app: server setup, QR/code claim, off-LAN HTTPS tunnel, SecureStore, remote install security |

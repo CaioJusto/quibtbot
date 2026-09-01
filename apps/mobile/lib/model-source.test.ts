@@ -62,14 +62,17 @@ describe("mobile model source section", () => {
     expect(section).toContain('"models/beginOAuth"');
     expect(section).toContain('"models/completeOAuth"');
     expect(section).toContain('"models/usePlan"');
+    expect(section).toContain('"models/connectCli"');
   });
 
-  it("segue a ordem do onboarding e confirma a chave que o servidor conferiu", () => {
+  it("segue a ordem do onboarding, inclui CLI e confirma a chave conferida", () => {
     const subscription = section.indexOf('label="Assinatura"');
+    const cli = section.indexOf('label="CLI"');
     const key = section.indexOf('label="Chave"');
     const local = section.indexOf('label="Local"');
     expect(subscription).toBeGreaterThan(-1);
-    expect(subscription).toBeLessThan(key);
+    expect(subscription).toBeLessThan(cli);
+    expect(cli).toBeLessThan(key);
     expect(key).toBeLessThan(local);
     // A frase vem do core: "confirmada" só quando o servidor sondou o provedor.
     expect(section).toContain("connectedModelNotice({");

@@ -18,16 +18,21 @@ import {
   DesktopSandboxProvider,
   defaultModelForProvider,
   destroyBot,
+  detectLocalCliEngines,
   type EncryptedSecretStore,
   ensureDesktopScreenUrl,
   failRunsWithoutWorker,
   isComposioUnknownOutcome,
   isComputerAlreadyStoppedError,
   isComputerUnreachableError,
+  LOCAL_CLI_PROVIDER,
+  type LocalCliEngine,
   lessonCaptureCommand,
   lessonStartCommand,
   listPiCatalog,
   loadFolderGrants,
+  localCliCatalog,
+  localCliLabel,
   onControlLeaseGranted,
   type PiOAuthLogins,
   parseLessonCapture,
@@ -146,6 +151,8 @@ export interface RouterDeps {
   onDeploymentSettingsChanged?: () => void;
   /** O fetch da sondagem da chave do modelo em `models.connect`; os testes injetam um falso. */
   probeFetch?: typeof fetch;
+  /** Detector injetável para testes; no produto olha o PATH do processo da API. */
+  localCliDetection?: () => Promise<LocalCliEngine[]>;
   /** Quem diz se há worker vivo; sem ele, lê o batimento direto do banco. */
   workerPresence?: WorkerPresenceReader;
   /** O push do celular, para o run que o reconciliador reprova quando ninguém está olhando. */
@@ -469,11 +476,13 @@ export function createRouter(deps: RouterDeps) {
     models: {
       // O "Scripted" é o emulador dos testes: só aparece quando o deploy roda com ele, nunca
       // na lista de quem instalou o produto.
-      list: authed.models.list.handler(async () =>
-        deps.env.agentRuntime === "scripted"
-          ? [...listPiCatalog(), scriptedCatalogEntry]
-          : listPiCatalog(),
-      ),
+      list: authed.models.list.handler(async () => {
+        if (deps.env.agentRuntime === "scripted") {
+          return [...listPiCatalog(), scriptedCatalogEntry];
+        }
+        const detected = await (deps.localCliDetection ?? detectLocalCliEngines)().catch(() => []);
+        return [...listPiCatalog(), ...localCliCatalog(detected)];
+      }),
       credentials: authed.models.credentials.handler(async ({ context }) => {
         const rows = await deps.prisma.userModelCredential.findMany({
           where: {
@@ -518,6 +527,27 @@ export function createRouter(deps: RouterDeps) {
           label: input.label,
           modelId: input.modelId,
           verified,
+        });
+      }),
+      connectCli: authed.models.connectCli.handler(async ({ context, input }) => {
+        if (deps.env.agentRuntime === "scripted") {
+          throw new ORPCError("BAD_REQUEST", { message: "CLI local não está ativa neste deploy." });
+        }
+        const detected = await (deps.localCliDetection ?? detectLocalCliEngines)();
+        const engine = detected.find((entry) => entry.id === input.binary);
+        if (!engine) {
+          throw new ORPCError("BAD_REQUEST", {
+            message: `${localCliLabel(input.binary)} não foi encontrada no host da API.`,
+            data: { code: "LOCAL_CLI_NOT_FOUND", binary: input.binary },
+          });
+        }
+        return persistModelCredential(deps, context.actor, {
+          provider: LOCAL_CLI_PROVIDER,
+          // Marcador interno, não uma chave. O runtime local usa a sessão do próprio binário.
+          plaintext: `local-cli:${input.binary}`,
+          label: localCliLabel(input.binary),
+          modelId: input.binary,
+          verified: true,
         });
       }),
       beginOAuth: authed.models.beginOAuth.handler(async ({ context, input }) => {
