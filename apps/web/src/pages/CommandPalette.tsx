@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../components/desktop-ui";
-import { filterPalette, moveHighlight, type PaletteItem } from "../lib/command-palette";
+import {
+  filterPalette,
+  moveHighlight,
+  normalizeQuery,
+  type PaletteItem,
+} from "../lib/command-palette";
 
 /**
  * Busca de teclado sobre a lista já montada pelo Shell. O componente não conhece
@@ -11,20 +16,57 @@ export function CommandPalette({
   items,
   onPick,
   onClose,
+  searchMessages,
 }: {
   items: PaletteItem[];
   onPick: (item: PaletteItem) => void;
   onClose: () => void;
+  searchMessages?: (query: string) => Promise<PaletteItem[]>;
 }) {
   const [query, setQuery] = useState("");
   const [highlight, setHighlight] = useState(0);
+  const [remoteItems, setRemoteItems] = useState<PaletteItem[]>([]);
+  const [searching, setSearching] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
-  const rows = useMemo(() => filterPalette(items, query), [items, query]);
+  const localRows = useMemo(() => filterPalette(items, query), [items, query]);
+  const rows = useMemo(() => [...localRows, ...remoteItems], [localRows, remoteItems]);
+
+  // Quem abriu com ⌘K estava provavelmente escrevendo: fechar devolve o foco para lá,
+  // como o ⌘F já faz, em vez de largar o teclado no vazio.
+  useEffect(() => {
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    inputRef.current?.focus();
+    return () => previous?.focus();
+  }, []);
 
   useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
+    const normalized = normalizeQuery(query);
+    if (!searchMessages || normalized.length < 2) {
+      setRemoteItems([]);
+      setSearching(false);
+      return;
+    }
+    let cancelled = false;
+    setSearching(true);
+    setRemoteItems([]);
+    const timer = window.setTimeout(() => {
+      searchMessages(query)
+        .then((results) => {
+          if (!cancelled) setRemoteItems(results);
+        })
+        .catch(() => {
+          if (!cancelled) setRemoteItems([]);
+        })
+        .finally(() => {
+          if (!cancelled) setSearching(false);
+        });
+    }, 220);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [query, searchMessages]);
 
   // Uma busca nova pode encurtar a lista: manter o índice antigo destacaria uma
   // linha que não existe mais, e o Enter abriria outra coisa.
@@ -32,9 +74,12 @@ export function CommandPalette({
     setHighlight(0);
   }, [query]);
 
-  // A linha destacada tem de estar visível quando se anda só com o teclado.
+  // A linha destacada tem de estar visível quando se anda só com o teclado. O seletor
+  // pula os cabeçalhos de seção, que não contam no índice das linhas.
   useEffect(() => {
-    listRef.current?.children[highlight]?.scrollIntoView({ block: "nearest" });
+    listRef.current
+      ?.querySelector(`[data-row-index="${highlight}"]`)
+      ?.scrollIntoView({ block: "nearest" });
   }, [highlight]);
 
   function onKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
@@ -78,8 +123,8 @@ export function CommandPalette({
             ref={inputRef}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Buscar bot, grupo ou ação"
-            aria-label="Buscar bot, grupo ou ação"
+            placeholder="Buscar bot, grupo, ação ou mensagem"
+            aria-label="Buscar bot, grupo, ação ou mensagem"
             autoComplete="off"
             className="w-full bg-transparent text-[14px] text-[var(--qb-ink)] outline-none placeholder:text-[var(--qb-muted)]"
           />
@@ -89,15 +134,23 @@ export function CommandPalette({
         </div>
         {rows.length === 0 ? (
           <p className="px-3 py-6 text-center text-[13px] text-[var(--qb-muted)]">
-            Nada com esse nome.
+            {searching ? "Buscando mensagens…" : "Nada com esse nome."}
           </p>
         ) : (
           <ul ref={listRef} className="max-h-[320px] overflow-y-auto py-1.5">
             {rows.map((item, index) => (
               <li key={item.id}>
+                {remoteItems.length > 0 && index === localRows.length ? (
+                  <div className="px-3 pt-2 pb-1 text-[11px] font-semibold tracking-wide text-[var(--qb-muted)] uppercase">
+                    Mensagens
+                  </div>
+                ) : null}
                 <button
                   type="button"
-                  onMouseEnter={() => setHighlight(index)}
+                  data-row-index={index}
+                  // mousemove, não mouseenter: rolar a lista com as setas passa linhas por
+                  // baixo do cursor parado, e isso não pode roubar o destaque do teclado.
+                  onMouseMove={() => setHighlight(index)}
                   onClick={() => onPick(item)}
                   aria-current={index === highlight}
                   className={`flex w-full items-center gap-2 px-3 py-2 text-left ${
@@ -117,6 +170,15 @@ export function CommandPalette({
                 </button>
               </li>
             ))}
+            {searching ? (
+              <li
+                className="px-3 py-2 text-[12px] text-[var(--qb-muted)]"
+                role="status"
+                aria-live="polite"
+              >
+                Buscando mensagens…
+              </li>
+            ) : null}
           </ul>
         )}
       </div>

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildPaletteItems,
   filterPalette,
+  messagePaletteItems,
   moveHighlight,
   normalizeQuery,
   opensPalette,
@@ -118,6 +119,29 @@ describe("buildPaletteItems", () => {
   it("lists groups with their own action", () => {
     const built = buildPaletteItems([], [{ id: "g1", name: "Time" }]);
     expect(built[0]).toMatchObject({ label: "Time", action: { kind: "group", id: "g1" } });
+  });
+});
+
+describe("messagePaletteItems", () => {
+  it("turns a message into an action for its owning conversation", () => {
+    const [item] = messagePaletteItems([
+      {
+        messageId: "m1",
+        threadId: "t1",
+        seq: 4,
+        botId: null,
+        groupId: "g1",
+        ownerName: "Equipe",
+        text: "  Decisão   da reunião  ",
+        createdAt: "2026-08-27T09:00:00.000Z",
+      },
+    ]);
+    expect(item).toMatchObject({
+      id: "message:m1",
+      label: "Decisão da reunião",
+      detail: "Mensagem em Equipe",
+      action: { kind: "message", botId: null, groupId: "g1", messageId: "m1" },
+    });
   });
 });
 

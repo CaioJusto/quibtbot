@@ -303,11 +303,18 @@ export const RunSchema = z.object({
 });
 export type Run = z.infer<typeof RunSchema>;
 
+export const RoutineRunSchema = RunSchema.extend({
+  createdAt: z.string(),
+});
+export type RoutineRun = z.infer<typeof RoutineRunSchema>;
+
 export const ThreadSnapshotSchema = z.object({
   botId: Id,
   threadId: Id,
   cursor: z.number().int().min(-1),
   messages: z.array(ThreadMessageSchema),
+  /** Existe página anterior à janela devolvida? Ausente em servidores antigos. */
+  hasMore: z.boolean().optional(),
   run: RunSchema.nullable(),
   computer: ComputerStatusSchema,
   conversations: z.array(ConversationSchema).default([]),
@@ -315,11 +322,25 @@ export const ThreadSnapshotSchema = z.object({
 });
 export type ThreadSnapshot = z.infer<typeof ThreadSnapshotSchema>;
 
+export const ThreadSearchResultSchema = z.object({
+  messageId: Id,
+  threadId: Id,
+  seq: z.number().int().nonnegative(),
+  botId: Id.nullable(),
+  groupId: Id.nullable(),
+  ownerName: z.string(),
+  text: z.string(),
+  createdAt: z.string(),
+});
+export type ThreadSearchResult = z.infer<typeof ThreadSearchResultSchema>;
+
 export const GroupThreadSnapshotSchema = z.object({
   groupId: Id,
   threadId: Id,
   cursor: z.number().int().min(-1),
   messages: z.array(ThreadMessageSchema),
+  /** Existe página anterior à janela devolvida? Ausente em servidores antigos. */
+  hasMore: z.boolean().optional(),
   runs: z.array(RunSchema),
 });
 export type GroupThreadSnapshot = z.infer<typeof GroupThreadSnapshotSchema>;
