@@ -12,7 +12,7 @@ export type ModelCatalogEntry = {
   label?: string;
   oauthLabel?: string;
   signIn?: "device-code";
-  auth?: "api-key" | "oauth" | "both";
+  auth?: "api-key" | "oauth" | "both" | "host-cli";
   subscription?: boolean;
 };
 

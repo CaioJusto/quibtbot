@@ -16,11 +16,13 @@ import {
   InMemoryWakeupDriver,
   isComposioEnabled,
   LocalAgentHomeStore,
+  LocalCliAgentRuntime,
   loadFolderGrantsByUser,
   MAX_TTS_INPUT_CHARS,
   PiAgentRuntime,
   PiOAuthLogins,
   parseModelSecret,
+  RoutedAgentRuntime,
   resolveModelApiKey,
   revokeControlScreenOrSchedule,
   ScriptedAgentRuntime,
@@ -270,8 +272,12 @@ export async function createApp(overrides: CreateAppOverrides = {}): Promise<App
   const connector = stack.destination;
   await connector.start();
   void stack.composio?.warmDirectory().catch(() => undefined);
-  const runtime =
+  const primaryRuntime =
     env.agentRuntime === "scripted" ? new ScriptedAgentRuntime() : new PiAgentRuntime();
+  const runtime =
+    env.agentRuntime === "scripted"
+      ? primaryRuntime
+      : new RoutedAgentRuntime(primaryRuntime, new LocalCliAgentRuntime());
   const notifications = new ExpoPushProvider(prisma);
   const billingPolicy = env.billingEnabled
     ? {

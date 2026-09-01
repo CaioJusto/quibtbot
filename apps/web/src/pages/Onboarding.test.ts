@@ -91,21 +91,29 @@ describe("onboarding wiring", () => {
 });
 
 describe("etapa do modelo", () => {
-  it("põe a assinatura primeiro, a chave OpenRouter depois e o modelo local por último", () => {
+  it("põe assinatura, CLI detectada, chave OpenRouter e modelo local", () => {
     const subscription = src.indexOf('title="Minha assinatura"');
+    const cli = src.indexOf('title="CLI no host"');
     const key = src.indexOf('title="Chave OpenRouter"');
     const local = src.indexOf('title="Modelo local"');
     expect(subscription).toBeGreaterThan(-1);
-    expect(subscription).toBeLessThan(key);
+    expect(subscription).toBeLessThan(cli);
+    expect(cli).toBeLessThan(key);
     expect(key).toBeLessThan(local);
     // E o cartão que começa marcado segue a mesma ordem.
     expect(src).toContain("initialTokenSource({");
   });
 
-  it("promete só as assinaturas que o app sabe entrar: nada de Claude", () => {
-    expect(src).not.toContain("Claude");
+  it("separa login do app das CLIs já autenticadas no host", () => {
+    expect(src).toContain("Nenhuma CLI Claude Code, Codex ou Grok");
     expect(src).toContain("ChatGPT Plus/Pro, Copilot ou SuperGrok");
     expect(src).toContain('entry.signIn === "device-code"\n    ? "Entre com a assinatura');
+  });
+
+  it("ativa a CLI sem chave e explica onde ela roda", () => {
+    expect(src).toContain("rpc.models.connectCli");
+    expect(src).toContain("host da API/worker");
+    expect(src).toContain("Não é preciso colar chave");
   });
 
   it("diz onde a chave OpenRouter nasce e quem paga", () => {

@@ -34,16 +34,19 @@ describe("mobile onboarding screen", () => {
     expect(screen).toContain("models/connect");
   });
 
-  it("põe a assinatura primeiro, a chave OpenRouter depois e o modelo local por último", () => {
+  it("põe a assinatura e a CLI antes da chave e do modelo local", () => {
     const subscription = screen.indexOf('title="Minha assinatura"');
+    const cli = screen.indexOf('title="CLI no host"');
     const key = screen.indexOf('title="Chave OpenRouter"');
     const local = screen.indexOf('title="Modelo local"');
     expect(subscription).toBeGreaterThan(-1);
-    expect(subscription).toBeLessThan(key);
+    expect(subscription).toBeLessThan(cli);
+    expect(cli).toBeLessThan(key);
     expect(key).toBeLessThan(local);
     // O cartão que começa marcado segue a mesma regra do web (@quibt/core).
     expect(screen).toContain("initialTokenSource({");
-    expect(screen).not.toContain("Claude");
+    expect(screen).toContain("Claude Code, Codex ou Grok");
+    expect(screen).toContain('rpc("models/connectCli"');
   });
 
   it("diz onde a chave OpenRouter nasce e quem paga", () => {

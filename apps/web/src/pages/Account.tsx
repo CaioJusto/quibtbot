@@ -35,7 +35,7 @@ type ModelCatalogEntry = {
   id: string;
   label?: string;
   oauthLabel?: string;
-  auth?: "api-key" | "oauth" | "both";
+  auth?: "api-key" | "oauth" | "both" | "host-cli";
   subscription?: boolean;
   signIn?: "device-code";
 };
@@ -186,6 +186,7 @@ export function AccountSettingsBody({
 
   const selectedModel =
     modelsForProvider.find((entry) => entry.id === modelId) ?? modelsForProvider[0];
+  const cliModels = catalog.filter((entry) => entry.provider === "local-cli");
 
   function pickTokenSource(next: TokenSource) {
     setTokenSource(next);
@@ -228,6 +229,27 @@ export function AccountSettingsBody({
     } catch (err) {
       // Chave recusada ou sem crédito: o probe explica em português e nada foi gravado.
       setError(err instanceof Error ? err.message : "Não foi possível conectar o modelo");
+    } finally {
+      setPending(null);
+    }
+  }
+
+  async function connectHostCli() {
+    if (selectedModel?.provider !== "local-cli") return;
+    setPending("connect-cli");
+    setError(null);
+    setNotice(null);
+    try {
+      await rpc.models.connectCli({
+        binary: selectedModel.id as "claude" | "codex" | "grok",
+      });
+      await rpc.models.setDefault({ provider: "local-cli", modelId: selectedModel.id });
+      setCredentials(await rpc.models.credentials().catch(() => []));
+      setNotice(
+        `${selectedModel.label ?? selectedModel.id} ativado. O Quibt usa a sessão já conectada no host da API/worker.`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível ativar a CLI do host");
     } finally {
       setPending(null);
     }
@@ -457,6 +479,7 @@ export function AccountSettingsBody({
             {(
               [
                 ["subscription", "Minha assinatura"],
+                ...(cliModels.length ? [["cli", "CLI no host"]] : []),
                 ["key", "Chave OpenRouter"],
                 ["local", "Modelo local"],
               ] as Array<[TokenSource, string]>
@@ -472,6 +495,13 @@ export function AccountSettingsBody({
               </button>
             ))}
           </fieldset>
+
+          {!cliModels.length ? (
+            <p className="qb-account__hint">
+              Nenhuma CLI Claude Code, Codex ou Grok foi encontrada no host da API. As outras opções
+              continuam disponíveis.
+            </p>
+          ) : null}
 
           {tokenSource === "subscription" ? null : (
             <div className="qb-account__block">
@@ -505,18 +535,25 @@ export function AccountSettingsBody({
                   </select>
                 </label>
               </div>
-              <label className="qb-account__label">
-                {tokenSource === "local" ? "URL do modelo" : "Chave de API"}
-                <input
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  type={tokenSource === "local" ? "text" : "password"}
-                  autoComplete="off"
-                  spellCheck={false}
-                  placeholder={tokenSource === "local" ? localModelUrl(provider) : "sk-…"}
-                  className={field}
-                />
-              </label>
+              {tokenSource === "cli" ? (
+                <p className="qb-account__hint">
+                  A CLI roda no host da API/worker e usa o login já salvo por ela. Nenhuma chave é
+                  enviada ao Quibt, e ela não roda dentro do computador do bot.
+                </p>
+              ) : (
+                <label className="qb-account__label">
+                  {tokenSource === "local" ? "URL do modelo" : "Chave de API"}
+                  <input
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    type={tokenSource === "local" ? "text" : "password"}
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder={tokenSource === "local" ? localModelUrl(provider) : "sk-…"}
+                    className={field}
+                  />
+                </label>
+              )}
               {provider === "openrouter" ? (
                 <p className="qb-account__hint">
                   Crie a chave em{" "}
@@ -533,11 +570,19 @@ export function AccountSettingsBody({
               ) : null}
               <button
                 type="button"
-                disabled={pending !== null || !apiKey.trim() || !selectedModel}
-                onClick={() => void connectModel()}
+                disabled={
+                  pending !== null || !selectedModel || (tokenSource !== "cli" && !apiKey.trim())
+                }
+                onClick={() =>
+                  tokenSource === "cli" ? void connectHostCli() : void connectModel()
+                }
                 className={primary}
               >
-                {pending === "connect" ? "Conectando…" : "Usar este modelo"}
+                {pending === "connect" || pending === "connect-cli"
+                  ? "Conectando…"
+                  : tokenSource === "cli"
+                    ? "Usar esta CLI"
+                    : "Usar este modelo"}
               </button>
             </div>
           )}

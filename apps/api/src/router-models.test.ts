@@ -18,7 +18,11 @@ const context = { actor };
  * O que `models.connect` grava, e o fetch que a sondagem usa. O Prisma falso registra
  * cada credencial criada: o teste olha ali para saber se a chave errada foi guardada.
  */
-function harness(respond: (url: string) => Response | never, env: Partial<RouterDeps["env"]> = {}) {
+function harness(
+  respond: (url: string) => Response | never,
+  env: Partial<RouterDeps["env"]> = {},
+  localCliDetection?: RouterDeps["localCliDetection"],
+) {
   const created: Array<Record<string, unknown>> = [];
   const probed: string[] = [];
   const tx = {
@@ -47,6 +51,7 @@ function harness(respond: (url: string) => Response | never, env: Partial<Router
       load: (ciphertext: string) => ciphertext.replace(/^enc:/, ""),
     },
     probeFetch,
+    localCliDetection,
     env: {
       defaultProvider: "openrouter",
       defaultModel: "model",
@@ -142,5 +147,66 @@ describe("models.connect confere a chave antes de gravar", () => {
     );
     expect(probed).toEqual([]);
     expect(created).toHaveLength(1);
+  });
+});
+
+describe("modelos por CLI do host", () => {
+  it("lista somente os binários detectados, além do catálogo Pi existente", async () => {
+    const { router } = harness(
+      () => {
+        throw new Error("must not probe");
+      },
+      {},
+      async () => [
+        { id: "claude", label: "Claude Code", path: "/fake/claude" },
+        { id: "codex", label: "Codex", path: "/fake/codex" },
+      ],
+    );
+
+    const catalog = await call(router.models.list, undefined, { context });
+
+    expect(catalog).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ provider: "openrouter" }),
+        expect.objectContaining({ provider: "local-cli", id: "claude", auth: "host-cli" }),
+        expect.objectContaining({ provider: "local-cli", id: "codex", auth: "host-cli" }),
+      ]),
+    );
+    expect(catalog).not.toContainEqual(
+      expect.objectContaining({ provider: "local-cli", id: "grok" }),
+    );
+  });
+
+  it("mantém todos os provedores Pi e nenhuma opção CLI quando nenhum binário existe", async () => {
+    const { router } = harness(
+      () => new Response("{}"),
+      {},
+      async () => [],
+    );
+    const catalog = await call(router.models.list, undefined, { context });
+    expect(catalog.some((entry) => entry.provider === "openrouter")).toBe(true);
+    expect(catalog.some((entry) => entry.provider === "local-cli")).toBe(false);
+  });
+
+  it("ativa a CLI detectada sem receber chave e recusa uma que não está no host", async () => {
+    const { router, created } = harness(
+      () => {
+        throw new Error("must not probe");
+      },
+      {},
+      async () => [{ id: "codex", label: "Codex", path: "/fake/codex" }],
+    );
+
+    const credential = await call(router.models.connectCli, { binary: "codex" }, { context });
+    expect(credential).toMatchObject({ provider: "local-cli", label: "Codex", verified: true });
+    expect(created).toContainEqual(
+      expect.objectContaining({ provider: "local-cli", defaultModel: "codex" }),
+    );
+    await expect(
+      call(router.models.connectCli, { binary: "grok" }, { context }),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      data: { code: "LOCAL_CLI_NOT_FOUND", binary: "grok" },
+    });
   });
 });

@@ -31,8 +31,10 @@ import {
   InMemoryWakeupDriver,
   isComposioEnabled,
   LocalAgentHomeStore,
+  LocalCliAgentRuntime,
   loadFolderGrantsByUser,
   PiAgentRuntime,
+  RoutedAgentRuntime,
   ScriptedAgentRuntime,
   sandboxOptionsFromSettings,
   scheduleOrphanReconcile,
@@ -51,8 +53,12 @@ async function main() {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) throw new Error("DATABASE_URL is required");
   const { prisma } = createDb(databaseUrl);
-  const runtime =
+  const primaryRuntime =
     process.env.AGENT_RUNTIME === "scripted" ? new ScriptedAgentRuntime() : new PiAgentRuntime();
+  const runtime =
+    process.env.AGENT_RUNTIME === "scripted"
+      ? primaryRuntime
+      : new RoutedAgentRuntime(primaryRuntime, new LocalCliAgentRuntime());
   const dataDir = process.env.DATA_DIR ?? "./data";
   const desktopGrantsByUser = await loadFolderGrantsByUser(dataDir);
   const runtimeConfig = workerRuntimeConfig(process.env);

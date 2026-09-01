@@ -28,6 +28,7 @@ const catalog = [
   { provider: "anthropic", id: "an/one", auth: "both" as const, subscription: true },
   { provider: "ollama", id: "llama3.2", auth: "api-key" as const },
   { provider: "openai-compatible", id: "local-model", auth: "api-key" as const },
+  { provider: "local-cli", id: "codex", auth: "host-cli" as const, subscription: true },
   { provider: "copilot", id: "gh/one", auth: "oauth" as const, signIn: "device-code" as const },
   // Assinatura no catálogo do Pi, mas sem login implementado no app.
   { provider: "kimi-for-coding", id: "kimi/one", auth: "oauth" as const, subscription: true },
@@ -81,7 +82,8 @@ describe("providersForMode", () => {
     expect(providersForMode(catalog, "subscription").map((entry) => entry.provider)).toEqual([
       "copilot",
     ]);
-    expect(providersForMode(catalog, "plan")).toHaveLength(6);
+    expect(providersForMode(catalog, "cli").map((entry) => entry.provider)).toEqual(["local-cli"]);
+    expect(providersForMode(catalog, "plan")).toHaveLength(7);
   });
 
   it("só oferece na aba Assinatura quem tem o login pelo código implementado", () => {
@@ -297,6 +299,12 @@ describe("modelSaveAction", () => {
   it("connects the key when there is one", () => {
     expect(modelSaveAction({ ...base, tokenSource: "key", apiKey: "sk-1" }).kind).toBe("connect");
   });
+
+  it("ativates a detected host CLI without asking for a key", () => {
+    expect(modelSaveAction({ ...base, tokenSource: "cli", apiKey: "" })).toEqual({
+      kind: "cli",
+    });
+  });
 });
 
 describe("machineNotice", () => {
@@ -405,6 +413,7 @@ describe("modeForProvider", () => {
 
   it("reconhece o modelo local", () => {
     expect(modeForProvider({ provider: "ollama", id: "llama" })).toBe("local");
+    expect(modeForProvider({ provider: "local-cli", id: "codex", auth: "host-cli" })).toBe("cli");
   });
 
   it("concorda com providersForMode", () => {
@@ -412,6 +421,7 @@ describe("modeForProvider", () => {
       { provider: "openrouter", id: "or/one", auth: "oauth" as const },
       { provider: "xai", id: "grok", signIn: "device-code" as const },
       { provider: "ollama", id: "llama" },
+      { provider: "local-cli", id: "claude", auth: "host-cli" as const },
     ];
     for (const entry of entries) {
       expect(providersForMode(entries, modeForProvider(entry))).toContainEqual(entry);

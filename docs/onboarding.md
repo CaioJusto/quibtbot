@@ -52,13 +52,18 @@ endereço não prova quem está no teclado. No celular e em qualquer outro apare
 
 Depois do nome, o app vai direto às decisões — modelo, máquina e o primeiro bot. A tela da máquina confirma o Docker desta máquina; quem já instalou apontando para Box, E2B ou um supervisor remoto pula esse passo (a escolha já está feita, e continua em Ajustes → Máquina). Não há telas de apresentação no meio.
 
-Três jeitos, nesta ordem na tela. Pode pular e configurar depois, mas sem modelo o bot não responde.
+O app mostra as opções abaixo. Pode pular e configurar depois, mas sem modelo o bot não responde.
 
 | Jeito | O que fazer | Quem paga |
 | --- | --- | --- |
 | Minha assinatura | Entre com ChatGPT Plus/Pro, GitHub Copilot ou SuperGrok. O app mostra um código para você colar no site deles. | A assinatura que você já paga |
+| CLI no host | Se a API detectar `claude`, `codex` ou `grok`, escolha a CLI já conectada. Não cole chave. | A assinatura usada pela CLI |
 | Chave OpenRouter | Crie a chave em [openrouter.ai/keys](https://openrouter.ai/keys), copie e cole no Quibt. | A sua conta OpenRouter, por uso |
 | Modelo local | Instale [Ollama](https://ollama.com) (ou LM Studio). A URL padrão é `http://127.0.0.1:11434`. | Ninguém. Roda no seu PC |
+
+A CLI local roda no host dos processos da API/worker, não dentro do computador do bot. Veja
+[cli-engines.md](./cli-engines.md). Se nenhuma for encontrada, a tela avisa e mantém as outras
+opções.
 
 Na assinatura, **Continuar só libera depois que o login termina** — antes disso o botão diz “Entre na assinatura primeiro”. Salvar o provedor sem credencial fazia o bot responder “não tenho um modelo conectado” no primeiro recado. A aba só lista as três assinaturas acima: são as que o app sabe entrar.
 

@@ -128,7 +128,7 @@ export const appContract = {
           id: z.string(),
           label: z.string(),
           billing: z.string(),
-          auth: z.enum(["api-key", "oauth", "both"]).optional(),
+          auth: z.enum(["api-key", "oauth", "both", "host-cli"]).optional(),
           oauthLabel: z.string().optional(),
           subscription: z.boolean().optional(),
           signIn: z.enum(["device-code"]).optional(),
@@ -145,6 +145,9 @@ export const appContract = {
           modelId: z.string().optional(),
         }),
       )
+      .output(ModelConnectResultSchema),
+    connectCli: oc
+      .input(z.object({ binary: z.enum(["claude", "codex", "grok"]) }))
       .output(ModelConnectResultSchema),
     beginOAuth: oc
       .input(
