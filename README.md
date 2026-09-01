@@ -125,6 +125,9 @@ into an AI assistant to walk you through these same commands.
 Leaving is one command too. Installing puts containers, one computer container per workspace, three
 images and a data directory on the machine; deleting the app alone leaves all of that behind.
 
+With the local API running, connect Claude Desktop, Cursor, or Codex to the roster with
+`quibtbot mcp`; see the [stdio MCP server setup](docs/mcp-server.md).
+
 ```bash
 quibtbot uninstall                # services, bot computers, images and the data dir
 quibtbot uninstall --keep-data    # keep the database and bot homes for a later reinstall

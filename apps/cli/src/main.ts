@@ -24,12 +24,14 @@ import {
   type SensitivePairingOutput,
   type UninstallEvent,
 } from "@quibt/installer";
+import { runMcpServer } from "./mcp.js";
 
 export type CliCommand =
   | "install"
   | "status"
   | "doctor"
   | "pair"
+  | "mcp"
   | "update"
   | "uninstall"
   | "version"
@@ -45,7 +47,15 @@ export interface ParsedCli {
   local: boolean;
 }
 
-const VALID_COMMANDS = ["install", "status", "doctor", "pair", "update", "uninstall"] as const;
+const VALID_COMMANDS = [
+  "install",
+  "status",
+  "doctor",
+  "pair",
+  "mcp",
+  "update",
+  "uninstall",
+] as const;
 
 export class CliUsageError extends Error {
   readonly exitCode: number;
@@ -138,14 +148,15 @@ function isMainModule(): boolean {
   }
 }
 
-function printHelp(): void {
-  console.log(`Usage: quibtbot <command>
+function printHelp(log: typeof console.log): void {
+  log(`Usage: quibtbot <command>
 
 Commands:
   install   Install or resume an installation
   status    Show services, version, and URL
   doctor    Run diagnostics without changing data
   pair      Issue a new pairing QR/code
+  mcp       Run the bounded stdio MCP roster control plane
   update    Update images with backup and verification
   uninstall Remove the Quibt services, bot computers, images and data dir
 
@@ -197,6 +208,8 @@ export interface RunCliDeps {
   platform?: NodeJS.Platform;
   log?: typeof console.log;
   error?: typeof console.error;
+  /** Tests can replace the blocking stdio server without writing to stdout. */
+  runMcp?: () => Promise<void>;
 }
 
 /**
@@ -279,11 +292,15 @@ export async function runCliAsync(args: string[], deps: RunCliDeps = {}): Promis
   try {
     const parsed = parseCli(args);
     if (parsed.command === "help") {
-      printHelp();
+      printHelp(log);
       return 0;
     }
     if (parsed.command === "version") {
       log(INSTALL_RELEASE);
+      return 0;
+    }
+    if (parsed.command === "mcp") {
+      await (deps.runMcp ?? (() => runMcpServer({ fetch: deps.fetch, error })))();
       return 0;
     }
 

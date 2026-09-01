@@ -50,6 +50,10 @@ describe("parseCli", () => {
   it("maps --version to the version command", () => {
     expect(parseCli(["--version"]).command).toBe("version");
   });
+
+  it("accepts mcp as a command without extra CLI flags", () => {
+    expect(parseCli(["mcp"])).toMatchObject({ command: "mcp" });
+  });
 });
 
 describe("cli version output", () => {
@@ -129,6 +133,28 @@ describe("runCliAsync", () => {
   afterEach(() => {
     logs.length = 0;
     errors.length = 0;
+  });
+
+  it("mentions mcp in help", async () => {
+    const code = await runCliAsync(["--help"], {
+      log: (line) => logs.push(line),
+      error: (line) => errors.push(line),
+    });
+    expect(code).toBe(0);
+    expect(logs.join("\n")).toMatch(/mcp\s+Run the bounded stdio MCP/i);
+  });
+
+  it("starts mcp without printing Usage or any other CLI text to stdout", async () => {
+    const runMcp = vi.fn(async () => {});
+    const code = await runCliAsync(["mcp"], {
+      runMcp,
+      log: (line) => logs.push(line),
+      error: (line) => errors.push(line),
+    });
+    expect(code).toBe(0);
+    expect(runMcp).toHaveBeenCalledOnce();
+    expect(logs).toEqual([]);
+    expect(errors).toEqual([]);
   });
 
   it("runs pair via local mint without printing bootstrap secret", async () => {
