@@ -74,11 +74,11 @@
     "react-native-worklets": "0.10.1"
   },
   "devDependencies": {
-    "@react-native/metro-config": "0.86.3",
+    "@react-native/metro-config": "0.87.1",
     "@testcontainers/postgresql": "^11.5.1",
     "@types/node": "^24.3.0",
     "@types/react": "^19.1.12",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   }
 }

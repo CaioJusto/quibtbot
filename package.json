@@ -42,15 +42,15 @@
     "dev:chat": "node --env-file-if-exists=.env scripts/dev-chat.mjs"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.8",
+    "@biomejs/biome": "^2.5.11",
     "@types/node": "^24.3.0",
     "actionlint": "^2.0.6",
     "esbuild": "^0.28.0",
     "postject": "^1.0.0-alpha.6",
     "tsx": "^4.20.5",
-    "turbo": "^2.5.6",
+    "turbo": "^2.10.12",
     "typescript": "^5.9.2",
-    "vitest": "^4.1.10",
+    "vitest": "^4.1.11",
     "yaml": "^2.9.0"
   },
   "pnpm": {
