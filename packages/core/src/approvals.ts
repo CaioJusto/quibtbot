@@ -124,7 +124,8 @@ const UNSAFE_WHEN_UNATTENDED = new Set([
 
 /** Whether `tool` may skip the approval card outright, independent of `alwaysAllow`/`autoApprove`. */
 export function isSafeTool(tool: string, options?: { unattended?: boolean }): boolean {
-  if (!SAFE_TOOLS.has(tool)) return false;
+  const openApiRead = /^oa__.+?__(get|head|options)__.+$/i.test(tool);
+  if (!SAFE_TOOLS.has(tool) && !openApiRead) return false;
   if (options?.unattended && UNSAFE_WHEN_UNATTENDED.has(tool)) return false;
   return true;
 }
@@ -158,10 +159,13 @@ export function toolSummary(tool: string, args: Record<string, unknown>): string
  * itself contain `_`, so the match is lazy up to the first `__` separator.
  */
 const MCP_PREFIX = /^mcp__.+?__/;
+const OPENAPI_PREFIX = /^oa__.+?__(?:get|put|post|delete|patch|head|options)__/i;
 
 /** Bare tool name, with any MCP server prefix removed. */
 export function bareToolName(tool: string): string {
-  return tool.replace(MCP_PREFIX, "").toLowerCase();
+  return (
+    MCP_PREFIX.test(tool) ? tool.replace(MCP_PREFIX, "") : tool.replace(OPENAPI_PREFIX, "")
+  ).toLowerCase();
 }
 
 function sha256Hex(value: string): string {

@@ -32,10 +32,16 @@ describe("dashboard copies the landing product demo", () => {
 
   it("the labeled Assumir controle action takes the keyboard, not just opens the overlay", () => {
     expect(shell).toContain("async function takeOverComputer()");
-    expect(shell).toContain("onClick={() => void takeOverComputer()}");
-    expect(shell).not.toContain(
-      "onClick={() => void openComputer()}\n                    >\n                      Assumir controle",
+    expect(shell).toMatch(
+      /className="qb-dash__screen"\s+aria-label="Abrir a tela do computador"\s+onClick=\{\(\) => void openComputer\(\)\}/,
     );
+    expect(shell).not.toContain('aria-label="Assumir controle do computador"');
+    expect(shell).toMatch(
+      /className="qb-dash__screen-action"\s+aria-label=\{holdsControl \? "Liberar controle" : "Assumir controle"\}[\s\S]*?void takeOverComputer\(\)/,
+    );
+    expect(
+      shell.match(/aria-label=\{holdsControl \? "Liberar controle" : "Assumir controle"\}/g),
+    ).toHaveLength(1);
   });
 
   it("opens a takeover request from the conversation inside the Quibt overlay", () => {

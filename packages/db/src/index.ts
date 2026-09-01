@@ -1,6 +1,7 @@
 export * from "./artifacts.js";
 export * from "./billing.js";
 export * from "./bot-mcp.js";
+export * from "./bot-openapi.js";
 export * from "./capabilities.js";
 export * from "./client.js";
 export * from "./collaboration.js";

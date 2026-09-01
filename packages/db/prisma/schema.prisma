@@ -109,6 +109,7 @@ model Organization {
   orphanProvisions OrphanProvision[]
   webhooks    Webhook[]
   botMcpServers BotMcpServer[]
+  botOpenApiSources BotOpenApiSource[]
 
   @@unique([slug])
   @@map("organization")
@@ -303,6 +304,7 @@ model Bot {
   authoredMessages Message[]         @relation("MessageAuthor")
   webhooks         Webhook[]
   mcpServers       BotMcpServer[]
+  openApiSources   BotOpenApiSource[]
 
   @@index([workspaceId, userId])
   @@index([parentBotId])
@@ -329,6 +331,24 @@ model BotMcpServer {
   @@unique([botId, name])
   @@index([workspaceId, botId])
   @@map("bot_mcp_servers")
+}
+
+model BotOpenApiSource {
+  id             String       @id @default(cuid())
+  workspaceId    String
+  workspace      Organization @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  botId          String
+  bot            Bot          @relation(fields: [botId], references: [id], onDelete: Cascade)
+  name           String
+  url            String
+  enabled        Boolean      @default(true)
+  disabledReason String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([botId, name])
+  @@index([workspaceId, botId])
+  @@map("bot_openapi_sources")
 }
 
 model Thread {

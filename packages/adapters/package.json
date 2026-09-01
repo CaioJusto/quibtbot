@@ -20,7 +20,8 @@
     "@quibt/contracts": "workspace:*",
     "@quibt/core": "workspace:*",
     "@quibt/db": "workspace:*",
-    "graphile-worker": "^0.17.3"
+    "graphile-worker": "^0.17.3",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@types/pg": "^8.15.5",

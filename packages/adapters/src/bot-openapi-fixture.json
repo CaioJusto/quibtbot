@@ -1,0 +1,33 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "Pets", "version": "1.0.0" },
+  "servers": [{ "url": "https://api.example.test/v1" }],
+  "paths": {
+    "/pets": {
+      "get": {
+        "operationId": "listPets",
+        "parameters": [{ "name": "limit", "in": "query", "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "OK" } }
+      },
+      "post": {
+        "operationId": "createPet",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/Pet" } }
+          }
+        },
+        "responses": { "200": { "description": "OK" } }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Pet": {
+        "type": "object",
+        "properties": { "name": { "type": "string" } },
+        "required": ["name"]
+      }
+    }
+  }
+}

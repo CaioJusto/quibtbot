@@ -51,6 +51,7 @@ import {
   serializeModelSecret,
   touchRunningComputer,
   validateMcpEndpoint,
+  validatePublicHttpsEndpoint,
   workspaceProviderRef,
 } from "@quibt/adapters";
 import { type Auth, mailerEnabled } from "@quibt/auth";
@@ -96,9 +97,11 @@ import {
 import {
   activeConversationForBot,
   addBotMcpServer,
+  addBotOpenApiSource,
   appendEvent,
   appendThreadMessage,
   BotMcpServerError,
+  BotOpenApiSourceError,
   CapabilityInstallError,
   cancelThreadRuns,
   capabilityDigest,
@@ -116,10 +119,12 @@ import {
   isImage,
   isRunNonceConflict,
   listBotMcpServers,
+  listBotOpenApiSources,
   mapConversation,
   type Pool,
   type PrismaClient,
   removeBotMcpServer,
+  removeBotOpenApiSource,
   requireMembership,
   type WebhookReceiveResult,
   type WebhookService,
@@ -751,6 +756,43 @@ export function createRouter(deps: RouterDeps) {
       remove: authed.botMcp.remove.handler(async ({ context, input }) => {
         await repos.getBot(context.actor, input.botId);
         await removeBotMcpServer(deps.prisma, {
+          workspaceId: context.actor.workspaceId,
+          botId: input.botId,
+          id: input.id,
+        });
+        return { ok: true as const };
+      }),
+    },
+    botOpenApi: {
+      list: authed.botOpenApi.list.handler(async ({ context, input }) => {
+        await repos.getBot(context.actor, input.botId);
+        return listBotOpenApiSources(deps.prisma, {
+          workspaceId: context.actor.workspaceId,
+          botId: input.botId,
+        });
+      }),
+      add: authed.botOpenApi.add.handler(async ({ context, input }) => {
+        await repos.getBot(context.actor, input.botId);
+        await validatePublicHttpsEndpoint(input.url, "OpenAPI URL").catch((error: unknown) => {
+          throw new ORPCError("BAD_REQUEST", {
+            message: error instanceof Error ? error.message : "Invalid OpenAPI URL",
+          });
+        });
+        return addBotOpenApiSource(deps.prisma, {
+          workspaceId: context.actor.workspaceId,
+          botId: input.botId,
+          name: input.name,
+          url: input.url,
+        }).catch((error: unknown) => {
+          if (error instanceof BotOpenApiSourceError) {
+            throw new ORPCError("BAD_REQUEST", { message: error.message });
+          }
+          throw error;
+        });
+      }),
+      remove: authed.botOpenApi.remove.handler(async ({ context, input }) => {
+        await repos.getBot(context.actor, input.botId);
+        await removeBotOpenApiSource(deps.prisma, {
           workspaceId: context.actor.workspaceId,
           botId: input.botId,
           id: input.id,

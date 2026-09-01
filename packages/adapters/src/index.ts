@@ -2,6 +2,7 @@ export * from "./approval-wait.js";
 export * from "./artifacts.js";
 export * from "./bot-destroy-finalize.js";
 export * from "./bot-mcp.js";
+export * from "./bot-openapi.js";
 export * from "./box-emulator.js";
 export * from "./box-sandbox.js";
 export * from "./box-screens.js";

@@ -234,7 +234,7 @@ function ComputerHandoffCard({
       {active ? (
         <button
           type="button"
-          aria-label="Assumir controle e abrir o computador dentro do Quibt"
+          aria-label="Assumir controle pela prévia e abrir o computador dentro do Quibt"
           className="group relative mx-[18px] block aspect-video w-[calc(100%_-_36px)] overflow-hidden rounded-[var(--qb-r-md)] bg-[var(--qb-rail)] text-[var(--qb-canvas)]"
           disabled={busy || !action}
           onClick={action}
@@ -272,6 +272,9 @@ function ComputerHandoffCard({
         {action ? (
           <button
             type="button"
+            aria-label={
+              active ? "Assumir controle e abrir o computador dentro do Quibt" : undefined
+            }
             className="mt-3.5 flex min-h-11 items-center gap-2 rounded-full bg-[var(--qb-ink-strong)] px-4 py-2.5 text-[15px] font-medium text-[var(--qb-canvas)] disabled:cursor-wait disabled:opacity-60"
             disabled={busy}
             onClick={action}
