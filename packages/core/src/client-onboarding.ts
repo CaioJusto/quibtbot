@@ -189,7 +189,7 @@ export function machineCredentialsReady(
     | undefined,
   input: { endpoint: string; apiKey: string },
 ): { ok: true } | { ok: false; message: string } {
-  if (!item) return { ok: false, message: "Escolha Docker, a sua VPS, E2B ou Box." };
+  if (!item) return { ok: false, message: "Escolha Docker, a sua VPS, E2B, Box ou Daytona." };
   if (item.needsEndpoint && !input.endpoint.trim() && !item.configured) {
     return { ok: false, message: item.endpointLabel ?? "Cole a URL do supervisor da sua VPS." };
   }

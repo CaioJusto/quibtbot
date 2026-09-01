@@ -8,6 +8,7 @@ describe("machineGuideFor", () => {
       "remote-supervisor",
       "e2b",
       "box",
+      "daytona",
       "vps-hetzner",
       "vps-digitalocean",
       "vps-generic",
@@ -42,9 +43,10 @@ describe("machineGuideFor", () => {
     }
   });
 
-  it("tells E2B and Box owners where to get a key", () => {
+  it("tells cloud sandbox owners where to get a key", () => {
     expect(machineGuideFor("e2b").keyUrl).toMatch(/e2b\.dev/);
     expect(machineGuideFor("box").keyUrl).toMatch(/ascii\.dev|box\.ascii/);
+    expect(machineGuideFor("daytona").keyUrl).toMatch(/daytona\.io/);
     expect(machineGuideFor("docker").keyUrl).toBeUndefined();
   });
 
@@ -56,10 +58,11 @@ describe("machineGuideFor", () => {
     expect(copy).toMatch(/preserva o disco/i);
   });
 
-  it("says Docker bots share one computer and E2B/Box do not", () => {
+  it("says Docker bots share one computer and cloud sandboxes do not", () => {
     expect(machineGuideFor("docker").botsShare).toMatch(/mesmo computador/i);
     expect(machineGuideFor("e2b").botsShare).toMatch(/Não compartilham/);
     expect(machineGuideFor("box").botsShare).toMatch(/Não compartilham/);
+    expect(machineGuideFor("daytona").botsShare).toMatch(/Não compartilham/);
   });
 
   it("spells out one graphical desktop per bot for Docker and the remote supervisor", () => {
@@ -121,8 +124,8 @@ describe("machineGuideFor", () => {
     }
   });
 
-  it("never lets an E2B or Box guide claim it hosts the Quibt server, only the bot's computer", () => {
-    for (const kind of ["e2b", "box"]) {
+  it("never lets a cloud sandbox guide claim it hosts the Quibt server, only the bot's computer", () => {
+    for (const kind of ["e2b", "box", "daytona"]) {
       const guide = machineGuideFor(kind);
       expect(`${guide.headline} ${guide.what}`).not.toMatch(
         /hospeda o servidor|é o servidor Quibt/i,

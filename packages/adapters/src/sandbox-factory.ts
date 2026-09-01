@@ -8,6 +8,8 @@ import {
 import { machineFamily, resolveDeploymentMachine } from "@quibt/core";
 import { BoxSandboxEmulator } from "./box-emulator.js";
 import { BoxSandboxProvider } from "./box-sandbox.js";
+import { DaytonaSandboxEmulator } from "./daytona-emulator.js";
+import { DaytonaSandboxProvider } from "./daytona-sandbox.js";
 import { DockerSandboxProvider } from "./docker-sandbox.js";
 import { ManagedSandboxEmulator } from "./e2b-emulator.js";
 import { E2BSandboxProvider } from "./e2b-sandbox.js";
@@ -48,8 +50,18 @@ function registerBuiltinSandboxFactories(): void {
     if (!opts.boxApiKey) throw new Error("BOX_API_KEY is required for the box sandbox provider");
     return new BoxSandboxProvider(opts.boxApiKey);
   });
+  registerSandboxFactory("daytona", (opts) => {
+    if (!opts.daytonaApiKey) {
+      throw new Error("DAYTONA_API_KEY is required for the daytona sandbox provider");
+    }
+    return new DaytonaSandboxProvider(opts.daytonaApiKey, {
+      apiUrl: opts.daytonaApiUrl,
+      target: opts.daytonaTarget,
+    });
+  });
   registerSandboxFactory("e2b-emulator", () => new ManagedSandboxEmulator());
   registerSandboxFactory("box-emulator", () => new BoxSandboxEmulator());
+  registerSandboxFactory("daytona-emulator", () => new DaytonaSandboxEmulator());
   registerSandboxFactory("fake", () => new FakeSandboxProvider());
 }
 
@@ -57,13 +69,13 @@ export function createSandboxProvider(kind: string, opts: SandboxFactoryOptions)
   registerBuiltinSandboxFactories();
   if (kind === "desktop") {
     throw new Error(
-      "SANDBOX_PROVIDER=desktop is disabled because it is not an OS isolation boundary. Use docker, e2b, box, or remote-supervisor.",
+      "SANDBOX_PROVIDER=desktop is disabled because it is not an OS isolation boundary. Use docker, e2b, box, daytona, or remote-supervisor.",
     );
   }
   const factory = sandboxFactories.get(kind);
   if (!factory) {
     throw new Error(
-      `Unknown SANDBOX_PROVIDER "${kind}". Use docker | remote-supervisor | e2b | e2b-emulator | box | box-emulator | desktop | fake.`,
+      `Unknown SANDBOX_PROVIDER "${kind}". Use docker | remote-supervisor | e2b | e2b-emulator | box | box-emulator | daytona | daytona-emulator | desktop | fake.`,
     );
   }
   return factory(opts);
@@ -90,6 +102,9 @@ export interface SandboxFactoryOptions {
   remoteSupervisorToken?: string;
   e2bApiKey?: string;
   boxApiKey?: string;
+  daytonaApiKey?: string;
+  daytonaApiUrl?: string;
+  daytonaTarget?: string;
   dataDir?: string;
   desktopGrants?: string[];
   desktopGrantsByUser?: Record<string, string[]>;

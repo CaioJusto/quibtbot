@@ -76,7 +76,7 @@ describe("onboarding wiring", () => {
     expect(src).not.toContain('shape: "freddy"');
   });
 
-  it("lets the owner pick Docker, VPS, E2B or Box and test the choice", () => {
+  it("lets the owner pick Docker, VPS, E2B, Box or Daytona and test the choice", () => {
     expect(src).toContain("O quadro abaixo diz o que instalar e o que");
     expect(src).toContain("MachineGuide");
     expect(src).toContain("probeMachine");

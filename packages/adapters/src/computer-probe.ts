@@ -102,6 +102,11 @@ export async function probeComputer(
     if (!key) return { ok: false, message: "Cole a BOX_API_KEY para testar." };
     return { ok: true, message: "Chave presente. O próximo computador sobe no Box." };
   }
+  if (boot === "daytona") {
+    const key = input.apiKey?.trim();
+    if (!key) return { ok: false, message: "Cole a DAYTONA_API_KEY para testar." };
+    return { ok: true, message: "Chave presente. O próximo computador sobe na Daytona." };
+  }
   const url = (input.endpoint || input.supervisorUrl || "").trim().replace(/\/$/, "");
   if (boot === "remote-supervisor" && !url) {
     return { ok: false, message: "Cole a URL https do supervisor da sua VPS." };

@@ -250,7 +250,7 @@ describe("machineCredentialsReady", () => {
     ).toBe(true);
   });
 
-  it("asks for the E2B or Box key unless that machine is already configured", () => {
+  it("asks for a cloud sandbox key unless that machine is already configured", () => {
     expect(
       machineCredentialsReady(
         { needsKey: true, needsEndpoint: false },

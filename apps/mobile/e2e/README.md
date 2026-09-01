@@ -8,7 +8,7 @@ functions the screens under `apps/mobile/app/*` call) against a real API app boo
 the scripted / fake emulator stack:
 
 - `AGENT_RUNTIME=scripted` — the model runtime used by `packages/testkit/src/journeys.test.ts`.
-- `SANDBOX_PROVIDER=fake` — `FakeSandboxProvider`, no Docker/E2B/Box required.
+- `SANDBOX_PROVIDER=fake` — `FakeSandboxProvider`, no Docker/E2B/Box/Daytona required.
 - `WAKEUP_DRIVER=memory` — no Graphile/queue worker required.
 
 ## What it covers

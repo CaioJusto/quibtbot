@@ -138,7 +138,7 @@ describe("the machine the deploy reports", () => {
     expect((await call(keyGone.router.me, undefined, { context })).sandboxProvider).toBe("docker");
   });
 
-  it("lets the owner pick E2B or Box with a pasted key, and refuses without one", async () => {
+  it("lets the owner pick a cloud sandbox with a pasted key, and refuses without one", async () => {
     const { router } = harness({ availableMachines: ["docker"] });
     await expect(
       call(router.computers.activate, { kind: "e2b" }, { context }),
@@ -155,6 +155,12 @@ describe("the machine the deploy reports", () => {
       { context },
     );
     expect(box.sandboxProvider).toBe("box");
+    const daytona = await call(
+      router.computers.activate,
+      { kind: "daytona", apiKey: "daytona_x" },
+      { context },
+    );
+    expect(daytona.sandboxProvider).toBe("daytona");
   });
 
   it("reuses the saved machine key when the owner tests the configured Box again", async () => {
@@ -165,6 +171,17 @@ describe("the machine the deploy reports", () => {
     await expect(call(router.computers.probe, { kind: "box" }, { context })).resolves.toEqual({
       ok: true,
       message: "Chave presente. O próximo computador sobe no Box.",
+    });
+  });
+
+  it("reuses the saved machine key when the owner tests the configured Daytona again", async () => {
+    const { router } = harness(
+      { availableMachines: ["docker"] },
+      { sandboxProvider: "daytona", sandboxCredentialCipher: "enc:daytona_saved" },
+    );
+    await expect(call(router.computers.probe, { kind: "daytona" }, { context })).resolves.toEqual({
+      ok: true,
+      message: "Chave presente. O próximo computador sobe na Daytona.",
     });
   });
 

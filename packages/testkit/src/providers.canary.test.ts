@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { E2BSandboxProvider, PiAgentRuntime } from "@quibt/adapters";
+import { DaytonaSandboxProvider, E2BSandboxProvider, PiAgentRuntime } from "@quibt/adapters";
 import { afterAll, describe, expect, it } from "vitest";
 
 function loadEnvFile() {
@@ -21,10 +21,12 @@ function loadEnvFile() {
 loadEnvFile();
 
 const liveE2b = Boolean(process.env.VERIFY_PROVIDERS && process.env.E2B_API_KEY);
+const liveDaytona = Boolean(process.env.VERIFY_PROVIDERS && process.env.DAYTONA_API_KEY);
 const livePi = Boolean(process.env.VERIFY_PROVIDERS && process.env.OPENROUTER_API_KEY);
 const livePiApp = Boolean(livePi && process.env.DATABASE_URL);
 
 const describeE2b = liveE2b ? describe : describe.skip;
+const describeDaytona = liveDaytona ? describe : describe.skip;
 const describePi = livePi ? describe : describe.skip;
 const describePiApp = livePiApp ? describe : describe.skip;
 
@@ -50,6 +52,36 @@ describeE2b("live E2B canary", () => {
     expect(stdout).toContain("e2b-ok");
     await sandbox.destroy(computer, ctx);
   }, 120_000);
+});
+
+describeDaytona("live Daytona canary", () => {
+  it("provisions a desktop, runs a command, and destroys it", async () => {
+    const sandbox = new DaytonaSandboxProvider(process.env.DAYTONA_API_KEY!, {
+      apiUrl: process.env.DAYTONA_API_URL,
+      target: process.env.DAYTONA_TARGET,
+    });
+    const ctx = {
+      operationId: "canary",
+      traceId: "canary",
+      workspaceId: "canary",
+      userId: "canary",
+      signal: new AbortController().signal,
+    };
+    const computer = await sandbox.provision(
+      { botId: "canary", homePath: "/home/daytona/quibt-home" },
+      ctx,
+    );
+    try {
+      let stdout = "";
+      for await (const event of sandbox.execute(computer, { argv: ["echo", "daytona-ok"] }, ctx)) {
+        if (event.type === "stdout") stdout += event.data;
+        if (event.type === "exit") expect(event.code).toBe(0);
+      }
+      expect(stdout).toContain("daytona-ok");
+    } finally {
+      await sandbox.destroy(computer, ctx);
+    }
+  }, 180_000);
 });
 
 describePi("live OpenRouter / Pi canary", () => {

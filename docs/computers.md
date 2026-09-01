@@ -1,17 +1,17 @@
-# Computador dos bots — Docker, VPS, E2B e Box
+# Computador dos bots — Docker, VPS, E2B, Box e Daytona
 
-Pesquisa de 15/08/2026 contra o código deste repositório e a documentação oficial da E2B e da Box. O texto de onboarding que a pessoa vê no app vem de `packages/core/src/machine-onboarding.ts`. Este arquivo é a versão longa, inclusive para quem não é técnico.
+Pesquisa atualizada em 01/09/2026 contra o código deste repositório e a documentação oficial da E2B, Box e Daytona. O texto de onboarding que a pessoa vê no app vem de `packages/core/src/machine-onboarding.ts`. Este arquivo é a versão longa, inclusive para quem não é técnico.
 
 ## O que o Quibt Bot é hoje
 
-Produto **open source / local-first**. Você instala, traz o modelo, escolhe a máquina. A Quibt não revende VPS, E2B nem Box. Cloud (`QUIBT_EDITION=cloud`) existe só como flag de operador — não aparece no site, no README nem no onboarding público.
+Produto **open source / local-first**. Você instala, traz o modelo, escolhe a máquina. A Quibt não revende VPS, E2B, Box nem Daytona. Cloud (`QUIBT_EDITION=cloud`) existe só como flag de operador — não aparece no site, no README nem no onboarding público.
 
 O app (web, Electron, celular) é só a janela. Os comandos do bot rodam no **provedor** que você escolheu, nunca como o seu usuário do macOS ou do Windows.
 
 Duas perguntas, respondidas separadamente: **Onde o Quibt fica ligado?** (o servidor — API,
 worker, Postgres — que roda neste computador, na sua VPS ou numa VM da Box; E2B nunca aparece
 aqui, porque ela só isola o computador de um bot) e **Onde os bots trabalham?** (é isto que
-este arquivo detalha: Docker, VPS/remote-supervisor, E2B ou Box). Ver
+este arquivo detalha: Docker, VPS/remote-supervisor, E2B, Box ou Daytona). Ver
 [`architecture.md`](./architecture.md) (em inglês) para o desenho completo do sistema.
 
 ## Mandar o que está na tela
@@ -51,7 +51,7 @@ segunda janela (nem morre no "No usable sandbox" do Chromium puro em container).
 
 **Preciso assumir o controle para ver a tela?** Para mexer, sim; para olhar, não. A URL assinada chega ao soquete VNC de verdade: o `view_only` do noVNC é só JavaScript no navegador, então a API **não emite** capacidade enquanto este ator não tiver o lease. Sem o teclado ainda dá para **olhar**: o painel e a tela cheia pedem um retrato (`computer.preview`, um PNG com cache de 3 s) a cada 3 s e o mostram com o selo "ao vivo · há Ns", com o botão **Assumir controle** por cima; o poll para com o painel fechado, a aba escondida ou o controle na sua mão. Se o retrato falhar, o último quadro fica até envelhecer, com "sem prévia · tentando de novo" por cima. **Liberar** tira a URL na hora. O controle vale 15 minutos a partir do último uso: cada tecla, clique ou colagem renova o prazo (a tela mostra "controle até HH:mm"). O heartbeat que o app manda enquanto a tela está aberta acorda o container, mas só empurra o prazo com prova de gente: uso desde a última renovação, ou a pessoa estar mesmo na tela (aba à vista, janela em foco e o teclado dentro do quadro; no celular, o app em primeiro plano nessa tela) — o que se digita dentro do noVNC vai direto pelo WebSocket e o servidor não vê. Uma aba deixada aberta atrás de outra não segura o teclado. Quem para de usar por 15 minutos devolve o computador ao bot sozinho. A capacidade sai pela API e o app serve em `/novnc/…`; ela vale para aquele servidor de tela até expirar, porque o cliente noVNC busca os próprios scripts e abre o WebSocket em caminhos diferentes.
 
-**O Crocbot (“Croc Pot”) faz isso?** Não do mesmo jeito. O Crocbot ou sobe um **container Docker por agente/sessão**, ou controla **abas do Chrome** (perfil isolado `croc`, ou extensão no Chrome que você já usa). Ele não coloca vários desktops X11 dentro de um único Linux de workspace. O Quibt no Docker é “um PC do escritório, um monitor por bot”. E2B e Box no Quibt são “um computador isolado por bot”, mais perto do sandbox-por-agente do Crocbot do que do modelo de abas.
+**O Crocbot (“Croc Pot”) faz isso?** Não do mesmo jeito. O Crocbot ou sobe um **container Docker por agente/sessão**, ou controla **abas do Chrome** (perfil isolado `croc`, ou extensão no Chrome que você já usa). Ele não coloca vários desktops X11 dentro de um único Linux de workspace. O Quibt no Docker é “um PC do escritório, um monitor por bot”. E2B, Box e Daytona no Quibt são “um computador isolado por bot”, mais perto do sandbox-por-agente do Crocbot do que do modelo de abas.
 
 ## Docker (nesta máquina)
 
@@ -74,7 +74,7 @@ segunda janela (nem morre no "No usable sandbox" do Chromium puro em container).
 - Idle: `SANDBOX_IDLE_MS` (padrão 10 min) pausa o computador.
 - Comando: `SANDBOX_COMMAND_TIMEOUT_MS` (padrão 5 min) mata um `shell` que não termina.
 
-**Limite honesto:** o notebook precisa estar ligado. Várias pessoas no mesmo Docker compartilham o kernel do host — por isso o Cloud recusa Docker, e o self-host público deve ir para E2B, Box ou VPS dedicada. O celular no mesmo Wi-Fi lê o QR em **Ajustes → Celular → Nesta rede**. Fora dessa rede, **Qualquer rede** usa um `https://` que **você** sobe (Cloudflare Tunnel ou Tailscale Funnel apontando para `http://127.0.0.1:5173`). O Quibt não hospeda túnel; o PC continua precisando ficar ligado.
+**Limite honesto:** o notebook precisa estar ligado. Várias pessoas no mesmo Docker compartilham o kernel do host — por isso o Cloud recusa Docker, e o self-host público deve ir para E2B, Box, Daytona ou VPS dedicada. O celular no mesmo Wi-Fi lê o QR em **Ajustes → Celular → Nesta rede**. Fora dessa rede, **Qualquer rede** usa um `https://` que **você** sobe (Cloudflare Tunnel ou Tailscale Funnel apontando para `http://127.0.0.1:5173`). O Quibt não hospeda túnel; o PC continua precisando ficar ligado.
 
 ## VPS / máquina virtual (remote-supervisor)
 
@@ -174,16 +174,38 @@ Conferido em [docs.ascii.dev/box](https://docs.ascii.dev/box/quickstart) e na AP
 
 **Limite honesto:** você paga a Box. Não é a imagem `quibt/computer:local`. Não há delete na API v1 que o adapter usa — `destroy` arquiva.
 
+## Daytona
+
+Conferido na [documentação oficial](https://www.daytona.io/docs/en/typescript-sdk/) e no SDK `@daytona/sdk` 0.207.0 (01/09/2026).
+
+**Para quem:** quer um sandbox isolado por bot com terminal, filesystem, desktop VNC e Computer Use na nuvem.
+
+**O que a pessoa faz**
+
+1. Entra em [app.daytona.io](https://app.daytona.io/) e cria uma chave no dashboard.
+2. Cola `DAYTONA_API_KEY` no onboarding ou em Ajustes → Máquina. Testa. Salva.
+3. Em Daytona self-hosted, define também `DAYTONA_API_URL`; `DAYTONA_TARGET` escolhe um target/região quando a conta usa mais de um. Na Daytona hospedada, ambos são opcionais.
+
+**O que o sistema faz de verdade** (`packages/adapters/src/daytona-sandbox.ts`)
+
+- Usa o SDK atual `@daytona/sdk` e a imagem padrão, porque ela inclui Xvfb, Xfce, x11vnc e noVNC exigidos por `computerUse`.
+- Cria um sandbox privado por bot, resolução 1280×800, sem auto-delete. O idle do Quibt chama `stop`; a próxima mensagem chama `start` no mesmo id e preserva o filesystem. Excluir o bot chama `Daytona.delete`.
+- Comandos usam sessões do SDK, com cwd, ambiente, timeout e stdout/stderr separados.
+- O painel inicia `computerUse`, expõe a porta noVNC 6080 por uma URL assinada de uma hora e revoga o token quando a tela fecha. Teclado, mouse e screenshots usam a API Computer Use.
+- A SDK atual não oferece clipboard: “colar” digita o texto pelo Computer Use. PTY interativo existe na SDK, mas o contrato atual do executor continua orientado a comandos.
+
+**Limite honesto:** você paga a Daytona. A URL de tela expira; o painel pede outra quando necessário. Imagens customizadas só terão desktop se incluírem os pacotes VNC documentados, por isso o provider usa a imagem padrão.
+
 ## O que funciona de ponta a ponta
 
-| Peça                                 | Docker / VPS                                                                | E2B                              | Box                                |
-| ------------------------------------ | --------------------------------------------------------------------------- | -------------------------------- | ---------------------------------- |
-| Ligar o desktop na primeira mensagem | Sim (`quibt-session`)                                                       | Sim (`Sandbox.create` + browser) | Sim (espera `ready`, pede desktop) |
-| Painel noVNC / stream no app         | Sim, URL assinada `/novnc/*`                                                | Sim, stream E2B                  | Sim, URL da Box                    |
-| Assumir controle                     | noVNC + input xdotool                                                       | stream + `press` / mouse         | só noVNC interativo                |
-| Vários bots ao mesmo tempo           | Sim, displays 1…32 no **mesmo** container                                   | Sim, **N sandboxes**             | Sim, **N VMs**                     |
-| Persistência                         | Home no disco do host                                                       | Pause/resume do sandbox E2B      | Archive/resume do disco Box        |
-| Trocar de máquina depois             | Salva em `deployment_settings`; vale no **próximo** boot; o antigo é parado | idem                             | idem                               |
+| Peça                                 | Docker / VPS                                                                | E2B                              | Box                                | Daytona                              |
+| ------------------------------------ | --------------------------------------------------------------------------- | -------------------------------- | ---------------------------------- | ------------------------------------ |
+| Ligar o desktop na primeira mensagem | Sim (`quibt-session`)                                                       | Sim (`Sandbox.create` + browser) | Sim (espera `ready`, pede desktop) | Sim (`create` + `computerUse.start`) |
+| Painel noVNC / stream no app         | Sim, URL assinada `/novnc/*`                                                | Sim, stream E2B                  | Sim, URL da Box                    | Sim, preview assinado da porta 6080  |
+| Assumir controle                     | noVNC + input xdotool                                                       | stream + `press` / mouse         | só noVNC interativo                | noVNC + Computer Use                 |
+| Vários bots ao mesmo tempo           | Sim, displays 1…32 no **mesmo** container                                   | Sim, **N sandboxes**             | Sim, **N VMs**                     | Sim, **N sandboxes**                 |
+| Persistência                         | Home no disco do host                                                       | Pause/resume do sandbox E2B      | Archive/resume do disco Box        | Stop/start do sandbox                |
+| Trocar de máquina depois             | Salva em `deployment_settings`; vale no **próximo** boot; o antigo é parado | idem                             | idem                               | idem                                 |
 
 O roteador (`createRoutingSandboxProvider`) nunca teleporta um desktop ligado para outro provedor. Computador já criado fica na família que o criou.
 

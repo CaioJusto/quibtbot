@@ -5,16 +5,16 @@ This is **Quibt Bot**: you run the product, you bring the model, you pick the ma
 Two separate questions, answered independently: **Onde o Quibt fica ligado?** and **Onde os bots trabalham?**
 
 The first is where the server (API, worker, Postgres) runs: this computer, your VPS, or a Box
-VM. The second is where each bot's own computer runs: Docker, a remote supervisor, E2B, or Box.
+VM. The second is where each bot's own computer runs: Docker, a remote supervisor, E2B, Box, or Daytona.
 See [`docs/architecture.md`](./architecture.md) for the full picture.
 
-Onboarding asks for an OpenRouter key, a local Ollama / OpenAI-compatible URL (`http://127.0.0.1:11434`), **or** a ChatGPT / Copilot / SuperGrok subscription. There is no Quibt token plan. The first owner picks the machine from the catalog (Docker, a remote supervisor / BYO VPS, E2B, or Box). E2B/Box and the remote supervisor accept keys and endpoints in the UI (BYOK), not only in `.env`. The pick is saved in `deployment_settings` and the API and worker route new computers to it; `SANDBOX_PROVIDER` stays the fallback for a deploy that never chose. VPS recipes (Hetzner, DigitalOcean, generic) install the Compose stack on **your** account — Quibt does not resell VMs. Plugins can add an HTTP MCP server without Composio.
+Onboarding asks for an OpenRouter key, a local Ollama / OpenAI-compatible URL (`http://127.0.0.1:11434`), **or** a ChatGPT / Copilot / SuperGrok subscription. There is no Quibt token plan. The first owner picks the machine from the catalog (Docker, a remote supervisor / BYO VPS, E2B, Box, or Daytona). E2B, Box, Daytona, and the remote supervisor accept keys and endpoints in the UI (BYOK), not only in `.env`. The pick is saved in `deployment_settings` and the API and worker route new computers to it; `SANDBOX_PROVIDER` stays the fallback for a deploy that never chose. VPS recipes (Hetzner, DigitalOcean, generic) install the Compose stack on **your** account — Quibt does not resell VMs. Plugins can add an HTTP MCP server without Composio.
 
-The signed-in product is a long-running API, a Graphile Worker, Postgres, and a computer provider (Docker supervisor, E2B, or Box). It is not a static site. The marketing site in `apps/www` can be hosted separately.
+The signed-in product is a long-running API, a Graphile Worker, Postgres, and a computer provider (Docker supervisor, E2B, Box, or Daytona). It is not a static site. The marketing site in `apps/www` can be hosted separately.
 
 ## Local (source checkout)
 
-Same as the README quick start on macOS, Windows, or Linux: `.env` from `.env.example`, Postgres via Compose, `pnpm sandbox:build`, and `pnpm dev`. Desktop: `pnpm desktop` or `pnpm dev:desktop` while that stack is up. For a plain browser, run `pnpm owner:code`, open [http://127.0.0.1:5173](http://127.0.0.1:5173), and enter that one-use installer code. See [desktop.md](./desktop.md). The host OS only runs the client and the stack; the bot computer is always Linux (Docker / E2B / Box).
+Same as the README quick start on macOS, Windows, or Linux: `.env` from `.env.example`, Postgres via Compose, `pnpm sandbox:build`, and `pnpm dev`. Desktop: `pnpm desktop` or `pnpm dev:desktop` while that stack is up. For a plain browser, run `pnpm owner:code`, open [http://127.0.0.1:5173](http://127.0.0.1:5173), and enter that one-use installer code. See [desktop.md](./desktop.md). The host OS only runs the client and the stack; the bot computer is always Linux (Docker / E2B / Box / Daytona).
 
 This computer stays on for a locally-hosted server: the API, worker, and Postgres are the
 `pnpm dev` processes on it, so closing the laptop or letting it sleep pauses the API for every
@@ -183,7 +183,7 @@ Optional:
 ```env
 SIGNUPS_ENABLED=true      # closed by default; true lets people beyond the first owner sign up
 SIGNUP_ALLOWLIST=you@example.com,@company.com
-SANDBOX_PROVIDER=docker   # or e2b / box. Keep fake only for pnpm verify:fast.
+SANDBOX_PROVIDER=docker   # or e2b / box / daytona. Keep fake only for pnpm verify:fast.
 AGENT_RUNTIME=pi          # Keep scripted only for pnpm verify:fast.
 WAKEUP_DRIVER=graphile
 SANDBOX_IDLE_MS=600000    # pause the bot computer after 10 minutes idle
@@ -192,6 +192,9 @@ DATABASE_TRANSACTION_TIMEOUT_MS=30000 # Prisma interactive transaction deadline
 DATABASE_POOL_MAX=16      # Postgres connections per process (API, worker)
 E2B_API_KEY=              # when SANDBOX_PROVIDER=e2b
 BOX_API_KEY=              # when SANDBOX_PROVIDER=box
+DAYTONA_API_KEY=          # when SANDBOX_PROVIDER=daytona
+DAYTONA_API_URL=          # optional: self-hosted/custom Daytona API
+DAYTONA_TARGET=           # optional: Daytona target/region
 ```
 
 The two database values only matter on a busy or large install:
@@ -213,10 +216,11 @@ Do not commit `.env`. Never put `COMPOSIO_API_KEY`, OpenRouter keys, or provider
 
 The catalog in onboarding and **Settings → Máquina** is the picker. After a tap, the app shows a plain-language guide (what to install, where the key lives, how bots share the computer). That copy is `machineGuideFor()` in `@quibt/core`. The long form is [computers.md](./computers.md); the first-run walkthrough is [onboarding.md](./onboarding.md). `SANDBOX_PROVIDER=desktop` is refused because a host process is not an OS sandbox.
 
-- **Docker** is the trusted single-machine implementation: one resource-limited persistent container and home per workspace, plus one X11/noVNC/Chrome session per bot. With `SANDBOX_SCREEN_NETWORK=internal` — what the Compose stack sets — every workspace computer gets a dedicated Docker network separate from Postgres and the application network; without it the computer runs on Docker's default bridge, so set it on any host that also runs the database. Keep the supervisor private. Public or multi-user deployments should use E2B, Box, or a remote supervisor on a dedicated VPS.
+- **Docker** is the trusted single-machine implementation: one resource-limited persistent container and home per workspace, plus one X11/noVNC/Chrome session per bot. With `SANDBOX_SCREEN_NETWORK=internal` — what the Compose stack sets — every workspace computer gets a dedicated Docker network separate from Postgres and the application network; without it the computer runs on Docker's default bridge, so set it on any host that also runs the database. Keep the supervisor private. Public or multi-user deployments should use E2B, Box, Daytona, or a remote supervisor on a dedicated VPS.
 - **Remote supervisor / BYO VPS** — the supported way to use a VPS is to install the whole stack there (catalog recipes: Hetzner, DigitalOcean, generic `curl | bash` / cloud-init). Quibt does not provision or bill the VM. Pointing this deployment at a supervisor that runs on *another* host is opt-in on both sides, and it does not carry the screen — see **Supervisor on another host** below.
 - **E2B** keeps its existing one-bot/one-sandbox behavior. Paste `E2B_API_KEY` in the UI (BYOK) or set it in `.env`. Workspace-wide shared files and multi-display sessions are currently the Docker path; they are not emulated by sharing a browser tab in E2B.
 - **Box** (`SANDBOX_PROVIDER=box`, box.ascii.dev) gives each bot a persistent Ubuntu cloud VM with a virtual desktop, billed per second on **your** Box account. Paste `BOX_API_KEY` in the UI. User boxes are created with `noEnv: true`, so operator environment variables and credentials are never copied into them. Boxes are created without provider auto-stop; the `SANDBOX_IDLE_MS` scheduler stops (archives) idle boxes and they resume with their disk intact on the next message or Take control. Take control happens through the interactive noVNC desktop stream.
+- **Daytona** (`SANDBOX_PROVIDER=daytona`) gives each bot a private sandbox from Daytona's default graphical image. Paste `DAYTONA_API_KEY` in the UI or set it in `.env`; hosted Daytona needs no other setting. `DAYTONA_API_URL` and `DAYTONA_TARGET` are optional for self-hosted/custom control planes and target selection. The panel uses a one-hour signed noVNC preview and Computer Use for input. Quibt stops idle sandboxes, starts the same id on demand, and deletes it when the bot is deleted.
 - **Desktop provider** is disabled. Running the Electron client does not run model commands on the host.
 - **Fake** is only an emulator for verification.
 
@@ -278,7 +282,7 @@ after it the feature works offline. If it fails, the voice note is still sent as
 4. Persist `DATA_DIR` (bot homes) and `ARTIFACTS_DIR` (files exchanged in the chat: screenshots, PDFs,
    spreadsheets, voice notes; defaults to `./data/artifacts`). Both are local filesystems today, so attach a
    volume. Object-storage-backed homes are not wired yet.
-5. Choose computers: **`SANDBOX_PROVIDER=e2b`** with `E2B_API_KEY` or **`SANDBOX_PROVIDER=box`** with `BOX_API_KEY` for a public or multi-user production service. Each bot keeps one sandbox id (`providerRef`) and a graphical desktop with a browser. Take control, sign in, then release — the bot keeps that session. Idle boxes pause after `SANDBOX_IDLE_MS` (default 10 minutes) and resume on the next message or Take control. Docker remains the local and trusted single-machine default.
+5. Choose computers: **`SANDBOX_PROVIDER=e2b`** with `E2B_API_KEY`, **`SANDBOX_PROVIDER=box`** with `BOX_API_KEY`, or **`SANDBOX_PROVIDER=daytona`** with `DAYTONA_API_KEY` for a public or multi-user production service. Each bot keeps one sandbox id (`providerRef`) and a graphical desktop with a browser. Take control, sign in, then release — the bot keeps that session. Idle boxes pause after `SANDBOX_IDLE_MS` (default 10 minutes) and resume on the next message or Take control. Docker remains the local and trusted single-machine default.
 6. A Hetzner CX22 (2 vCPU / 4 GB) is enough for API + worker + Postgres when E2B owns the desktops. 2 GB works for a quiet box; 8 GB is only needed if you also run Docker computers on that same machine.
 7. Set public HTTPS `WEB_ORIGIN` / `BETTER_AUTH_URL` / `API_URL`, secrets, and an OpenRouter (or other Pi) deployment key if you want to skip per-user model keys.
 8. Put the web app behind the same origin as `/api`, `/rpc`, `/files`, and `/hooks` (the bundled Node server already proxies them; an outer reverse proxy may front it). Docker noVNC connections use short-lived signed `/novnc/*` capabilities; do not replace that route with an unrestricted port proxy.

@@ -1,7 +1,7 @@
 export const QUIBT_EDITIONS = ["oss", "cloud"] as const;
 export type QuibtEdition = (typeof QUIBT_EDITIONS)[number];
 
-export const OSS_MACHINES = ["docker", "remote-supervisor", "e2b", "box"] as const;
+export const OSS_MACHINES = ["docker", "remote-supervisor", "e2b", "box", "daytona"] as const;
 export type OssMachine = (typeof OSS_MACHINES)[number];
 
 export function resolveEdition(input: {
@@ -29,9 +29,9 @@ export function assertEditionConfig(edition: QuibtEdition, billingEnabled: boole
  * holds the host Docker socket and every workspace shares that kernel, which the docs call a
  * "trusted single machine" setup. Cloud is the opposite of that by definition.
  */
-const CLOUD_MACHINES = ["e2b", "box"] as const;
+const CLOUD_MACHINES = ["e2b", "box", "daytona"] as const;
 /** Emulators never talk to a real tenant, so they stay legal outside production. */
-const EMULATED_MACHINES = ["e2b-emulator", "box-emulator", "fake"] as const;
+const EMULATED_MACHINES = ["e2b-emulator", "box-emulator", "daytona-emulator", "fake"] as const;
 
 /** Loud opt-out for someone who hosts "cloud" only for themselves on one box. */
 export function allowsSharedDocker(source: {
@@ -94,12 +94,14 @@ export function parseOssMachine(value: string | undefined): OssMachine | null {
 export function availableOssMachines(input: {
   e2bApiKey?: string;
   boxApiKey?: string;
+  daytonaApiKey?: string;
   remoteSupervisorUrl?: string;
 }): OssMachine[] {
   const machines: OssMachine[] = ["docker"];
   if (input.remoteSupervisorUrl) machines.push("remote-supervisor");
   if (input.e2bApiKey) machines.push("e2b");
   if (input.boxApiKey) machines.push("box");
+  if (input.daytonaApiKey) machines.push("daytona");
   return machines;
 }
 
@@ -108,6 +110,7 @@ export function machineFamily(kind: string | undefined | null): OssMachine | nul
   const raw = (kind ?? "").trim().toLowerCase();
   if (raw === "e2b-emulator") return "e2b";
   if (raw === "box-emulator") return "box";
+  if (raw === "daytona-emulator") return "daytona";
   return parseOssMachine(raw);
 }
 
@@ -153,5 +156,9 @@ export const OSS_MACHINE_COPY: Record<OssMachine, { title: string; body: string 
   box: {
     title: "Box",
     body: "VM Ubuntu persistente na Box. Crie a conta, cole a chave. Cada bot tem a própria máquina — a Quibt não cobra a VM.",
+  },
+  daytona: {
+    title: "Daytona",
+    body: "Sandbox isolado na Daytona com terminal e desktop VNC. Cole a chave; cada bot ganha o próprio computador.",
   },
 };

@@ -40,8 +40,16 @@ export type EffectStatus = z.infer<typeof EffectStatus>;
 export const MemoryScope = z.enum(["bot", "user"]);
 export type MemoryScope = z.infer<typeof MemoryScope>;
 
-export const SandboxKind = z.enum(["docker", "remote-supervisor", "e2b", "box", "desktop", "fake"]);
+export const SandboxKind = z.enum([
+  "docker",
+  "remote-supervisor",
+  "e2b",
+  "box",
+  "daytona",
+  "desktop",
+  "fake",
+]);
 export type SandboxKind = z.infer<typeof SandboxKind>;
 
-export const OssMachineKind = z.enum(["docker", "remote-supervisor", "e2b", "box"]);
+export const OssMachineKind = z.enum(["docker", "remote-supervisor", "e2b", "box", "daytona"]);
 export type OssMachineKind = z.infer<typeof OssMachineKind>;

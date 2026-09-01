@@ -86,6 +86,18 @@ export const MACHINE_CATALOG: MachineCatalogDefinition[] = [
     searchable: ["box", "ascii", "vm", "ubuntu", "nuvem"],
   },
   {
+    kind: "daytona",
+    family: "daytona",
+    title: OSS_MACHINE_COPY.daytona.title,
+    body: OSS_MACHINE_COPY.daytona.body,
+    category: "cloud",
+    needsKey: true,
+    needsEndpoint: false,
+    needsDocker: false,
+    keyLabel: "DAYTONA_API_KEY",
+    searchable: ["daytona", "sandbox", "vnc", "computer use", "nuvem", "cloud"],
+  },
+  {
     kind: "vps-hetzner",
     family: "remote-supervisor",
     title: "Hetzner (receita)",
@@ -178,6 +190,7 @@ export function searchMachineCatalog(query: string): MachineCatalogDefinition[] 
 export interface CatalogReadiness {
   e2bApiKey?: string;
   boxApiKey?: string;
+  daytonaApiKey?: string;
   remoteSupervisorUrl?: string;
   remoteSupervisorToken?: string;
   dockerReady?: boolean;
@@ -191,6 +204,7 @@ export function machineIsReady(kind: string, readiness: CatalogReadiness): boole
   }
   if (boot === "e2b") return Boolean(readiness.e2bApiKey);
   if (boot === "box") return Boolean(readiness.boxApiKey);
+  if (boot === "daytona") return Boolean(readiness.daytonaApiKey);
   return false;
 }
 

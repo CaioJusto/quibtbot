@@ -57,7 +57,7 @@ Same durable-process rules as [self-host.md](./self-host.md) (API + worker +
 Postgres, not Vercel serverless). Differences:
 
 - `QUIBT_EDITION=cloud` and `BILLING_ENABLED=true` with every Stripe setting.
-- Set `SANDBOX_PROVIDER` yourself: Cloud boots only on `e2b` or `box`. Docker is
+- Set `SANDBOX_PROVIDER` yourself: Cloud boots only on `e2b`, `box`, or `daytona`. Docker is
   refused because every workspace would share one host kernel and one Docker
   socket; a single-tenant "cloud" can opt out loudly with
   `QUIBT_ALLOW_SHARED_DOCKER=true`. The API and the worker both check this at

@@ -2,7 +2,7 @@ import { controlLeaseLive } from "@quibt/core";
 import type { PrismaClient } from "@quibt/db";
 
 /**
- * Docker and remote-supervisor share one machine per workspace. E2B and Box
+ * Docker and remote-supervisor share one machine per workspace. E2B, Box, and Daytona
  * use one sandbox/VM per bot. Callers must persist `providerRef` on `Computer`
  * for workspace-scoped kinds and only stop/destroy the VM when no sibling
  * session still needs it.

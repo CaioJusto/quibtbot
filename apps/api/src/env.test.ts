@@ -47,6 +47,19 @@ describe("loadEnv", () => {
     expect(env.wakeupDriver).toBe("memory");
   });
 
+  it("loads Daytona credentials, client settings, and catalog availability", () => {
+    const env = loadEnv({
+      ...base,
+      DAYTONA_API_KEY: "daytona_test_key",
+      DAYTONA_API_URL: "https://daytona.example.test",
+      DAYTONA_TARGET: "eu",
+    });
+    expect(env.daytonaApiKey).toBe("daytona_test_key");
+    expect(env.daytonaApiUrl).toBe("https://daytona.example.test");
+    expect(env.daytonaTarget).toBe("eu");
+    expect(env.availableMachines).toEqual(["docker", "daytona"]);
+  });
+
   it("throws when production omits secrets", () => {
     expect(() =>
       loadEnv({
