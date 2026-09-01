@@ -1,4 +1,4 @@
-import type { Bot, MemoryDocument, Routine } from "@quibt/contracts";
+import type { Bot, BotMcpServer, MemoryDocument, Routine } from "@quibt/contracts";
 import {
   formatCron,
   formatMemoryUsageFromRaw,
@@ -307,6 +307,8 @@ export function AgentSettings({
           só aquele comando, exatamente como está escrito, daí em diante.
         </p>
 
+        <BotMcpSettings botId={bot.id} />
+
         <div className="mt-8 flex flex-col items-start gap-3">
           <button
             type="button"
@@ -422,6 +424,235 @@ export function AgentSettings({
         </div>
       </details>
     </div>
+  );
+}
+
+function BotMcpSettings({ botId }: { botId: string }) {
+  const [servers, setServers] = useState<BotMcpServer[]>([]);
+  const [name, setName] = useState("");
+  const [transport, setTransport] = useState<"stdio" | "http">("stdio");
+  const [command, setCommand] = useState("");
+  const [argsText, setArgsText] = useState("");
+  const [url, setUrl] = useState("");
+  const [envText, setEnvText] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void rpc.botMcp
+      .list({ botId })
+      .then((rows) => {
+        if (!cancelled) setServers(rows);
+      })
+      .catch((reason: unknown) => {
+        if (!cancelled) {
+          setError(
+            reason instanceof Error ? reason.message : "Não foi possível listar os servidores",
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [botId]);
+
+  function parseEnvironment(): Record<string, string> {
+    const env: Record<string, string> = {};
+    for (const line of envText.split("\n")) {
+      if (!line.trim()) continue;
+      const separator = line.indexOf("=");
+      if (separator < 1) throw new Error("Use uma variável por linha no formato CHAVE=valor");
+      const key = line.slice(0, separator).trim();
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+        throw new Error(`Nome de variável inválido: ${key}`);
+      }
+      env[key] = line.slice(separator + 1);
+    }
+    return env;
+  }
+
+  async function addServer() {
+    setError(null);
+    const cleanName = name.trim();
+    if (!cleanName) {
+      setError("Informe um nome para o servidor");
+      return;
+    }
+    if (transport === "stdio" && (!command.trim() || /\s/.test(command.trim()))) {
+      setError("Comando é só o executável, sem espaços; coloque flags em argumentos");
+      return;
+    }
+    if (transport === "http" && !url.trim().startsWith("https://")) {
+      setError("A URL precisa usar HTTPS; HTTP sem criptografia é recusado");
+      return;
+    }
+    let env: Record<string, string>;
+    try {
+      env = parseEnvironment();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Variáveis de ambiente inválidas");
+      return;
+    }
+    setAdding(true);
+    try {
+      const added =
+        transport === "stdio"
+          ? await rpc.botMcp.add({
+              botId,
+              name: cleanName,
+              command: command.trim(),
+              args: argsText.split("\n").filter((arg) => arg.length > 0),
+              env,
+            })
+          : await rpc.botMcp.add({
+              botId,
+              name: cleanName,
+              args: [],
+              url: url.trim(),
+              env,
+            });
+      setServers((current) => [...current, added]);
+      setName("");
+      setCommand("");
+      setArgsText("");
+      setUrl("");
+      setEnvText("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível adicionar o servidor");
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  async function removeServer(id: string) {
+    setRemoving(id);
+    setError(null);
+    try {
+      await rpc.botMcp.remove({ botId, id });
+      setServers((current) => current.filter((server) => server.id !== id));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível remover o servidor");
+    } finally {
+      setRemoving(null);
+    }
+  }
+
+  return (
+    <section>
+      <SectionTitle>Servidores MCP</SectionTitle>
+      <p className="mb-3 px-1 text-[13px] leading-[1.45] text-[var(--qb-muted-2)]">
+        Este bot pode chamar ferramentas MCP extras que você configurar por comando (stdio) ou URL
+        HTTPS. HTTP sem criptografia é recusado. Variáveis de ambiente são usadas somente ao
+        adicionar e não voltam na lista.
+      </p>
+
+      {servers.length ? (
+        <div className={`${CARD} mb-3`}>
+          {servers.map((server, index) => (
+            <div
+              key={server.id}
+              className="flex items-start gap-3 px-3.5 py-3"
+              style={index ? { borderTop: "1px solid var(--qb-hairline)" } : undefined}
+            >
+              <span className="min-w-0 flex-1">
+                <span className="block text-[14.5px] font-medium text-[var(--qb-ink)]">
+                  {server.name}
+                  {!server.enabled ? " · desativado" : ""}
+                </span>
+                <span className="mt-0.5 block break-all text-[12px] leading-[1.4] text-[var(--qb-muted-2)]">
+                  {server.transport === "stdio"
+                    ? [server.command, ...server.args].filter(Boolean).join(" ")
+                    : server.url}
+                </span>
+                {server.disabledReason ? (
+                  <span className="mt-1 block text-[12px] text-[var(--qb-danger)]">
+                    {server.disabledReason}
+                  </span>
+                ) : null}
+              </span>
+              <button
+                type="button"
+                disabled={removing === server.id}
+                onClick={() => void removeServer(server.id)}
+                className="text-[13px] text-[var(--qb-danger)] disabled:opacity-40"
+              >
+                Remover
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      <div className={`${CARD} space-y-3 px-3.5 py-3`}>
+        <label className="qb-dash__field">
+          Nome
+          <input value={name} onChange={(event) => setName(event.target.value)} />
+        </label>
+        <label className="qb-dash__field">
+          Tipo
+          <select
+            value={transport}
+            onChange={(event) => setTransport(event.target.value === "http" ? "http" : "stdio")}
+          >
+            <option value="stdio">Comando</option>
+            <option value="http">HTTPS</option>
+          </select>
+        </label>
+        {transport === "stdio" ? (
+          <>
+            <label className="qb-dash__field">
+              Comando
+              <input
+                value={command}
+                placeholder="npx"
+                onChange={(event) => setCommand(event.target.value)}
+              />
+            </label>
+            <label className="qb-dash__field">
+              Argumentos (um por linha)
+              <textarea
+                rows={3}
+                value={argsText}
+                placeholder={"-y\nmeu-servidor-mcp"}
+                onChange={(event) => setArgsText(event.target.value)}
+              />
+            </label>
+            <p className="text-[12px] text-[var(--qb-muted-2)]">
+              O comando não pode ter espaços; coloque cada flag ou argumento em uma linha.
+            </p>
+          </>
+        ) : (
+          <label className="qb-dash__field">
+            URL HTTPS
+            <input
+              value={url}
+              placeholder="https://exemplo.com/mcp"
+              onChange={(event) => setUrl(event.target.value)}
+            />
+          </label>
+        )}
+        <label className="qb-dash__field">
+          Variáveis de ambiente (opcional, CHAVE=valor)
+          <textarea
+            rows={3}
+            value={envText}
+            placeholder="TOKEN=…"
+            onChange={(event) => setEnvText(event.target.value)}
+          />
+        </label>
+        <button
+          type="button"
+          disabled={adding}
+          onClick={() => void addServer()}
+          className="rounded-full bg-[var(--qb-ink-strong)] px-4 py-2 text-[14px] font-semibold text-[var(--qb-canvas)] disabled:opacity-40"
+        >
+          {adding ? "Adicionando…" : "Adicionar"}
+        </button>
+        {error ? <p className="text-[12.5px] text-[var(--qb-danger)]">{error}</p> : null}
+      </div>
+    </section>
   );
 }
 

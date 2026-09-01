@@ -95,8 +95,10 @@ import {
 } from "@quibt/core";
 import {
   activeConversationForBot,
+  addBotMcpServer,
   appendEvent,
   appendThreadMessage,
+  BotMcpServerError,
   CapabilityInstallError,
   cancelThreadRuns,
   capabilityDigest,
@@ -113,9 +115,11 @@ import {
   installCapability,
   isImage,
   isRunNonceConflict,
+  listBotMcpServers,
   mapConversation,
   type Pool,
   type PrismaClient,
+  removeBotMcpServer,
   requireMembership,
   type WebhookReceiveResult,
   type WebhookService,
@@ -709,6 +713,48 @@ export function createRouter(deps: RouterDeps) {
             signal: new AbortController().signal,
           },
         );
+        return { ok: true as const };
+      }),
+    },
+    botMcp: {
+      list: authed.botMcp.list.handler(async ({ context, input }) => {
+        await repos.getBot(context.actor, input.botId);
+        return listBotMcpServers(deps.prisma, {
+          workspaceId: context.actor.workspaceId,
+          botId: input.botId,
+        });
+      }),
+      add: authed.botMcp.add.handler(async ({ context, input }) => {
+        await repos.getBot(context.actor, input.botId);
+        if (input.url) {
+          await validateMcpEndpoint(input.url).catch((error: unknown) => {
+            throw new ORPCError("BAD_REQUEST", {
+              message: error instanceof Error ? error.message : "Invalid MCP endpoint",
+            });
+          });
+        }
+        return addBotMcpServer(deps.prisma, {
+          workspaceId: context.actor.workspaceId,
+          botId: input.botId,
+          name: input.name,
+          command: input.command,
+          args: input.args,
+          url: input.url,
+          env: input.env,
+        }).catch((error: unknown) => {
+          if (error instanceof BotMcpServerError) {
+            throw new ORPCError("BAD_REQUEST", { message: error.message });
+          }
+          throw error;
+        });
+      }),
+      remove: authed.botMcp.remove.handler(async ({ context, input }) => {
+        await repos.getBot(context.actor, input.botId);
+        await removeBotMcpServer(deps.prisma, {
+          workspaceId: context.actor.workspaceId,
+          botId: input.botId,
+          id: input.id,
+        });
         return { ok: true as const };
       }),
     },
