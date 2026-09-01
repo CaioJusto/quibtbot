@@ -198,6 +198,31 @@ describe("dashboard copies the landing product demo", () => {
     expect(findSection).not.toContain("rpc.");
   });
 
+  it("wires the account ChatGPT login into speak buttons and auto-speak", () => {
+    // O login é da conta (rpc.voice.status); o botão de ouvir só nasce com voz ligada
+    // no bot, e o auto-falar lê de um ref para valer nos streams 1:1 e de grupo.
+    expect(shell).toContain("rpc.voice");
+    expect(shell).toContain("voiceReady");
+    expect(shell).toContain("autoSpeakBotIdsRef");
+    expect(shell).toContain("speakBot?.voiceEnabled");
+    expect(shell).toContain("speechRef.current?.stop()");
+    expect(shell).toContain('event.payload.role === "bot"');
+    expect(shell).toContain("event.payload.authorBotId === botId");
+    expect(shell).toContain("botId: authorBotId");
+  });
+
+  it("gives the group header a channel topic and the inbox a last-message preview", () => {
+    expect(shell).toContain("function groupTopic(");
+    expect(shell).toContain("{groupTopic(activeGroup)}");
+    expect(inbox).toContain("row.group.preview");
+  });
+
+  it("offers the Markdown team import next to bot and group creation", () => {
+    expect(shell).toContain('panel === "import-team"');
+    expect(shell).toContain("TeamImportPanel");
+    expect(inbox).toContain("Importar equipe (.md)");
+  });
+
   it("clears inbox search after creating a group and lands on it", () => {
     expect(shell).toContain("async function createGroup");
     expect(shell).toContain('setQuery("")');

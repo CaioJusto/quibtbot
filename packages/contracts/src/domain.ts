@@ -25,6 +25,9 @@ export const BotSchema = z.object({
   alwaysAllow: z.array(z.string()).default([]),
   chiefOfStaff: z.boolean().default(false),
   hidden: z.boolean().default(false),
+  voiceEnabled: z.boolean().default(false),
+  voiceAutoSpeak: z.boolean().default(false),
+  voiceId: z.string().default(""),
   activeConversationId: Id.nullable().default(null),
   threadId: Id,
   preview: z.string(),
@@ -60,10 +63,22 @@ export const BotGroupSchema = z.object({
   instructions: z.string(),
   threadId: Id,
   members: z.array(BotGroupMemberSchema),
+  /** Último recado do fio do grupo, para a lista mostrar atividade e não só o elenco. */
+  preview: z.string().default(""),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
 export type BotGroup = z.infer<typeof BotGroupSchema>;
+
+/**
+ * Estado da voz (TTS) da conta. A voz reutiliza o login ChatGPT/Codex já salvo para
+ * modelos; nenhum segredo ou caminho alternativo de credencial chega ao cliente.
+ */
+export const VoiceStatusSchema = z.object({
+  configured: z.boolean(),
+  provider: z.literal("openai-codex").nullable(),
+});
+export type VoiceStatus = z.infer<typeof VoiceStatusSchema>;
 
 export const CreateBotGroupInput = z.object({
   name: z.string().min(1).max(80),
@@ -102,6 +117,9 @@ export const UpdateBotInput = z.object({
   alwaysAllow: z.array(z.string()).optional(),
   chiefOfStaff: z.boolean().optional(),
   hidden: z.boolean().optional(),
+  voiceEnabled: z.boolean().optional(),
+  voiceAutoSpeak: z.boolean().optional(),
+  voiceId: z.string().max(120).optional(),
 });
 
 function hasExactlyOneRoutineOwner(input: { botId?: string | null; groupId?: string | null }) {

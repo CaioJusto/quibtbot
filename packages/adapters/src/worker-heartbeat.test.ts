@@ -121,6 +121,9 @@ function store(input: { heartbeats?: HeartbeatRow[]; runs?: RunRow[] } = {}) {
         activeConversationId: null,
       })),
     },
+    botGroup: {
+      updateMany: vi.fn(async () => ({ count: 0 })),
+    },
     conversation: {
       findUnique: vi.fn(async () => null),
       update: vi.fn(async () => ({})),

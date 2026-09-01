@@ -53,6 +53,7 @@ export { screenshotCommand, screenshotPath } from "./screenshot.js";
 export * from "./scripted-runtime.js";
 export * from "./secrets.js";
 export * from "./session-lifecycle.js";
+export * from "./tts.js";
 export * from "./wakeup.js";
 export * from "./web-fetch.js";
 export * from "./worker-heartbeat.js";

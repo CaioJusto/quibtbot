@@ -10,6 +10,7 @@ import type {
 import {
   addFolderGrant,
   apiBootComputer,
+  CHATGPT_OAUTH_PROVIDER,
   type ComposioConnector,
   ComposioKeyMissingError,
   composioAbortSignal,
@@ -583,6 +584,9 @@ export function createRouter(deps: RouterDeps) {
         return { ok: true as const };
       }),
     },
+    voice: {
+      status: authed.voice.status.handler(async ({ context }) => voiceStatus(deps, context.actor)),
+    },
     bots: {
       list: authed.bots.list.handler(async ({ context }) => repos.listBots(context.actor)),
       get: authed.bots.get.handler(async ({ context, input }) =>
@@ -624,6 +628,9 @@ export function createRouter(deps: RouterDeps) {
             alwaysAllow: input.alwaysAllow,
             chiefOfStaff: input.chiefOfStaff,
             hidden: input.hidden,
+            voiceEnabled: input.voiceEnabled,
+            voiceAutoSpeak: input.voiceAutoSpeak,
+            voiceId: input.voiceId?.trim(),
           },
         });
         const bots = await repos.listBots(context.actor);
@@ -2767,6 +2774,25 @@ export async function deleteAccountData(deps: RouterDeps, actor: Actor): Promise
 }
 
 export { capabilityDigest };
+
+/** Voz fica pronta pelo mesmo login ChatGPT/Codex usado pelos modelos. */
+async function voiceStatus(deps: RouterDeps, actor: Actor) {
+  if (deps.env.agentRuntime === "scripted") {
+    return { configured: true, provider: CHATGPT_OAUTH_PROVIDER } as const;
+  }
+  const row = await deps.prisma.userModelCredential.findFirst({
+    where: {
+      userId: actor.userId,
+      workspaceId: actor.workspaceId,
+      provider: CHATGPT_OAUTH_PROVIDER,
+    },
+    orderBy: { updatedAt: "desc" },
+  });
+  return {
+    configured: Boolean(row),
+    provider: row ? CHATGPT_OAUTH_PROVIDER : null,
+  } as const;
+}
 
 async function persistModelCredential(
   deps: RouterDeps,
