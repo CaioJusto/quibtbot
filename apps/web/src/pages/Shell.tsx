@@ -542,6 +542,46 @@ export function ShellPage() {
   // current route from this ref so a deleted or switched bot never acts on old params.
   const paramsRef = useRef({ botId, groupId });
   paramsRef.current = { botId, groupId };
+  const lastTrayRoutine = useRef<{ label: string; at: string } | null>(null);
+
+  useEffect(() => {
+    const tray = desktopBridge()?.tray;
+    if (!tray) return;
+
+    const ownerRoutines = activeGroup ? groupRoutines : active ? routines : [];
+    const latestRoutine = ownerRoutines.reduce<Routine | null>((latest, routine) => {
+      if (!routine.lastRunAt) return latest;
+      if (!latest?.lastRunAt) return routine;
+      return Date.parse(routine.lastRunAt) > Date.parse(latest.lastRunAt) ? routine : latest;
+    }, null);
+    if (
+      latestRoutine?.lastRunAt &&
+      (!lastTrayRoutine.current ||
+        Date.parse(latestRoutine.lastRunAt) > Date.parse(lastTrayRoutine.current.at))
+    ) {
+      lastTrayRoutine.current = { label: latestRoutine.name, at: latestRoutine.lastRunAt };
+    }
+    void tray
+      .setStatus({
+        pendingApprovalCount: bots.filter((bot) => bot.status === "waiting_input").length,
+        lastRoutineLabel: lastTrayRoutine.current?.label ?? null,
+        lastRoutineAt: lastTrayRoutine.current?.at ?? null,
+      })
+      .catch(() => undefined);
+  }, [active, activeGroup, bots, groupRoutines, routines]);
+
+  useEffect(() => {
+    const tray = desktopBridge()?.tray;
+    return () => {
+      void tray
+        ?.setStatus({
+          pendingApprovalCount: 0,
+          lastRoutineLabel: null,
+          lastRoutineAt: null,
+        })
+        .catch(() => undefined);
+    };
+  }, []);
 
   const readAccountId = session.data?.user.id ?? session.data?.user.email ?? "";
   if (readState.current.accountId !== readAccountId) {
@@ -750,9 +790,8 @@ export function ShellPage() {
     const refreshWorkerAlive = workerAliveRefresher(() => rpc.me(), setWorkerAlive);
     const stop = startPolling(
       async () => {
-        if (document.visibilityState === "hidden") return;
         await refreshBots();
-        await refreshWorkerAlive();
+        if (document.visibilityState === "visible") await refreshWorkerAlive();
       },
       4000,
       { immediate: true },
@@ -828,6 +867,9 @@ export function ShellPage() {
           }
           if (threadEventNeedsSnapshotRefresh(event.type)) {
             void reload();
+          }
+          if (event.type === "run.started") {
+            void refreshGroupRoutines(groupId).catch(() => undefined);
           }
         }
       },

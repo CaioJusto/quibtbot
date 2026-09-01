@@ -32,6 +32,12 @@ release time from the `signing-status-*.json` files attached to the tag — see 
 
 Until a release is published, build the artifacts locally (below) and open the installer from `apps/desktop/out/`.
 
+## Tray / menu bar
+
+Closing the Quibt Bot window hides it in the system tray (the menu bar on macOS) instead of
+quitting. The icon shows waiting tool approvals and the last routine run; choose **Abrir Quibt
+Bot** to reveal the window and **Sair** to quit the app.
+
 ## Run from source
 
 ```bash
