@@ -2,6 +2,12 @@ export type RemoteAccess =
   | { kind: "off"; reason: "missing" | "logged-out" | "not-serving" }
   | { kind: "on"; url: string };
 
+export interface DesktopTrayStatus {
+  pendingApprovalCount: number;
+  lastRoutineLabel: string | null;
+  lastRoutineAt: string | null;
+}
+
 export interface QuibtDesktop {
   platform: string;
   reloadApp?: () => Promise<void>;
@@ -17,6 +23,9 @@ export interface QuibtDesktop {
     minimize: () => Promise<void>;
     toggleMaximize: () => Promise<void>;
     state: () => Promise<{ minimized: boolean; maximized: boolean; fullScreen: boolean }>;
+  };
+  tray?: {
+    setStatus: (status: DesktopTrayStatus) => Promise<void>;
   };
 }
 

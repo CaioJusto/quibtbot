@@ -26,7 +26,7 @@ import {
   runPair,
   runUninstall,
 } from "@quibt/installer";
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, Tray } from "electron";
 import { appBundlePath } from "./app-bundle.js";
 import { firstDeepLinkFromArgv, webUrlFromDeepLink } from "./deep-link.js";
 import { isMainFrameLoadFailure, parseDidFailLoad } from "./did-fail-load.js";
@@ -93,6 +93,15 @@ import {
   toComposeMode,
 } from "./stack.js";
 import { disableRemoteAccess, enableRemoteAccess, readRemoteAccess } from "./tailscale.js";
+import {
+  IDLE_TRAY_PRESENCE,
+  normalizeTrayPresence,
+  shouldHideToTrayOnClose,
+  type TrayPresence,
+  trayMenuTemplate,
+  trayTitle,
+  trayTooltip,
+} from "./tray.js";
 import { TrustedOriginPolicy } from "./trusted-origins.js";
 import { shouldLoadOfflinePage, windowRevealActions } from "./window-behavior.js";
 import { waitForWebContentsLoad } from "./window-navigation.js";
@@ -179,11 +188,18 @@ let autoStartPending = false;
 let pendingOwnerEnrollment: PendingOwnerEnrollment | null = null;
 let pendingLocalOwnerInvite: { apiBase: string; code: string; expiresAt: number } | null = null;
 let ownerEnrollmentPreparation: Promise<void> | null = null;
+let tray: Tray | null = null;
+let trayPresence: TrayPresence = { ...IDLE_TRAY_PRESENCE };
+let isQuitting = false;
 const localInstallGate = new InstallConcurrencyGate<StackStartResult>();
 const remoteInstallGate = new InstallConcurrencyGate<StackStartResult>();
 const localEmitContexts = new InstallEmitContextRegistry();
 const remoteEmitContexts = new InstallEmitContextRegistry();
 const sshInspectionStore = new SshInspectionStore();
+
+app.on("before-quit", () => {
+  isQuitting = true;
+});
 
 function parseSshPort(raw: unknown): number | { error: string } {
   const port = typeof raw === "number" && Number.isFinite(raw) ? raw : 22;
@@ -544,6 +560,16 @@ function revealWindow(win: BrowserWindow) {
   }
 }
 
+function revealPrimaryWindow(): BrowserWindow {
+  let win = BrowserWindow.getAllWindows().find((candidate) => !candidate.isDestroyed());
+  if (!win) {
+    win = createWindow();
+    flushPendingDeepLink();
+  }
+  revealWindow(win);
+  return win;
+}
+
 function grantsFile() {
   return path.join(app.getPath("userData"), "folder-grants.json");
 }
@@ -819,10 +845,54 @@ function createWindow() {
       if (showOffline) void navigateToSetup(win);
     },
   );
+  win.on("close", (event) => {
+    if (!shouldHideToTrayOnClose({ isQuitting })) return;
+    event.preventDefault();
+    win.hide();
+  });
   void openInitialPage(win).catch(() => {
     startupRecoveryMessage = LOCAL_UNAVAILABLE_MESSAGE;
   });
   return win;
+}
+
+function trayIconPath(): string {
+  const candidates = [
+    path.join(import.meta.dirname, "quibt-icon.png"),
+    path.join(app.getAppPath(), "assets", "icon.png"),
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0]!;
+}
+
+function quitFromTray(): void {
+  isQuitting = true;
+  app.quit();
+}
+
+function updateTrayPresence(next: TrayPresence): void {
+  trayPresence = next;
+  if (!tray || tray.isDestroyed()) return;
+
+  tray.setToolTip(trayTooltip(next));
+  if (process.platform === "darwin") tray.setTitle(trayTitle(next));
+  tray.setContextMenu(
+    Menu.buildFromTemplate(
+      trayMenuTemplate(next).map((item) => ({
+        label: item.label,
+        enabled: item.enabled,
+        ...(item.id === "open" ? { click: () => revealPrimaryWindow() } : {}),
+        ...(item.id === "quit" ? { click: quitFromTray } : {}),
+      })),
+    ),
+  );
+}
+
+function createTray(): Tray {
+  const icon = nativeImage.createFromPath(trayIconPath());
+  tray = new Tray(icon);
+  tray.on("click", () => revealPrimaryWindow());
+  updateTrayPresence(trayPresence);
+  return tray;
 }
 
 async function openInitialPage(win: BrowserWindow) {
@@ -1136,6 +1206,10 @@ if (gotLock) {
     const icon = developmentIcon();
     if (process.platform === "darwin" && icon) app.dock?.setIcon(icon);
     if (process.platform === "darwin") applicationMenu();
+    ipcMain.handle("desktop.tray.setStatus", (event, raw: unknown) => {
+      assertTrustedRenderer(event);
+      updateTrayPresence(normalizeTrayPresence(raw));
+    });
     ipcMain.handle("desktop.platform", (event) => {
       assertTrustedRenderer(event);
       return process.platform;
@@ -1562,13 +1636,11 @@ if (gotLock) {
       }
       return true;
     });
+    createTray();
     createWindow();
     flushPendingDeepLink();
     app.on("activate", () => {
-      if (BrowserWindow.getAllWindows().length === 0) {
-        createWindow();
-        flushPendingDeepLink();
-      }
+      revealPrimaryWindow();
     });
   });
 
@@ -1580,11 +1652,10 @@ if (gotLock) {
   app.on("second-instance", (_event, argv) => {
     const raw = firstDeepLinkFromArgv(argv);
     if (raw) openDeepLink(raw);
-    const win = BrowserWindow.getAllWindows()[0];
-    if (win) revealWindow(win);
+    revealPrimaryWindow();
   });
 }
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+  if ((!tray || tray.isDestroyed()) && process.platform !== "darwin") app.quit();
 });

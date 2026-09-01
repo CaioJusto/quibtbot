@@ -54,6 +54,8 @@ product.
 
 The desktop app wraps the same UI the browser shows. The API, worker, and bot computer still run on
 **your** machine — the app is a window, not a service in someone else's cloud.
+Closing that window keeps Quibt running in the system tray (the menu bar on macOS); see
+[`docs/desktop.md`](docs/desktop.md#tray--menu-bar).
 
 | Platform | Installer | One sentence |
 | --- | --- | --- |

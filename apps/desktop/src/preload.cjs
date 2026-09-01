@@ -41,6 +41,9 @@ const bridge = {
     toggleMaximize: () => ipcRenderer.invoke("desktop.window.toggleMaximize"),
     state: () => ipcRenderer.invoke("desktop.window.state"),
   },
+  tray: {
+    setStatus: (status) => ipcRenderer.invoke("desktop.tray.setStatus", status),
+  },
 };
 
 contextBridge.exposeInMainWorld("quibtDesktop", bridge);
