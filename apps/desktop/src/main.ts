@@ -26,7 +26,8 @@ import {
   runPair,
   runUninstall,
 } from "@quibt/installer";
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, Tray } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, shell, Tray } from "electron";
+import { BotBrowserHost } from "./bot-browser-host.js";
 import { appBundlePath } from "./app-bundle.js";
 import { firstDeepLinkFromArgv, webUrlFromDeepLink } from "./deep-link.js";
 import { isMainFrameLoadFailure, parseDidFailLoad } from "./did-fail-load.js";
@@ -191,6 +192,12 @@ let ownerEnrollmentPreparation: Promise<void> | null = null;
 let tray: Tray | null = null;
 let trayPresence: TrayPresence = { ...IDLE_TRAY_PRESENCE };
 let isQuitting = false;
+const botBrowserHost = new BotBrowserHost((payload) => {
+  if (!Notification.isSupported()) return;
+  const notification = new Notification({ title: payload.title, body: payload.body });
+  notification.on("click", () => revealPrimaryWindow());
+  notification.show();
+});
 const localInstallGate = new InstallConcurrencyGate<StackStartResult>();
 const remoteInstallGate = new InstallConcurrencyGate<StackStartResult>();
 const localEmitContexts = new InstallEmitContextRegistry();
@@ -1209,6 +1216,46 @@ if (gotLock) {
     ipcMain.handle("desktop.tray.setStatus", (event, raw: unknown) => {
       assertTrustedRenderer(event);
       updateTrayPresence(normalizeTrayPresence(raw));
+    });
+    ipcMain.handle("desktop.botBrowser.attach", (event, raw: unknown) => {
+      const win = windowFrom(event);
+      if (!win) return { error: "Janela do app não encontrada." };
+      return botBrowserHost.attach(win, raw);
+    });
+    ipcMain.handle("desktop.botBrowser.hide", (event, raw: unknown) => {
+      const win = windowFrom(event);
+      if (!win) return { ok: true as const };
+      return botBrowserHost.hide(win, raw);
+    });
+    ipcMain.handle("desktop.botBrowser.setBounds", (event, raw: unknown) => {
+      const win = windowFrom(event);
+      if (!win) return { error: "Janela do app não encontrada." };
+      return botBrowserHost.setBounds(win, raw);
+    });
+    ipcMain.handle("desktop.botBrowser.loadUrl", (event, raw: unknown) => {
+      const win = windowFrom(event);
+      if (!win) return { error: "Janela do app não encontrada." };
+      return botBrowserHost.loadUrl(win, raw);
+    });
+    ipcMain.handle("desktop.botBrowser.go", (event, raw: unknown) => {
+      const win = windowFrom(event);
+      if (!win) return { error: "Janela do app não encontrada." };
+      const action =
+        raw && typeof raw === "object" && "action" in raw
+          ? (raw as { action?: "back" | "forward" | "reload" }).action
+          : undefined;
+      if (action !== "back" && action !== "forward" && action !== "reload") {
+        return { error: "Ação inválida no navegador do bot." };
+      }
+      return botBrowserHost.go(win, raw, action);
+    });
+    ipcMain.handle("desktop.botBrowser.state", (event, raw: unknown) => {
+      assertTrustedRenderer(event);
+      return botBrowserHost.state(raw);
+    });
+    ipcMain.handle("desktop.botBrowser.notifyTakeover", (event, raw: unknown) => {
+      assertTrustedRenderer(event);
+      return botBrowserHost.notifyTakeover(raw);
     });
     ipcMain.handle("desktop.platform", (event) => {
       assertTrustedRenderer(event);

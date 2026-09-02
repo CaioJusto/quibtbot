@@ -12,6 +12,7 @@ vi.mock("electron", () => ({}));
 function presence(input: Partial<TrayPresence> = {}): TrayPresence {
   return {
     pendingApprovalCount: 0,
+    pendingTakeoverCount: 0,
     lastRoutineLabel: null,
     lastRoutineAt: null,
     ...input,
@@ -34,15 +35,28 @@ describe("desktop tray presence", () => {
       lastRoutineAt: new Date().toISOString(),
     });
     expect(trayTooltip(status).toLocaleLowerCase("pt-BR")).toContain("rotina");
-    expect(trayMenuTemplate(status)[2]?.label.toLocaleLowerCase("pt-BR")).toContain("rotina");
+    expect(trayMenuTemplate(status)[3]?.label.toLocaleLowerCase("pt-BR")).toContain("rotina");
   });
 
   it("keeps open, approval, routine, and quit in order", () => {
     expect(trayMenuTemplate(presence()).map((item) => item.label)).toEqual([
       "Abrir Quibt Bot",
       "Nenhuma aprovação pendente",
+      "Nenhum bot esperando você",
       "Nenhuma rotina executada",
       "Sair",
+    ]);
+  });
+
+  it("mentions a bot waiting for takeover before approvals", () => {
+    const status = presence({ pendingTakeoverCount: 1 });
+    expect(trayTooltip(status)).toContain("1 bot esperando você");
+    expect(trayMenuTemplate(status).map((item) => item.id)).toEqual([
+      "open",
+      "approvals",
+      "takeover",
+      "routine",
+      "quit",
     ]);
   });
 });

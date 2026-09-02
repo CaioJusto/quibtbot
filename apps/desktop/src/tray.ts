@@ -1,11 +1,12 @@
 export interface TrayPresence {
   pendingApprovalCount: number;
+  pendingTakeoverCount: number;
   lastRoutineLabel: string | null;
   lastRoutineAt: string | null;
 }
 
 export type TrayMenuItem = {
-  id: "open" | "approvals" | "routine" | "quit";
+  id: "open" | "approvals" | "takeover" | "routine" | "quit";
   label: string;
   enabled?: boolean;
 };
@@ -16,6 +17,7 @@ export interface CloseToTrayPolicy {
 
 export const IDLE_TRAY_PRESENCE: TrayPresence = {
   pendingApprovalCount: 0,
+  pendingTakeoverCount: 0,
   lastRoutineLabel: null,
   lastRoutineAt: null,
 };
@@ -25,6 +27,11 @@ const RECENT_ROUTINE_MS = 10 * 60 * 1_000;
 function approvalCopy(count: number): string {
   if (count === 1) return "1 aprovação pendente";
   return `${count} aprovações pendentes`;
+}
+
+function takeoverCopy(count: number): string {
+  if (count === 1) return "1 bot esperando você";
+  return `${count} bots esperando você`;
 }
 
 function routineCopy(status: TrayPresence): string | null {
@@ -65,6 +72,12 @@ export function normalizeTrayPresence(raw: unknown): TrayPresence {
     input.pendingApprovalCount > 0
       ? Math.floor(input.pendingApprovalCount)
       : 0;
+  const takeovers =
+    typeof input.pendingTakeoverCount === "number" &&
+    Number.isFinite(input.pendingTakeoverCount) &&
+    input.pendingTakeoverCount > 0
+      ? Math.floor(input.pendingTakeoverCount)
+      : 0;
   const label =
     typeof input.lastRoutineLabel === "string" && input.lastRoutineLabel.trim()
       ? input.lastRoutineLabel.trim().slice(0, 80)
@@ -73,10 +86,18 @@ export function normalizeTrayPresence(raw: unknown): TrayPresence {
     typeof input.lastRoutineAt === "string" && Number.isFinite(Date.parse(input.lastRoutineAt))
       ? new Date(input.lastRoutineAt).toISOString()
       : null;
-  return { pendingApprovalCount: count, lastRoutineLabel: label, lastRoutineAt: at };
+  return {
+    pendingApprovalCount: count,
+    pendingTakeoverCount: takeovers,
+    lastRoutineLabel: label,
+    lastRoutineAt: at,
+  };
 }
 
 export function trayTooltip(status: TrayPresence): string {
+  if (status.pendingTakeoverCount > 0) {
+    return `Quibt Bot — ${takeoverCopy(status.pendingTakeoverCount)}`;
+  }
   if (status.pendingApprovalCount > 0) {
     return `Quibt Bot — ${approvalCopy(status.pendingApprovalCount)}`;
   }
@@ -85,6 +106,7 @@ export function trayTooltip(status: TrayPresence): string {
 }
 
 export function trayTitle(status: TrayPresence): string {
+  if (status.pendingTakeoverCount > 0) return takeoverCopy(status.pendingTakeoverCount);
   if (status.pendingApprovalCount > 0) return approvalCopy(status.pendingApprovalCount);
   return routineJustFired(status) ? (routineCopy(status) ?? "") : "";
 }
@@ -98,6 +120,14 @@ export function trayMenuTemplate(status: TrayPresence): TrayMenuItem[] {
         status.pendingApprovalCount > 0
           ? approvalCopy(status.pendingApprovalCount)
           : "Nenhuma aprovação pendente",
+      enabled: false,
+    },
+    {
+      id: "takeover",
+      label:
+        status.pendingTakeoverCount > 0
+          ? takeoverCopy(status.pendingTakeoverCount)
+          : "Nenhum bot esperando você",
       enabled: false,
     },
     { id: "routine", label: routineMenuCopy(status), enabled: false },

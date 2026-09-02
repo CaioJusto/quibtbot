@@ -50,6 +50,7 @@ export * from "./pi-runtime.js";
 export * from "./provider-cleanup-reconcile.js";
 export * from "./provider-ref-persistence.js";
 export * from "./realtime.js";
+export * from "./request-takeover.js";
 export * from "./run-lease.js";
 export * from "./run-progress.js";
 export * from "./sandbox-destroy.js";

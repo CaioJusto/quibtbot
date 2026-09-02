@@ -38,8 +38,8 @@ Until a release is published, build the artifacts locally (below) and open the i
 ## Tray / menu bar
 
 Closing the Quibt Bot window hides it in the system tray (the menu bar on macOS) instead of
-quitting. The icon shows waiting tool approvals and the last routine run; choose **Abrir Quibt
-Bot** to reveal the window and **Sair** to quit the app.
+quitting. The icon shows waiting tool approvals, a bot parked on `request_takeover`, and the last
+routine run; choose **Abrir Quibt Bot** to reveal the window and **Sair** to quit the app.
 
 ## Run from source
 
@@ -93,6 +93,8 @@ These run through Node (`scripts/pack-desktop.mjs`), so they work in macOS Termi
 | Bot computer                      | Linux container or cloud VM | Linux container or cloud VM | Linux container or cloud VM |
 
 The bot does **not** click your host desktop. Navigation inside the computer pane is a Linux graphical session (Xvfb + noVNC + Chromium + xdotool). That is not [Cua](https://cua.ai/) / `cua-driver`. Cua is a native Mac/Windows/Linux computer-use driver; Quibt keeps the agent inside a Linux VM so the same computer works from any host OS.
+
+The desktop app also embeds a **per-bot Chromium** (`WebContentsView`, partition `persist:bot-<id>`). It is only in this app: cookies stay on that bot, not in the host Chrome profile and not in the Linux desktop the agent drives. When the bot calls `request_takeover`, the tray and an OS notification say it needs you; agent clicks stay refused until you take the wheel and release. Web and mobile keep the noVNC **Assumir controle** path.
 
 ## Signing and notarization
 

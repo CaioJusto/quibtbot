@@ -43,7 +43,7 @@ const DOCKER_GUIDE: MachineGuide = {
     "Instale o Docker Desktop em docker.com, abra o app e espere ficar “Running”.",
     "No Quibt, deixe “Nesta máquina (Docker)” selecionado.",
     "Toque em Testar. Se aparecer que o Docker respondeu, toque em Salvar e continuar.",
-    "Crie o primeiro bot. Quando você mandar uma mensagem, a tela Linux dele abre no painel do computador.",
+    "Crie o primeiro bot. Quando você mandar uma mensagem, a tela Linux dele abre no painel do computador. No app desktop existe também um navegador embutido só daquele bot — não é o Chrome deste aparelho.",
   ],
   botsShare:
     "É o mesmo computador (um Linux por workspace, a mesma imagem). Cada bot ganha a própria tela — um desktop gráfico por bot, não é uma aba do Chrome. Os arquivos e alguns logins do navegador são compartilhados. A parede é a mesma; as janelas de cada bot são outras.",

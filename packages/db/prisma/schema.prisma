@@ -793,6 +793,8 @@ model DesktopSession {
   controlLeaseExpiresAt DateTime?
   controlLastInputAt DateTime?
   controlFence   Int          @default(0)
+  /** Bot asked the owner to take the wheel; agent clicks/keys stay refused until release. */
+  waitingTakeover Boolean     @default(false)
   bootClaimToken String?
   bootClaimedAt  DateTime?
   bootLastError  String?
