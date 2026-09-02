@@ -283,7 +283,7 @@ infra/    compose  sandboxes
 | Doc | What it covers |
 | --- | --- |
 | [`docs/onboarding.md`](docs/onboarding.md) | First run in plain language (install, model, machine, first bot) |
-| [`docs/cli-engines.md`](docs/cli-engines.md) | Use an authenticated Claude Code, Codex, or Grok CLI as the model engine |
+| [`docs/cli-engines.md`](docs/cli-engines.md) | Use an authenticated Claude Code, Codex, Grok, or extra ACP CLI as the model engine, with hands on the bot computer |
 | [`docs/bot-mcp.md`](docs/bot-mcp.md) | Give one bot extra MCP tools through a safe stdio argv command or HTTPS endpoint |
 | [`docs/openapi-tools.md`](docs/openapi-tools.md) | Turn a per-bot OpenAPI 3 HTTPS document into prefixed tools with read/write approval rules |
 | [`docs/computers.md`](docs/computers.md) | Docker, VPS, E2B, Box, Daytona — what to do, how bots share a computer |

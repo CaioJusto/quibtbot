@@ -45,7 +45,7 @@ describe("mobile onboarding screen", () => {
     expect(key).toBeLessThan(local);
     // O cartão que começa marcado segue a mesma regra do web (@quibt/core).
     expect(screen).toContain("initialTokenSource({");
-    expect(screen).toContain("Claude Code, Codex ou Grok");
+    expect(screen).toContain("Claude Code, Codex, Grok ou ACP extra");
     expect(screen).toContain('rpc("models/connectCli"');
   });
 

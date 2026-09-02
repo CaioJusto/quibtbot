@@ -217,7 +217,7 @@ export function ModelSourceSection() {
       await rpc("models/setDefault", { provider: "local-cli", modelId: selected.id });
       await load();
       setNotice(
-        `${selected.label ?? selected.id} ativado. A sessão já conectada no host será usada.`,
+        `${selected.label ?? selected.id} ativado. A sessão já conectada no host será usada; as ferramentas mexem no computador do bot, não neste aparelho.`,
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível ativar a CLI do host");
@@ -313,8 +313,8 @@ export function ModelSourceSection() {
       </View>
       {!cliModels.length ? (
         <Text style={ui.body}>
-          Nenhuma CLI Claude Code, Codex ou Grok foi encontrada no host da API. As outras opções
-          continuam disponíveis.
+          Nenhuma CLI Claude Code, Codex, Grok ou ACP extra foi encontrada no host da API. As outras
+          opções continuam disponíveis.
         </Text>
       ) : null}
 

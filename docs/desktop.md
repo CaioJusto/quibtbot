@@ -8,9 +8,10 @@ Postgres/API/worker stack a source checkout would, on the computer you installed
 onboarding — a separate choice from where the server itself runs. See
 [`docs/architecture.md`](./architecture.md).
 
-Claude Code, Codex e Grok também podem ser usados como motores de modelo quando a CLI está no
-`PATH` dos processos da API e do worker. Isso é separado do computador do bot: a CLI usa o login
-do host e não recebe controle do desktop do usuário. Veja [`cli-engines.md`](./cli-engines.md).
+Claude Code, Codex, Grok e uma CLI ACP extra também podem ser usados como motores de modelo
+quando a CLI está no `PATH` dos processos da API e do worker. A CLI usa o login do host e tem
+mãos no computador do bot; não recebe controle do desktop do usuário. Veja
+[`cli-engines.md`](./cli-engines.md).
 
 Public site: [quibt.com.br](https://quibt.com.br).
 

@@ -14,9 +14,10 @@ aqui, porque ela só isola o computador de um bot) e **Onde os bots trabalham?**
 este arquivo detalha: Docker, VPS/remote-supervisor, E2B, Box ou Daytona). Ver
 [`architecture.md`](./architecture.md) (em inglês) para o desenho completo do sistema.
 
-Uma CLI Claude Code, Codex ou Grok escolhida como **modelo** fica do lado do servidor (host da
-API/worker); ela não é instalada nem executada nestes computadores de bot. Esse limite está em
-[`cli-engines.md`](./cli-engines.md).
+Uma CLI Claude Code, Codex, Grok ou ACP extra escolhida como **modelo** fica do lado do
+servidor (host da API/worker). Ela não é instalada nestes computadores de bot, mas chama as
+mesmas ferramentas (shell, arquivos, print, `computer`) contra o sandbox já escolhido. Não
+controla o Mac/Windows. Esse limite está em [`cli-engines.md`](./cli-engines.md).
 
 ## Mandar o que está na tela
 

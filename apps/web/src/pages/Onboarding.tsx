@@ -63,7 +63,7 @@ const BILLING_PT: Record<string, string> = {
 function billingText(entry: CatalogEntry | undefined): string {
   if (!entry) return "";
   if (entry.auth === "host-cli") {
-    return "Usa o login já feito nesta CLI no host da API/worker. Nenhuma chave é colada no Quibt.";
+    return "Usa o login já feito nesta CLI no host da API/worker. As ferramentas mexem no computador do bot, não neste Mac ou Windows. Nenhuma chave é colada no Quibt.";
   }
   const mapped = BILLING_PT[entry.provider];
   if (mapped) return mapped;
@@ -312,7 +312,7 @@ export function OnboardingPage() {
       } else {
         if (action.kind === "cli") {
           await rpc.models.connectCli({
-            binary: (selected?.id ?? modelId) as "claude" | "codex" | "grok",
+            binary: (selected?.id ?? modelId) as "claude" | "codex" | "grok" | "acp",
           });
         }
         if (action.kind === "connect") {
@@ -639,8 +639,8 @@ export function OnboardingPage() {
             </div>
             {!cliModels.length ? (
               <p className="mt-3 text-[13px] text-[var(--qb-muted)]">
-                Nenhuma CLI Claude Code, Codex ou Grok foi encontrada no host da API. As outras
-                opções continuam disponíveis.
+                Nenhuma CLI Claude Code, Codex, Grok ou ACP extra foi encontrada no host da API. As
+                outras opções continuam disponíveis.
               </p>
             ) : null}
             {/* Um painel só, com o que muda conforme o cartão marcado. A busca e a lista
@@ -784,7 +784,8 @@ export function OnboardingPage() {
                 ) : selected?.auth === "host-cli" ? (
                   <p className="mt-4 text-[13px] leading-[1.45] text-[var(--qb-muted)]">
                     {selected.label} roda no host da API/worker e usa a sessão já conectada nessa
-                    CLI. Não é preciso colar chave.
+                    CLI. Não é preciso colar chave. As ferramentas mexem no computador do bot, não
+                    neste Mac ou Windows.
                   </p>
                 ) : selected?.signIn === "device-code" ? null : (
                   <p className="mt-4 text-[13px] leading-[1.45] text-[var(--qb-muted)]">

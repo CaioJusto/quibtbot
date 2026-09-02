@@ -554,8 +554,8 @@ function ModelStep({
       </View>
       {!cliModels.length ? (
         <Text style={styles.keyHint}>
-          Nenhuma CLI Claude Code, Codex ou Grok foi encontrada no host da API. As outras opções
-          continuam disponíveis.
+          Nenhuma CLI Claude Code, Codex, Grok ou ACP extra foi encontrada no host da API. As outras
+          opções continuam disponíveis.
         </Text>
       ) : null}
       <View style={styles.providerList}>
@@ -611,7 +611,8 @@ function ModelStep({
       ) : null}
       {tokenSource === "cli" ? (
         <Text style={styles.keyHint}>
-          Usa o login já feito nessa CLI no host da API/worker. Nenhuma chave é colada no Quibt.
+          Usa o login já feito nessa CLI no host da API/worker. Nenhuma chave é colada no Quibt. As
+          ferramentas mexem no computador do bot, não neste aparelho.
         </Text>
       ) : null}
       {tokenSource === "subscription" ? (

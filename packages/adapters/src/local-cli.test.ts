@@ -2,7 +2,15 @@ import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { detectLocalCliEngines, localCliCatalog, resolveLocalCli } from "./local-cli.js";
+import {
+  detectLocalCliEngines,
+  EXTRA_ACP_CLI_ENV,
+  EXTRA_ACP_CLI_ID,
+  localCliCatalog,
+  parseExtraAcpCliPath,
+  resolveExtraAcpCli,
+  resolveLocalCli,
+} from "./local-cli.js";
 
 const created: string[] = [];
 
@@ -55,5 +63,58 @@ describe("host CLI detection", () => {
       [],
     );
     await expect(resolveLocalCli("bash", { env: { PATH: "/bin" } })).resolves.toBeNull();
+  });
+
+  it("registers one extra ACP CLI only from a safe absolute path that exists", async () => {
+    const home = await tempDir();
+    const localBin = path.join(home, ".local", "bin");
+    await mkdir(localBin, { recursive: true });
+    const executable = await fakeBinary(localBin, "my-agent");
+
+    const detected = await detectLocalCliEngines({
+      env: { PATH: "", [EXTRA_ACP_CLI_ENV]: executable },
+      homeDir: home,
+    });
+
+    expect(detected).toContainEqual({
+      id: EXTRA_ACP_CLI_ID,
+      label: "my-agent",
+      path: executable,
+    });
+    expect(localCliCatalog(detected).map((entry) => entry.id)).toContain(EXTRA_ACP_CLI_ID);
+    await expect(
+      resolveLocalCli(EXTRA_ACP_CLI_ID, { extraAcpCli: executable, homeDir: home }),
+    ).resolves.toBe(executable);
+  });
+
+  it("treats a missing extra ACP binary as unavailable and never throws", async () => {
+    const home = await tempDir();
+    const missing = path.join(home, ".local", "bin", "ghost-agent");
+    await expect(
+      detectLocalCliEngines({
+        env: { PATH: home, [EXTRA_ACP_CLI_ENV]: missing },
+        homeDir: home,
+      }),
+    ).resolves.toEqual([]);
+    await expect(resolveExtraAcpCli({ extraAcpCli: missing, homeDir: home })).resolves.toBeNull();
+    await expect(
+      resolveLocalCli(EXTRA_ACP_CLI_ID, { extraAcpCli: missing, homeDir: home }),
+    ).resolves.toBeNull();
+  });
+
+  it("refuses unknown extra ACP paths and shell metacharacters", () => {
+    const home = "/home/quibt";
+    expect(parseExtraAcpCliPath("/bin/bash", { homeDir: home })).toBeNull();
+    expect(parseExtraAcpCliPath("/usr/local/bin/foo;rm", { homeDir: home })).toBeNull();
+    expect(parseExtraAcpCliPath("/usr/local/bin/foo$(id)", { homeDir: home })).toBeNull();
+    expect(parseExtraAcpCliPath("~/.local/bin/agent", { homeDir: home })).toBeNull();
+    expect(parseExtraAcpCliPath("my-agent", { homeDir: home })).toBeNull();
+    expect(parseExtraAcpCliPath("/usr/local/bin/../bin/bash", { homeDir: home })).toBeNull();
+    expect(parseExtraAcpCliPath("/usr/local/bin/good-agent", { homeDir: home })).toBe(
+      "/usr/local/bin/good-agent",
+    );
+    expect(parseExtraAcpCliPath(`${home}/.local/bin/good-agent`, { homeDir: home })).toBe(
+      `${home}/.local/bin/good-agent`,
+    );
   });
 });

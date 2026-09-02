@@ -241,12 +241,12 @@ export function AccountSettingsBody({
     setNotice(null);
     try {
       await rpc.models.connectCli({
-        binary: selectedModel.id as "claude" | "codex" | "grok",
+        binary: selectedModel.id as "claude" | "codex" | "grok" | "acp",
       });
       await rpc.models.setDefault({ provider: "local-cli", modelId: selectedModel.id });
       setCredentials(await rpc.models.credentials().catch(() => []));
       setNotice(
-        `${selectedModel.label ?? selectedModel.id} ativado. O Quibt usa a sessão já conectada no host da API/worker.`,
+        `${selectedModel.label ?? selectedModel.id} ativado. O Quibt usa a sessão já conectada no host; as ferramentas mexem no computador do bot, não neste Mac ou Windows.`,
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível ativar a CLI do host");
@@ -498,8 +498,8 @@ export function AccountSettingsBody({
 
           {!cliModels.length ? (
             <p className="qb-account__hint">
-              Nenhuma CLI Claude Code, Codex ou Grok foi encontrada no host da API. As outras opções
-              continuam disponíveis.
+              Nenhuma CLI Claude Code, Codex, Grok ou ACP extra foi encontrada no host da API. As
+              outras opções continuam disponíveis.
             </p>
           ) : null}
 

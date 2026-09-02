@@ -58,7 +58,7 @@ describe("changing the AI provider from Conta", () => {
     expect(subscription).toBeLessThan(cli);
     expect(cli).toBeLessThan(key);
     expect(key).toBeLessThan(local);
-    expect(src).toContain("Claude Code, Codex ou Grok");
+    expect(src).toContain("Claude Code, Codex, Grok ou ACP extra");
   });
 
   it("confirma a chave que o servidor conferiu e aponta onde ela nasce", () => {

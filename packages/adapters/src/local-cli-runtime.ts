@@ -9,7 +9,17 @@ import type {
   AgentRuntime,
   AgentRuntimeEvent,
 } from "@quibt/adapter-kit";
+import { runAcpAgent } from "./cli-acp.js";
 import {
+  CLI_MCP_SERVER_NAME,
+  type CliToolBridge,
+  createRuntimeEventQueue,
+  startCliToolBridge,
+  writeCliMcpConfig,
+  writeCliMcpProxy,
+} from "./cli-tool-bridge.js";
+import {
+  EXTRA_ACP_CLI_ID,
   isLocalCliId,
   LOCAL_CLI_PROVIDER,
   type LocalCliDetectionOptions,
@@ -41,7 +51,7 @@ export class LocalCliAgentRuntime implements AgentRuntime {
       id: LOCAL_CLI_PROVIDER,
       contractVersion: "1",
       adapterVersion: "0.1.0",
-      capabilities: { streaming: true, compaction: false, tools: false, scripted: false },
+      capabilities: { streaming: true, compaction: false, tools: true, scripted: false },
     };
   }
 
@@ -54,7 +64,8 @@ export class LocalCliAgentRuntime implements AgentRuntime {
     if (request.model.provider !== LOCAL_CLI_PROVIDER || !isLocalCliId(request.model.id)) {
       yield {
         type: "error",
-        message: "CLI local desconhecida. Use Claude Code, Codex ou Grok detectado pelo Quibt.",
+        message:
+          "CLI local desconhecida. Use Claude Code, Codex, Grok ou a CLI ACP extra detectada pelo Quibt.",
         retryable: false,
       };
       yield { type: "done", text: "CLI local desconhecida." };
@@ -74,99 +85,187 @@ export class LocalCliAgentRuntime implements AgentRuntime {
 
     const isolatedCwd = await mkdtemp(path.join(os.tmpdir(), "quibt-cli-engine-"));
     const prompt = cliPrompt(request);
-    const invocation = cliInvocation(id, isolatedCwd, prompt);
-    let child: ChildProcessWithoutNullStreams;
-    try {
-      child = spawn(executable, invocation.argv, {
-        cwd: isolatedCwd,
-        env: cliEnvironment(this.options.env ?? process.env),
-        stdio: ["pipe", "pipe", "pipe"],
-        windowsHide: true,
-      });
-    } catch (error) {
-      await rm(isolatedCwd, { recursive: true, force: true });
-      const message = cliError(id, error);
-      yield { type: "error", message, retryable: true };
-      yield { type: "done", text: message };
-      return;
-    }
+    const queue = createRuntimeEventQueue();
+    const useTools = Boolean(request.executeTool) && request.tools.length > 0;
+    let bridge: CliToolBridge | undefined;
+    let child: ChildProcessWithoutNullStreams | undefined;
+    let slot = 0;
+    let settled = false;
 
-    running.set(request.runId, child);
-    const abort = () => terminate(child);
-    context.signal.addEventListener("abort", abort, { once: true });
-    if (context.signal.aborted) abort();
-    let stderr = "";
-    child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (chunk: string) => {
-      if (stderr.length < MAX_STDERR_CHARS)
-        stderr += chunk.slice(0, MAX_STDERR_CHARS - stderr.length);
-    });
-    child.stdin.on("error", () => undefined);
-    if (invocation.stdin !== undefined) child.stdin.end(invocation.stdin);
-    else child.stdin.end();
+    const finish = (...events: AgentRuntimeEvent[]) => {
+      if (settled) return;
+      settled = true;
+      for (const event of events) queue.push(event);
+    };
 
-    const close = new Promise<{ code: number | null; error?: unknown }>((resolve) => {
-      child.once("error", (error) => resolve({ code: null, error }));
-      child.once("close", (code) => resolve({ code }));
-    });
-    const lines = createInterface({ input: child.stdout, crlfDelay: Number.POSITIVE_INFINITY });
-    let streamed = "";
-    let fallback = "";
-    let inputTokens = 0;
-    let outputTokens = 0;
-
-    yield { type: "progress", text: `Consultando ${localCliLabel(id)} no host…` };
-    try {
-      for await (const line of lines) {
-        const parsed = parseCliLine(id, line);
-        if (!parsed) continue;
-        if (parsed.text) {
-          streamed += parsed.text;
-          yield { type: "text", text: parsed.text };
+    const work = (async () => {
+      try {
+        queue.push({ type: "progress", text: `Consultando ${localCliLabel(id)} no host…` });
+        let mcp: { configPath: string; proxyPath: string } | undefined;
+        if (useTools) {
+          bridge = await startCliToolBridge({
+            tools: request.tools,
+            executeTool: request.executeTool,
+            nextExecutionId: (name) => {
+              slot += 1;
+              return `${request.runId}:${name}#${slot}`;
+            },
+            onTool: (event) => queue.push({ type: "tool", ...event }),
+            onPermission: (ask) => {
+              finish(
+                { type: "ask", text: "Preciso da sua aprovação", detail: ask.summary },
+                { type: "done", text: "Preciso da sua aprovação" },
+              );
+              if (child) terminate(child);
+            },
+            onPause: () => {
+              if (child) terminate(child);
+            },
+          });
+          const proxyPath = await writeCliMcpProxy(isolatedCwd, bridge.port);
+          const configPath = await writeCliMcpConfig(isolatedCwd, process.execPath, [proxyPath]);
+          mcp = { configPath, proxyPath };
         }
-        if (parsed.finalText) fallback = parsed.finalText;
-        inputTokens = parsed.inputTokens ?? inputTokens;
-        outputTokens = parsed.outputTokens ?? outputTokens;
-      }
-      const result = await close;
-      if (result.error || (result.code !== 0 && !context.signal.aborted)) {
-        const detail = result.error ?? (stderr || `processo terminou com código ${result.code}`);
-        const message = cliError(id, detail);
-        yield { type: "error", message, retryable: true };
-        yield { type: "done", text: message };
-        return;
-      }
-      if (context.signal.aborted) {
-        yield { type: "done", text: "stopped" };
-        return;
-      }
-      if (!streamed && fallback) {
-        streamed = fallback;
-        yield { type: "text", text: fallback };
-      }
-      if (!streamed) {
-        const message = `${localCliLabel(id)} terminou sem devolver texto.`;
-        yield { type: "error", message, retryable: true };
-        yield { type: "done", text: message };
-        return;
-      }
-      if (inputTokens || outputTokens) {
-        yield {
-          type: "usage",
-          inputTokens,
-          outputTokens,
-          provider: LOCAL_CLI_PROVIDER,
-          model: id,
+
+        if (id === EXTRA_ACP_CLI_ID) {
+          if (!mcp) {
+            finish(
+              {
+                type: "error",
+                message: "CLI ACP precisa das ferramentas do computador do bot.",
+                retryable: false,
+              },
+              { type: "done", text: "CLI ACP precisa das ferramentas do computador do bot." },
+            );
+            return;
+          }
+          const result = await runAcpAgent({
+            executable,
+            cwd: isolatedCwd,
+            env: cliEnvironment(this.options.env ?? process.env),
+            prompt,
+            mcp: {
+              name: CLI_MCP_SERVER_NAME,
+              command: process.execPath,
+              args: [mcp.proxyPath],
+            },
+            signal: context.signal,
+            onEvent: (event) => queue.push(event),
+          });
+          if (!result.text) {
+            const message = `${localCliLabel(id)} terminou sem devolver texto.`;
+            finish({ type: "error", message, retryable: true }, { type: "done", text: message });
+            return;
+          }
+          finish({ type: "done", text: result.text });
+          return;
+        }
+
+        const invocation = cliInvocation(id, isolatedCwd, prompt, mcp);
+        try {
+          child = spawn(executable, invocation.argv, {
+            cwd: isolatedCwd,
+            env: cliEnvironment(this.options.env ?? process.env),
+            stdio: ["pipe", "pipe", "pipe"],
+            windowsHide: true,
+          });
+        } catch (error) {
+          const message = cliError(id, error);
+          finish({ type: "error", message, retryable: true }, { type: "done", text: message });
+          return;
+        }
+
+        running.set(request.runId, child);
+        const abort = () => {
+          if (child) terminate(child);
         };
+        context.signal.addEventListener("abort", abort, { once: true });
+        if (context.signal.aborted) abort();
+        let stderr = "";
+        child.stderr.setEncoding("utf8");
+        child.stderr.on("data", (chunk: string) => {
+          if (stderr.length < MAX_STDERR_CHARS)
+            stderr += chunk.slice(0, MAX_STDERR_CHARS - stderr.length);
+        });
+        child.stdin.on("error", () => undefined);
+        if (invocation.stdin !== undefined) child.stdin.end(invocation.stdin);
+        else child.stdin.end();
+
+        const close = new Promise<{ code: number | null; error?: unknown }>((resolve) => {
+          child!.once("error", (error) => resolve({ code: null, error }));
+          child!.once("close", (code) => resolve({ code }));
+        });
+        const lines = createInterface({
+          input: child.stdout,
+          crlfDelay: Number.POSITIVE_INFINITY,
+        });
+        let streamed = "";
+        let fallback = "";
+        let inputTokens = 0;
+        let outputTokens = 0;
+        try {
+          for await (const line of lines) {
+            if (settled) break;
+            const parsed = parseCliLine(id, line);
+            if (!parsed) continue;
+            if (parsed.text) {
+              streamed += parsed.text;
+              queue.push({ type: "text", text: parsed.text });
+            }
+            if (parsed.finalText) fallback = parsed.finalText;
+            inputTokens = parsed.inputTokens ?? inputTokens;
+            outputTokens = parsed.outputTokens ?? outputTokens;
+          }
+          const result = await close;
+          if (settled) return;
+          if (result.error || (result.code !== 0 && !context.signal.aborted)) {
+            const detail =
+              result.error ?? (stderr || `processo terminou com código ${result.code}`);
+            const message = cliError(id, detail);
+            finish({ type: "error", message, retryable: true }, { type: "done", text: message });
+            return;
+          }
+          if (context.signal.aborted) {
+            finish({ type: "done", text: "stopped" });
+            return;
+          }
+          if (!streamed && fallback) {
+            streamed = fallback;
+            queue.push({ type: "text", text: fallback });
+          }
+          if (!streamed) {
+            const message = `${localCliLabel(id)} terminou sem devolver texto.`;
+            finish({ type: "error", message, retryable: true }, { type: "done", text: message });
+            return;
+          }
+          if (inputTokens || outputTokens) {
+            queue.push({
+              type: "usage",
+              inputTokens,
+              outputTokens,
+              provider: LOCAL_CLI_PROVIDER,
+              model: id,
+            });
+          }
+          finish({ type: "done", text: streamed });
+        } finally {
+          context.signal.removeEventListener("abort", abort);
+          running.delete(request.runId);
+          lines.close();
+        }
+      } catch (error) {
+        const message = cliError(id, error);
+        finish({ type: "error", message, retryable: true }, { type: "done", text: message });
+      } finally {
+        if (child && child.exitCode === null && child.signalCode === null) terminate(child);
+        await bridge?.close();
+        await rm(isolatedCwd, { recursive: true, force: true });
+        queue.close();
       }
-      yield { type: "done", text: streamed };
-    } finally {
-      context.signal.removeEventListener("abort", abort);
-      running.delete(request.runId);
-      if (child.exitCode === null && child.signalCode === null) terminate(child);
-      lines.close();
-      await rm(isolatedCwd, { recursive: true, force: true });
-    }
+    })();
+
+    yield* queue.iterate();
+    await work;
   }
 }
 
@@ -192,7 +291,24 @@ export class RoutedAgentRuntime implements AgentRuntime {
   }
 }
 
-function cliInvocation(id: LocalCliId, cwd: string, prompt: string) {
+function cliInvocation(
+  id: LocalCliId,
+  cwd: string,
+  prompt: string,
+  mcp?: { configPath: string; proxyPath: string },
+) {
+  const mcpArgv = mcp && id !== "codex" ? ["--mcp-config", mcp.configPath] : [];
+  const claudeMcpArgv = mcp ? ["--strict-mcp-config", "--mcp-config", mcp.configPath] : [];
+  const codexMcpArgv = mcp
+    ? [
+        "-c",
+        `mcp_servers.${CLI_MCP_SERVER_NAME}.command=${JSON.stringify(process.execPath)}`,
+        "-c",
+        `mcp_servers.${CLI_MCP_SERVER_NAME}.args=${JSON.stringify([mcp.proxyPath])}`,
+        "-c",
+        `mcp_servers.${CLI_MCP_SERVER_NAME}.default_tools_approval_mode="approve"`,
+      ]
+    : [];
   if (id === "claude") {
     return {
       argv: [
@@ -206,6 +322,7 @@ function cliInvocation(id: LocalCliId, cwd: string, prompt: string) {
         "dontAsk",
         "--tools",
         "",
+        ...claudeMcpArgv,
       ],
       stdin: prompt,
     };
@@ -223,6 +340,7 @@ function cliInvocation(id: LocalCliId, cwd: string, prompt: string) {
         "--ignore-rules",
         "-C",
         cwd,
+        ...codexMcpArgv,
         "-",
       ],
       stdin: prompt,
@@ -235,13 +353,11 @@ function cliInvocation(id: LocalCliId, cwd: string, prompt: string) {
       cwd,
       "--output-format",
       "streaming-json",
-      "--tools",
-      "",
+      ...(mcp ? [] : ["--tools", "", "--max-turns", "1"]),
       "--no-subagents",
       "--no-memory",
       "--disable-web-search",
-      "--max-turns",
-      "1",
+      ...mcpArgv,
       "-p",
       prompt,
     ],
@@ -255,7 +371,7 @@ function cliPrompt(request: AgentRunRequest): string {
     .join("\n\n");
   return [
     request.instructions,
-    "You are the response engine for a Quibt bot. Reply to the user in this chat. Do not inspect or modify host files, run shell commands, browse, or use CLI tools. Quibt executes bot-computer tools separately; return only the assistant response text.",
+    "You are the model for a Quibt bot. Reply in this chat. Use the Quibt computer tools (shell, write_file, screenshot, computer, open_url, and the others provided) to act on this bot's Linux computer — Docker, VPS, E2B, Box, or Daytona. Those tools run in the bot computer, not on the host Mac/Windows. Do not use the CLI's built-in host shell, file, or browser tools. Do not inspect or modify files on the API/worker host.",
     history ? `Conversation so far:\n${history}` : "",
     `<user>\n${request.prompt}\n</user>`,
   ]

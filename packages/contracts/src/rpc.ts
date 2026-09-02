@@ -149,7 +149,7 @@ export const appContract = {
       )
       .output(ModelConnectResultSchema),
     connectCli: oc
-      .input(z.object({ binary: z.enum(["claude", "codex", "grok"]) }))
+      .input(z.object({ binary: z.enum(["claude", "codex", "grok", "acp"]) }))
       .output(ModelConnectResultSchema),
     beginOAuth: oc
       .input(

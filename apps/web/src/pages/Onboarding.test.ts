@@ -111,7 +111,7 @@ describe("etapa do modelo", () => {
   });
 
   it("separa login do app das CLIs já autenticadas no host", () => {
-    expect(src).toContain("Nenhuma CLI Claude Code, Codex ou Grok");
+    expect(src).toContain("Nenhuma CLI Claude Code, Codex, Grok ou ACP extra");
     expect(src).toContain("ChatGPT Plus/Pro, Copilot ou SuperGrok");
     expect(src).toContain('entry.signIn === "device-code"\n    ? "Entre com a assinatura');
   });
