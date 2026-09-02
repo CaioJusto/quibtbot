@@ -180,7 +180,7 @@ pnpm dev
 
 `pnpm dev` starts the API (`:3100`), Graphile Worker, Vite web app (`:5173`), and sandbox supervisor (`:7091`). This computer (or whichever VPS/Box VM you install onto) has to keep running for that API: turning it off pauses the API, the worker, and every bot until you turn it back on.
 
-For the native source flow, open another terminal and run `pnpm dev:desktop`; the app securely carries the installer's one-use invitation into the first-owner signup. For a plain browser, run `pnpm owner:code`, open [http://127.0.0.1:5173](http://127.0.0.1:5173), and enter the displayed eight-character code. The first account asks for your name only — no e-mail, no password ([why](docs/entrar-sem-senha.md)). Create a bot and send a message. The computer pane is a live Linux desktop with a browser.
+For the native source flow, open another terminal and run `pnpm dev:desktop`; the app securely carries the installer's one-use invitation into the first-owner signup. For a plain browser, run `pnpm owner:code`, open [http://127.0.0.1:5173](http://127.0.0.1:5173), and enter the displayed eight-character code. In `pnpm dev`, an empty `BOOTSTRAP_SECRET` is derived from `BETTER_AUTH_SECRET` — the same value the API uses — so you do not have to add a third secret after copying `.env.example`. Compose still wants its own `BOOTSTRAP_SECRET` (see [self-host](docs/self-host.md)). The first account asks for your name only — no e-mail, no password ([why](docs/entrar-sem-senha.md)). Create a bot and send a message. The computer pane is a live Linux desktop with a browser.
 
 ```bash
 curl -s http://127.0.0.1:3100/health

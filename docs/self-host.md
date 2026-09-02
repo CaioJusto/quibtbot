@@ -14,7 +14,7 @@ The signed-in product is a long-running API, a Graphile Worker, Postgres, and a 
 
 ## Local (source checkout)
 
-Same as the README quick start on macOS, Windows, or Linux: `.env` from `.env.example`, Postgres via Compose, `pnpm sandbox:build`, and `pnpm dev`. Desktop: `pnpm desktop` or `pnpm dev:desktop` while that stack is up. For a plain browser, run `pnpm owner:code`, open [http://127.0.0.1:5173](http://127.0.0.1:5173), and enter that one-use installer code. See [desktop.md](./desktop.md). The host OS only runs the client and the stack; the bot computer is always Linux (Docker / E2B / Box / Daytona).
+Same as the README quick start on macOS, Windows, or Linux: `.env` from `.env.example`, Postgres via Compose, `pnpm sandbox:build`, and `pnpm dev`. Desktop: `pnpm desktop` or `pnpm dev:desktop` while that stack is up. For a plain browser, run `pnpm owner:code`, open [http://127.0.0.1:5173](http://127.0.0.1:5173), and enter that one-use installer code. On this source path an empty `BOOTSTRAP_SECRET` is derived from `BETTER_AUTH_SECRET`, same as the API; Compose still requires its own value (below). See [desktop.md](./desktop.md). The host OS only runs the client and the stack; the bot computer is always Linux (Docker / E2B / Box / Daytona).
 
 This computer stays on for a locally-hosted server: the API, worker, and Postgres are the
 `pnpm dev` processes on it, so closing the laptop or letting it sleep pauses the API for every

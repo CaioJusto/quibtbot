@@ -57,6 +57,7 @@ Caminho C — a partir do código-fonte (desenvolvimento; Mac Intel entra aqui):
   pnpm sandbox:build
   pnpm dev
   Abrir http://127.0.0.1:5173. Para navegador puro: pnpm owner:code e digitar o código.
+  (BOOTSTRAP_SECRET vazio neste caminho é derivado de BETTER_AUTH_SECRET, igual à API.)
   `pnpm desktop` embrulha a mesma UI no Electron.
 
 Regras: nunca coloque chaves (OpenRouter, Composio, tokens) em git, logs ou chat; nunca
@@ -119,6 +120,7 @@ Path C — from source (development; Intel Macs go here):
   pnpm sandbox:build
   pnpm dev
   Open http://127.0.0.1:5173. For a plain browser: pnpm owner:code and enter the code.
+  (An empty BOOTSTRAP_SECRET on this path is derived from BETTER_AUTH_SECRET, same as the API.)
   `pnpm desktop` wraps the same UI in Electron.
 
 Rules: never put keys (OpenRouter, Composio, tokens) in git, logs, or chat; never
