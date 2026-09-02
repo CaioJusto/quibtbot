@@ -136,8 +136,8 @@ export function AuthPage() {
             ) : null}
             {!nativeInstaller ? (
               <p className="qb-entry__foot">
-                Use o código de oito caracteres mostrado por <code>quibtbot install</code> ou{" "}
-                <code>quibtbot pair</code>.
+                Use o código de oito caracteres mostrado por <code>pnpm owner:code</code>,{" "}
+                <code>quibtbot install</code> ou <code>quibtbot pair</code>.
               </p>
             ) : null}
             {error ? <p className="qb-entry__error">{error}</p> : null}
