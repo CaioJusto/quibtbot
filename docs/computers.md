@@ -213,7 +213,7 @@ Conferido na [documentação oficial](https://www.daytona.io/docs/en/typescript-
 
 O roteador (`createRoutingSandboxProvider`) nunca teleporta um desktop ligado para outro provedor. Computador já criado fica na família que o criou até o próximo boot; aí o disco do vendor é só cache. Arquivos e cookies do Chromium daquele bot voltam de um snapshot em `DATA_DIR` — ver [workspace-checkpoint.md](./workspace-checkpoint.md). Janelas abertas, o X11 e o noVNC **não** atravessam a troca.
 
-**Limite honesto da troca:** o que sobrevive é a pasta de casa e o perfil do navegador (logins gravados no Chromium). A mesa gráfica não teleporta: ao ligar noutro provedor a tela nasce vazia, com os arquivos e os cookies já no lugar.
+**Limite honesto da troca:** o que sobrevive é a pasta de casa (nos provedores isolados) e o perfil do navegador (logins gravados no Chromium). No Docker a casa `/home/quibt` continua compartilhada entre os bots do workspace: o checkpoint leva uma cópia ao sair, mas ao voltar só o Chrome daquele bot é restaurado, para não apagar o colega. A mesa gráfica não teleporta: ao ligar noutro provedor a tela nasce vazia, com os arquivos e os cookies já no lugar.
 
 ## Onde o texto do app vive
 

@@ -8,8 +8,11 @@ import { DaytonaSandboxEmulator } from "./daytona-emulator.js";
 import { ManagedSandboxEmulator } from "./e2b-emulator.js";
 import { FakeSandboxProvider } from "./fake-sandbox.js";
 import {
+  applyToFileMap,
+  collectFromFileMap,
   createWorkspaceCheckpointStore,
   hostDirPortableHomeVolume,
+  isSafePortablePath,
   portableHomeLayout,
   shouldExcludePortablePath,
   withWorkspaceCheckpoint,
@@ -75,6 +78,27 @@ describe("shouldExcludePortablePath", () => {
     expect(shouldExcludePortablePath("chrome/Default/Cookies")).toBe(false);
     expect(shouldExcludePortablePath("chrome/Default/Preferences")).toBe(false);
   });
+
+  it("drops live Chromium lock files so the next browser can start", () => {
+    expect(shouldExcludePortablePath("chrome/SingletonLock")).toBe(true);
+    expect(shouldExcludePortablePath("chrome/SingletonSocket")).toBe(true);
+    expect(shouldExcludePortablePath("chrome/lockfile")).toBe(true);
+  });
+});
+
+describe("isSafePortablePath", () => {
+  it("rejects traversal and absolute tails", () => {
+    expect(isSafePortablePath("home/../../etc/passwd")).toBe(false);
+    expect(isSafePortablePath("chrome/../home/secret")).toBe(false);
+    expect(isSafePortablePath("home//etc/passwd")).toBe(false);
+    expect(isSafePortablePath("/etc/passwd")).toBe(false);
+    expect(isSafePortablePath("etc/passwd")).toBe(false);
+  });
+
+  it("accepts home and chrome relatives", () => {
+    expect(isSafePortablePath("home/notes.txt")).toBe(true);
+    expect(isSafePortablePath("chrome/Default/Cookies")).toBe(true);
+  });
 });
 
 describe("portableHomeLayout", () => {
@@ -88,6 +112,35 @@ describe("portableHomeLayout", () => {
     expect(portableHomeLayout("box", "bot-a").homeRoot).toBe("/home/ubuntu");
     expect(portableHomeLayout("daytona", "bot-a").homeRoot).toBe("/home/daytona");
     expect(portableHomeLayout("fake", "bot-a").homeRoot).toBe("/home/quibt");
+    expect(portableHomeLayout("docker", "bot-a").sharedHome).toBe(true);
+    expect(portableHomeLayout("remote-supervisor", "bot-a").sharedHome).toBe(true);
+    expect(portableHomeLayout("e2b", "bot-a").sharedHome).toBe(false);
+    expect(portableHomeLayout("fake", "bot-a").sharedHome).toBe(false);
+  });
+});
+
+describe("shared Docker home apply", () => {
+  it("restores chrome only and leaves a sibling file on the shared home", () => {
+    const files = new Map<string, string>([["/home/quibt/sibling.txt", "from-b"]]);
+    applyToFileMap(files, portableHomeLayout("docker", "bot-a"), [
+      { path: "home/notes.txt", content: new TextEncoder().encode("from-a") },
+      { path: "chrome/Cookies", content: new TextEncoder().encode("cookie-a") },
+    ]);
+    expect(files.get("/home/quibt/sibling.txt")).toBe("from-b");
+    expect(files.get("/home/quibt/notes.txt")).toBeUndefined();
+    expect(files.get("/quibt-desktops/bot-a/chrome/Cookies")).toBe("cookie-a");
+  });
+
+  it("still exports a copy of the shared home when leaving Docker", () => {
+    const files = new Map<string, string>([
+      ["/home/quibt/office.txt", "shared"],
+      ["/quibt-desktops/bot-a/chrome/Cookies", "cookie-a"],
+    ]);
+    const entries = collectFromFileMap(files, portableHomeLayout("docker", "bot-a"));
+    expect(entries.map((entry) => entry.path).sort()).toEqual([
+      "chrome/Cookies",
+      "home/office.txt",
+    ]);
   });
 });
 
@@ -234,5 +287,30 @@ describe("hostDirPortableHomeVolume", () => {
     await expect(readFile(path.join(chrome, "Cache", "x"), "utf8")).rejects.toMatchObject({
       code: "ENOENT",
     });
+  });
+
+  it("round-trips an empty file", async () => {
+    const dataDir = await tempDir("quibt-empty-");
+    const store = createWorkspaceCheckpointStore({
+      dataDir,
+      encryptionKey: "test-encryption-key-32chars-minimum!!",
+    });
+    await store.save("bot-empty", [{ path: "home/empty.txt", content: new Uint8Array() }]);
+    const loaded = await store.load("bot-empty");
+    expect(loaded).toHaveLength(1);
+    expect(loaded?.[0]?.path).toBe("home/empty.txt");
+    expect(loaded?.[0]?.content.byteLength).toBe(0);
+  });
+
+  it("refuses a snapshot path that escapes home", async () => {
+    const dataDir = await tempDir("quibt-escape-");
+    const store = createWorkspaceCheckpointStore({
+      dataDir,
+      encryptionKey: "test-encryption-key-32chars-minimum!!",
+    });
+    await store.save("bot-escape", [
+      { path: "home/../../etc/passwd", content: new TextEncoder().encode("nope") },
+    ]);
+    expect(await store.load("bot-escape")).toEqual([]);
   });
 });

@@ -44,6 +44,7 @@ import {
   validateComputerSessionStartGate,
   waitForComputerSessionGateOrRecover,
 } from "./session-lifecycle.js";
+import { restoreSandboxHome } from "./workspace-checkpoint.js";
 import { isWorkspaceScopedSandbox, workspaceProviderRef } from "./workspace-computer.js";
 
 export function sandboxKindFromEnv(): string {
@@ -500,17 +501,19 @@ async function bootSharedDesktopSession(
         throw new Error("Lost desktop boot claim before persist");
       }
       await options?.afterPersist?.(deps.prisma, botId);
-      await openComputerUsage(deps.prisma, {
-        workspaceId: context.workspaceId,
-        botId,
-      });
-      scheduleComputerSleep(deps.wakeup, botId);
-      return {
+      const live: ComputerRef = {
         ...shared,
         botId,
         display: existing.display,
         screenUrl: sessionRef.screenUrl,
       };
+      await restoreSandboxHome(deps.sandbox, live, { ...context, botId });
+      await openComputerUsage(deps.prisma, {
+        workspaceId: context.workspaceId,
+        botId,
+      });
+      scheduleComputerSleep(deps.wakeup, botId);
+      return live;
     } catch (error) {
       if (!persisted) {
         const released = await releaseDesktopBootFailure(deps.prisma, botId, claim.token, error);

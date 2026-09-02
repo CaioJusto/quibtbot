@@ -28,6 +28,11 @@ export const PORTABLE_HOME_EXCLUDED_SEGMENTS: ReadonlySet<string> = new Set([
   ".X11-unix",
   "novnc",
   ".novnc",
+  "SingletonLock",
+  "SingletonSocket",
+  "SingletonCookie",
+  "lockfile",
+  "LOCK",
 ]);
 
 export interface PortableHomeEntry {
@@ -38,6 +43,8 @@ export interface PortableHomeEntry {
 export interface PortableHomeLayout {
   homeRoot: string;
   chromeRoots: string[];
+  /** Docker / VPS share one /home; apply must not overlay a sibling's live house. */
+  sharedHome: boolean;
 }
 
 export interface PortableHomeVolume {
@@ -52,6 +59,7 @@ export interface WorkspaceCheckpointStore {
 
 export type SandboxWithPortableHome = SandboxProvider & {
   checkpointHome(computer: ComputerRef, context: AdapterContext): Promise<void>;
+  restoreHome(computer: ComputerRef, context: AdapterContext): Promise<void>;
   collectPortableHome?(
     computer: ComputerRef,
     context: AdapterContext,
@@ -68,6 +76,17 @@ export function shouldExcludePortablePath(relativePath: string): boolean {
   return parts.some((part) => PORTABLE_HOME_EXCLUDED_SEGMENTS.has(part));
 }
 
+export function isSafePortablePath(relativePath: string): boolean {
+  const parts = relativePath.replace(/\\/g, "/").split("/");
+  if (parts[0] !== "home" && parts[0] !== "chrome") return false;
+  return parts.every((part) => part.length > 0 && part !== "." && part !== "..");
+}
+
+export function isSharedWorkspaceHome(kind: string): boolean {
+  const family = machineFamily(kind) ?? kind;
+  return family === "docker" || family === "remote-supervisor";
+}
+
 export function portableHomeLayout(kind: string, botId: string): PortableHomeLayout {
   const family = machineFamily(kind) ?? kind;
   if (family === "e2b") {
@@ -78,6 +97,7 @@ export function portableHomeLayout(kind: string, botId: string): PortableHomeLay
         "/home/user/.config/google-chrome",
         "/home/user/.config/google-chrome-for-testing",
       ],
+      sharedHome: false,
     };
   }
   if (family === "box") {
@@ -88,6 +108,7 @@ export function portableHomeLayout(kind: string, botId: string): PortableHomeLay
         "/home/ubuntu/.config/google-chrome",
         "/home/ubuntu/.config/google-chrome-for-testing",
       ],
+      sharedHome: false,
     };
   }
   if (family === "daytona") {
@@ -98,12 +119,14 @@ export function portableHomeLayout(kind: string, botId: string): PortableHomeLay
         "/home/daytona/.config/google-chrome",
         "/home/daytona/.config/google-chrome-for-testing",
       ],
+      sharedHome: false,
     };
   }
   const chrome = `/quibt-desktops/${botId}/chrome`;
   return {
     homeRoot: "/home/quibt",
     chromeRoots: [chrome, "/home/quibt/.config/chromium", "/home/quibt/.config/google-chrome"],
+    sharedHome: isSharedWorkspaceHome(kind),
   };
 }
 
@@ -136,7 +159,7 @@ export function applyToFileMap(
 ): void {
   const chromeRoot = layout.chromeRoots[0] ?? path.posix.join(layout.homeRoot, ".config/chromium");
   for (const entry of entries) {
-    if (shouldExcludePortablePath(entry.path)) continue;
+    if (!shouldApplyEntry(entry.path, layout.sharedHome)) continue;
     const abs = materializeAbs(entry.path, layout.homeRoot, chromeRoot);
     if (!abs) continue;
     files.set(abs, new TextDecoder().decode(entry.content));
@@ -146,6 +169,7 @@ export function applyToFileMap(
 export function hostDirPortableHomeVolume(input: {
   homeRoot: string;
   chromeRoot: string;
+  sharedHome?: boolean;
 }): PortableHomeVolume {
   return {
     async collect() {
@@ -155,7 +179,7 @@ export function hostDirPortableHomeVolume(input: {
     },
     async apply(entries) {
       for (const entry of entries) {
-        if (shouldExcludePortablePath(entry.path)) continue;
+        if (!shouldApplyEntry(entry.path, input.sharedHome === true)) continue;
         const abs = materializeHost(entry.path, input.homeRoot, input.chromeRoot);
         if (!abs) continue;
         await mkdir(path.dirname(abs), { recursive: true });
@@ -172,9 +196,9 @@ export function createWorkspaceCheckpointStore(input: {
   const root = path.resolve(input.dataDir, WORKSPACE_CHECKPOINT_DIR);
   return {
     async save(botId, entries) {
-      const filtered = entries.filter((entry) => !shouldExcludePortablePath(entry.path));
+      const filtered = entries.filter((entry) => isStoreableEntry(entry.path));
       const payload = encodeSnapshot(filtered);
-      const cipher = encryptBytes(input.encryptionKey, payload);
+      const cipher = encryptBytes(input.encryptionKey, payload, botId);
       const dir = path.join(root, safeId(botId));
       await mkdir(dir, { recursive: true });
       const dest = path.join(dir, WORKSPACE_CHECKPOINT_FILE);
@@ -186,7 +210,7 @@ export function createWorkspaceCheckpointStore(input: {
       const dest = path.join(root, safeId(botId), WORKSPACE_CHECKPOINT_FILE);
       try {
         const buf = await readFile(dest);
-        return decodeSnapshot(decryptBytes(input.encryptionKey, buf));
+        return decodeSnapshot(decryptBytes(input.encryptionKey, buf, botId));
       } catch (error) {
         if (isMissing(error)) return null;
         throw error;
@@ -245,6 +269,7 @@ export function portableHomeVolumeFor(
     return hostDirPortableHomeVolume({
       homeRoot: workspaceHomeOnHost(options.dataDir, context.workspaceId),
       chromeRoot: workspaceChromeOnHost(options.dataDir, context.workspaceId, computer.botId),
+      sharedHome: true,
     });
   }
   return commandPortableHomeVolume(provider, computer, context);
@@ -282,18 +307,18 @@ export function withWorkspaceCheckpoint(
   };
 
   const restoreHome = async (computer: ComputerRef, context: AdapterContext) => {
-    try {
-      await restorePortableHome(store, computer.botId, volume(computer, context));
-    } catch (error) {
-      console.error("workspace-checkpoint: restore failed", error);
-    }
+    await restorePortableHome(store, computer.botId, volume(computer, context));
   };
 
   const wrapped: SandboxWithPortableHome = {
     describe: () => provider.describe(),
     async provision(request, context) {
       const ref = await provider.provision(request, context);
-      await restoreHome(ref, { ...context, botId: request.botId });
+      // Workspace-scoped Docker boots the container as botId "workspace"; the
+      // real bot restore happens in bootSharedDesktopSession.
+      if (request.botId !== "workspace") {
+        await restoreHome({ ...ref, botId: request.botId }, { ...context, botId: request.botId });
+      }
       return ref;
     },
     execute: (computer, request, context) => provider.execute(computer, request, context),
@@ -311,6 +336,7 @@ export function withWorkspaceCheckpoint(
       await provider.destroy(computer, context);
     },
     checkpointHome,
+    restoreHome,
   };
 
   if (provider.revokeScreen) {
@@ -364,6 +390,16 @@ export async function checkpointSandboxHome(
   await provider.checkpointHome(computer, context);
 }
 
+export async function restoreSandboxHome(
+  sandbox: SandboxProvider,
+  computer: ComputerRef,
+  context: AdapterContext,
+): Promise<void> {
+  const provider = sandbox as SandboxWithPortableHome;
+  if (typeof provider.restoreHome !== "function") return;
+  await provider.restoreHome(computer, context);
+}
+
 function commandPortableHomeVolume(
   provider: SandboxProvider,
   computer: ComputerRef,
@@ -385,17 +421,17 @@ function commandPortableHomeVolume(
         files?: Array<{ p?: string; c?: string }>;
       };
       return (parsed.files ?? [])
-        .filter((file): file is { p: string; c: string } => Boolean(file.p && file.c))
-        .filter((file) => !shouldExcludePortablePath(file.p))
+        .filter((file): file is { p: string; c: string } => typeof file.p === "string")
+        .filter((file) => isStoreableEntry(file.p))
         .map((file) => ({
           path: file.p,
-          content: Buffer.from(file.c, "base64"),
+          content: Buffer.from(file.c ?? "", "base64"),
         }));
     },
     async apply(entries) {
       const chromeRoot =
         layout.chromeRoots[0] ?? path.posix.join(layout.homeRoot, ".config/chromium");
-      const filtered = entries.filter((entry) => !shouldExcludePortablePath(entry.path));
+      const filtered = entries.filter((entry) => shouldApplyEntry(entry.path, layout.sharedHome));
       for (const batch of chunk(filtered, 16)) {
         const result = await runCaptured(
           provider,
@@ -435,9 +471,13 @@ function collectPython(layout: PortableHomeLayout): string {
     `EXCL=set(${JSON.stringify([...PORTABLE_HOME_EXCLUDED_SEGMENTS])})`,
     `HOME=${JSON.stringify(layout.homeRoot)}`,
     `CHROMES=${JSON.stringify(layout.chromeRoots)}`,
+    "CHROME_ABS=[os.path.abspath(c) for c in CHROMES if c]",
     "def skip(p):",
     "    return any(part in EXCL for part in p.replace('\\\\','/').split('/'))",
-    "def walk(root, prefix):",
+    "def under_chrome(full):",
+    "    a=os.path.abspath(full)",
+    "    return any(a==c or a.startswith(c+os.sep) for c in CHROME_ABS)",
+    "def walk(root, prefix, omit_chrome=False):",
     "    out=[]",
     "    if not os.path.isdir(root):",
     "        return out",
@@ -445,6 +485,8 @@ function collectPython(layout: PortableHomeLayout): string {
     "        dns[:] = [d for d in dns if d not in EXCL]",
     "        for name in fns:",
     "            full=os.path.join(dp,name)",
+    "            if omit_chrome and under_chrome(full):",
+    "                continue",
     "            rel=os.path.relpath(full,root).replace(os.sep,'/')",
     "            portable=f'{prefix}/{rel}'",
     "            if skip(portable):",
@@ -455,7 +497,7 @@ function collectPython(layout: PortableHomeLayout): string {
     "                continue",
     "            out.append({'p':portable,'c':base64.b64encode(data).decode('ascii')})",
     "    return out",
-    "files=walk(HOME,'home')",
+    "files=walk(HOME,'home',True)",
     "for chrome in CHROMES:",
     "    if chrome and os.path.isdir(chrome):",
     "        files.extend(walk(chrome,'chrome'))",
@@ -471,21 +513,34 @@ function applyPython(homeRoot: string, chromeRoot: string, entries: PortableHome
   }));
   return [
     "import json,os,base64",
-    `HOME=${JSON.stringify(homeRoot)}`,
-    `CHROME=${JSON.stringify(chromeRoot)}`,
+    `HOME=os.path.abspath(${JSON.stringify(homeRoot)})`,
+    `CHROME=os.path.abspath(${JSON.stringify(chromeRoot)})`,
     `ITEMS=json.loads(${JSON.stringify(JSON.stringify(payload))})`,
+    "def contained(root, rel):",
+    "    if rel is None:",
+    "        return root",
+    "    if not rel or rel.startswith('/') or any(p in ('', '.', '..') for p in rel.split('/')):",
+    "        return None",
+    "    path=os.path.abspath(os.path.join(root, rel))",
+    "    if path!=root and not path.startswith(root+os.sep):",
+    "        return None",
+    "    return path",
     "def dest(portable):",
-    "    if portable=='home' or portable.startswith('home/'):",
-    "        return os.path.join(HOME, portable[5:]) if portable!='home' else HOME",
-    "    if portable=='chrome' or portable.startswith('chrome/'):",
-    "        return os.path.join(CHROME, portable[7:]) if portable!='chrome' else CHROME",
+    "    if portable=='home':",
+    "        return HOME",
+    "    if portable.startswith('home/'):",
+    "        return contained(HOME, portable[5:])",
+    "    if portable=='chrome':",
+    "        return CHROME",
+    "    if portable.startswith('chrome/'):",
+    "        return contained(CHROME, portable[7:])",
     "    return None",
     "for item in ITEMS:",
     "    path=dest(item['p'])",
     "    if not path:",
     "        continue",
     "    os.makedirs(os.path.dirname(path) or '.', exist_ok=True)",
-    "    open(path,'wb').write(base64.b64decode(item['c']))",
+    "    open(path,'wb').write(base64.b64decode(item.get('c') or ''))",
   ].join("\n");
 }
 
@@ -528,8 +583,18 @@ async function walkHostDir(root: string, prefix: string): Promise<PortableHomeEn
 
 function pushEntry(entries: PortableHomeEntry[], portable: string, content: string) {
   const cleaned = portable.replace(/\/+/g, "/");
-  if (!cleaned || shouldExcludePortablePath(cleaned)) return;
+  if (!cleaned || !isStoreableEntry(cleaned)) return;
   entries.push({ path: cleaned, content: new TextEncoder().encode(content) });
+}
+
+function shouldApplyEntry(portable: string, sharedHome: boolean): boolean {
+  if (!isStoreableEntry(portable)) return false;
+  if (sharedHome && (portable === "home" || portable.startsWith("home/"))) return false;
+  return true;
+}
+
+function isStoreableEntry(portable: string): boolean {
+  return isSafePortablePath(portable) && !shouldExcludePortablePath(portable);
 }
 
 function materializeAbs(portable: string, homeRoot: string, chromeRoot: string): string | null {
@@ -606,24 +671,25 @@ function decodeSnapshot(payload: Buffer): PortableHomeEntry[] {
     files?: Array<{ p?: string; c?: string }>;
   };
   return (body.files ?? [])
-    .filter((file): file is { p: string; c: string } => Boolean(file.p && file.c))
-    .filter((file) => !shouldExcludePortablePath(file.p))
-    .map((file) => ({ path: file.p, content: Buffer.from(file.c, "base64") }));
+    .filter((file): file is { p: string; c: string } => typeof file.p === "string")
+    .filter((file) => isStoreableEntry(file.p))
+    .map((file) => ({ path: file.p, content: Buffer.from(file.c ?? "", "base64") }));
 }
 
 function keyFrom(secret: string): Buffer {
   return createHash("sha256").update(secret).digest();
 }
 
-function encryptBytes(secret: string, plain: Buffer): Buffer {
+function encryptBytes(secret: string, plain: Buffer, aad: string): Buffer {
   const iv = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", keyFrom(secret), iv);
+  cipher.setAAD(Buffer.from(aad, "utf8"));
   const enc = Buffer.concat([cipher.update(plain), cipher.final()]);
   const tag = cipher.getAuthTag();
   return Buffer.concat([Buffer.from(WORKSPACE_CHECKPOINT_MAGIC), iv, tag, enc]);
 }
 
-function decryptBytes(secret: string, blob: Buffer): Buffer {
+function decryptBytes(secret: string, blob: Buffer, aad: string): Buffer {
   const magic = blob.subarray(0, 5).toString("utf8");
   if (magic !== WORKSPACE_CHECKPOINT_MAGIC) {
     throw new Error("Invalid workspace checkpoint");
@@ -632,6 +698,7 @@ function decryptBytes(secret: string, blob: Buffer): Buffer {
   const tag = blob.subarray(17, 33);
   const enc = blob.subarray(33);
   const decipher = createDecipheriv("aes-256-gcm", keyFrom(secret), iv);
+  decipher.setAAD(Buffer.from(aad, "utf8"));
   decipher.setAuthTag(tag);
   return Buffer.concat([decipher.update(enc), decipher.final()]);
 }

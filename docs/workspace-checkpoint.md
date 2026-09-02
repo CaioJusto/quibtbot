@@ -25,6 +25,11 @@ primeiro comando da pessoa.
 
 O mesmo `botId` lê o mesmo snapshot. Outro bot não compartilha.
 
+No Docker / VPS a casa `/home/quibt` é do escritório (vários bots). O snapshot
+ainda leva uma cópia daquela casa — útil ao ir para E2B, Box ou Daytona — mas
+a restauração **nesse** computador só escreve o perfil Chromium daquele bot.
+Assim um colega no mesmo container não perde os arquivos dele.
+
 ## Criptografia
 
 O blob em `DATA_DIR/workspace-checkpoints/<botId>/snapshot.qbhc` usa a mesma
