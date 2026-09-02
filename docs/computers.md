@@ -208,10 +208,12 @@ Conferido na [documentação oficial](https://www.daytona.io/docs/en/typescript-
 | Painel noVNC / stream no app         | Sim, URL assinada `/novnc/*`                                                | Sim, stream E2B                  | Sim, URL da Box                    | Sim, preview assinado da porta 6080  |
 | Assumir controle                     | noVNC + input xdotool                                                       | stream + `press` / mouse         | só noVNC interativo                | noVNC + Computer Use                 |
 | Vários bots ao mesmo tempo           | Sim, displays 1…32 no **mesmo** container                                   | Sim, **N sandboxes**             | Sim, **N VMs**                     | Sim, **N sandboxes**                 |
-| Persistência                         | Home no disco do host                                                       | Pause/resume do sandbox E2B      | Archive/resume do disco Box        | Stop/start do sandbox                |
-| Trocar de máquina depois             | Salva em `deployment_settings`; vale no **próximo** boot; o antigo é parado | idem                             | idem                               | idem                                 |
+| Persistência                         | Home no disco do host + checkpoint portátil por bot                         | Pause/resume **e** checkpoint em `DATA_DIR` | Archive/resume **e** checkpoint em `DATA_DIR` | Stop/start **e** checkpoint em `DATA_DIR` |
+| Trocar de máquina depois             | Salva em `deployment_settings`; no próximo boot o home e o perfil Chromium voltam do checkpoint | idem                             | idem                               | idem                                 |
 
-O roteador (`createRoutingSandboxProvider`) nunca teleporta um desktop ligado para outro provedor. Computador já criado fica na família que o criou.
+O roteador (`createRoutingSandboxProvider`) nunca teleporta um desktop ligado para outro provedor. Computador já criado fica na família que o criou até o próximo boot; aí o disco do vendor é só cache. Arquivos e cookies do Chromium daquele bot voltam de um snapshot em `DATA_DIR` — ver [workspace-checkpoint.md](./workspace-checkpoint.md). Janelas abertas, o X11 e o noVNC **não** atravessam a troca.
+
+**Limite honesto da troca:** o que sobrevive é a pasta de casa e o perfil do navegador (logins gravados no Chromium). A mesa gráfica não teleporta: ao ligar noutro provedor a tela nasce vazia, com os arquivos e os cookies já no lugar.
 
 ## Onde o texto do app vive
 
