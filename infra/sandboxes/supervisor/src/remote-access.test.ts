@@ -89,8 +89,12 @@ describe("docs: só prometem o que o código faz", () => {
     expect(selfHostDoc).toContain("SANDBOX_SCREEN_BIND_HOST");
   });
 
-  it("as duas documentações dizem que a tela não atravessa um supervisor remoto", () => {
-    expect(computersDoc).toMatch(/tela.*(não|nao).*(remoto|mesma máquina)/i);
+  it("as duas documentações descrevem a tela ao vivo por túnel SSH", () => {
+    expect(computersDoc).toMatch(/túnel SSH|docker -H ssh:\/\//i);
+    expect(computersDoc).toMatch(/127\.0\.0\.1/);
+    expect(selfHostDoc).toMatch(/SSH tunnel|ssh:\/\//i);
+    expect(computersDoc).not.toMatch(/A tela não atravessa um supervisor remoto/);
+    expect(selfHostDoc).not.toMatch(/The screen does not cross a remote supervisor/);
   });
 });
 

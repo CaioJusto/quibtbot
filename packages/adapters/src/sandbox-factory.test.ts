@@ -48,6 +48,21 @@ describe("createSandboxProvider", () => {
     expect(sandbox.describe().id).toBe("remote-supervisor");
   });
 
+  it("trata um alias SSH como remote-supervisor, sem exigir token", () => {
+    const sandbox = createSandboxProvider("remote-supervisor", {
+      remoteSupervisorUrl: "meu-vps",
+      ssh: {
+        resolveAlias: async () => ({ ok: true }),
+        refusePublishedWebPorts: async () => undefined,
+        supervisorOrigin: async () => "http://127.0.0.1:18080",
+        openNovncTunnel: async () => {
+          throw new Error("factory não abre túnel");
+        },
+      },
+    });
+    expect(sandbox.describe().id).toBe("remote-supervisor");
+  });
+
   it("refuses the host desktop provider", () => {
     expect(() => createSandboxProvider("desktop", {})).toThrow(/not an OS isolation boundary/);
   });

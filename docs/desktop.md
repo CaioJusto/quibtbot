@@ -5,8 +5,10 @@ The Mac `.dmg`, Windows installer, and Linux AppImage wrap the same web UI in El
 **Onde o Quibt fica ligado?** This machine, by default: the desktop app boots the same
 Postgres/API/worker stack a source checkout would, on the computer you installed it on.
 **Onde os bots trabalham?** Docker on that same machine unless you pick E2B, Box, Daytona, or a VPS in
-onboarding — a separate choice from where the server itself runs. See
-[`docs/architecture.md`](./architecture.md).
+onboarding — a separate choice from where the server itself runs. A VPS can be the whole stack
+(`quibtbot install`) or just the bot computer: paste an SSH `Host` alias from this Mac/PC's
+`~/.ssh/config` and the live screen tunnels to `127.0.0.1` (never a pasted key or password). See
+[`docs/architecture.md`](./architecture.md) and [`docs/computers.md`](./computers.md).
 
 Claude Code, Codex, Grok e uma CLI ACP extra também podem ser usados como motores de modelo
 quando a CLI está no `PATH` dos processos da API e do worker. A CLI usa o login do host e tem

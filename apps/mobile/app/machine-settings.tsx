@@ -1,3 +1,4 @@
+import { isSshHostAlias } from "@quibt/contracts";
 import {
   chosenMachineMatches,
   machineCredentialsReady,
@@ -236,16 +237,25 @@ export function MachineSettingsBody({ onSaved }: { onSaved?: () => void }) {
         })}
       </View>
       {item?.needsEndpoint ? (
-        <TextInput
-          value={endpoint}
-          onChangeText={setEndpoint}
-          placeholder={item.endpointLabel ?? "URL do supervisor"}
-          placeholderTextColor={COLORS.tertiary}
-          autoCapitalize="none"
-          style={styles.input}
-        />
+        <>
+          <TextInput
+            value={endpoint}
+            onChangeText={setEndpoint}
+            placeholder={item.endpointLabel ?? "Alias SSH ou URL do supervisor"}
+            placeholderTextColor={COLORS.tertiary}
+            autoCapitalize="none"
+            style={styles.input}
+          />
+          {item.family === "remote-supervisor" ? (
+            <Text style={styles.savedCredential}>
+              Alias SSH do ~/.ssh/config no computador da API: tela ao vivo por túnel até 127.0.0.1,
+              sem publicar 80/443. Nunca cole chave nem senha. Ou URL https do supervisor-tls e o
+              token. Celular 24 h: instale o Quibt inteiro na VPS.
+            </Text>
+          ) : null}
+        </>
       ) : null}
-      {item?.needsKey ? (
+      {item?.needsKey && !isSshHostAlias(endpoint) ? (
         <>
           <TextInput
             value={apiKey}

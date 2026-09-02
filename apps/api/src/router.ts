@@ -60,6 +60,7 @@ import {
   appContract,
   type ComputerStatus,
   type GroupThreadSnapshot,
+  isSshHostAlias,
   type Me,
   type MessageBlock,
   type ThreadSnapshot,
@@ -1815,6 +1816,13 @@ export function createRouter(deps: RouterDeps) {
         // Um arquivo por bot: no Docker os bots dividem o mesmo /tmp, e dois pollers (o
         // painel web num bot, o celular noutro) escrevendo o mesmo nome entregavam a
         // tela de um como retrato do outro, ou um PNG pela metade.
+        const loopback = await deps.sandbox.getLoopbackPreview?.(computer);
+        if (loopback?.contentType.includes("image/png") && loopback.bytes.length > 0) {
+          const image = `data:image/png;base64,${Buffer.from(loopback.bytes).toString("base64")}`;
+          const at = Date.now();
+          rememberPreview(bot.id, { image, at });
+          return { image, capturedAt: new Date(at).toISOString() };
+        }
         const target = previewImagePath(bot.id);
         const run = {
           operationId: "preview",
@@ -3627,17 +3635,25 @@ async function saveDeploymentMachine(
       }
     }
     if (definition?.needsKey) {
+      const sshAlias =
+        isSshHostAlias(input.sandboxEndpoint?.trim() ?? "") ||
+        isSshHostAlias(existing?.sandboxEndpoint?.trim() ?? "");
       const envCovers =
         (boot === "e2b" && (available.includes("e2b") || Boolean(deps.env.e2bApiKey))) ||
         (boot === "box" && (available.includes("box") || Boolean(deps.env.boxApiKey))) ||
         (boot === "daytona" &&
           (available.includes("daytona") || Boolean(deps.env.daytonaApiKey))) ||
         (boot === "remote-supervisor" && Boolean(deps.env.sandboxSupervisorToken));
-      if (!input.sandboxApiKey?.trim() && !hasSavedKey && !envCovers) {
+      if (
+        !input.sandboxApiKey?.trim() &&
+        !hasSavedKey &&
+        !envCovers &&
+        !(boot === "remote-supervisor" && sshAlias)
+      ) {
         throw new ORPCError("BAD_REQUEST", {
           message:
             boot === "remote-supervisor"
-              ? "Cole o token do supervisor da sua VPS."
+              ? "Cole o token do supervisor da sua VPS, ou um alias SSH do ~/.ssh/config."
               : `Cole a chave da sua conta ${boot === "e2b" ? "E2B" : boot === "box" ? "Box" : "Daytona"}.`,
         });
       }

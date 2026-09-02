@@ -143,6 +143,7 @@ describe("machineCredentialsReady", () => {
     expect(machineCredentialsReady(vps, { endpoint: "https://vps:7091", apiKey: "tok" }).ok).toBe(
       true,
     );
+    expect(machineCredentialsReady(vps, { endpoint: "meu-vps", apiKey: "" }).ok).toBe(true);
   });
 });
 

@@ -1,6 +1,6 @@
 import { lookup as dnsLookup } from "node:dns/promises";
 import { isIP } from "node:net";
-import { isAllowedSandboxEndpoint } from "@quibt/contracts";
+import { isAllowedSandboxEndpoint, isSshHostAlias } from "@quibt/contracts";
 import { bootableKind } from "@quibt/core";
 import { isPrivateMcpAddress, type ResolveHost } from "./mcp-http.js";
 import {
@@ -8,6 +8,7 @@ import {
   createGuardedFetch,
   type ProbeNetworkPolicy,
 } from "./pinned-fetch.js";
+import { probeSshDockerComputer, type SshDockerPort } from "./ssh-docker.js";
 
 export interface ComputerProbeInput {
   kind: string;
@@ -25,6 +26,8 @@ export interface ComputerProbeResult {
 export interface ComputerProbeOptions {
   /** Os testes trocam o DNS; em produção é o `lookup` do Node. */
   resolveHost?: ResolveHost;
+  /** Os testes fakesiam `ssh`/`docker`; em produção é o CLI do host da API. */
+  ssh?: SshDockerPort;
 }
 
 /**
@@ -109,7 +112,13 @@ export async function probeComputer(
   }
   const url = (input.endpoint || input.supervisorUrl || "").trim().replace(/\/$/, "");
   if (boot === "remote-supervisor" && !url) {
-    return { ok: false, message: "Cole a URL https do supervisor da sua VPS." };
+    return {
+      ok: false,
+      message: "Cole o alias SSH do ~/.ssh/config, ou a URL https do supervisor da sua VPS.",
+    };
+  }
+  if (boot === "remote-supervisor" && url && isSshHostAlias(url)) {
+    return probeSshDockerComputer({ alias: url, ssh: options.ssh });
   }
   const target = url || "http://127.0.0.1:7091";
   if (!isAllowedSandboxEndpoint(target)) {

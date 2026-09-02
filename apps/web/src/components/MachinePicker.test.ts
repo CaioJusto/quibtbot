@@ -14,12 +14,14 @@ describe("MachineCredentials", () => {
     // `--profile supervisor-tls`, é o Caddy em 443, pelo nome público. Um placeholder com
     // `:7091` ensina um endereço que não responde.
     expect(src).not.toMatch(/https?:\/\/[^\s"']*:7091/);
-    expect(src).toMatch(/placeholder="https:\/\/[^"]*"/);
+    expect(src).toMatch(/placeholder="[^"]*https:\/\/[^"]*"/);
     expect(src).toContain("supervisor-tls");
   });
 
-  it("says the screen does not cross a remote supervisor", () => {
-    expect(src).toMatch(/tela[^\n]{0,200}(não|nao)/i);
+  it("says the live screen arrives over an SSH tunnel to loopback", () => {
+    expect(src).toMatch(/túnel temporário do noVNC até 127\.0\.0\.1/);
+    expect(src).toMatch(/Alias SSH do ~\/\.ssh\/config/);
+    expect(src).not.toMatch(/painel do computador fica preto/);
   });
 
   it("keeps using the shared catalog labels instead of inventing copy", () => {

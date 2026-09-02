@@ -1,3 +1,4 @@
+import { isSshHostAlias } from "@quibt/contracts";
 import { bootableKind } from "./computer-catalog.js";
 import type { QuibtEdition } from "./edition.js";
 
@@ -199,7 +200,8 @@ export function machineCredentialsReady(
   if (item.needsEndpoint && !input.endpoint.trim() && !item.configured) {
     return { ok: false, message: item.endpointLabel ?? "Cole a URL do supervisor da sua VPS." };
   }
-  if (item.needsKey && !input.apiKey.trim() && !item.configured) {
+  const sshAlias = isSshHostAlias(input.endpoint.trim());
+  if (item.needsKey && !input.apiKey.trim() && !item.configured && !sshAlias) {
     return { ok: false, message: item.keyLabel ?? "Cole a chave da sua conta para esta máquina." };
   }
   return { ok: true };

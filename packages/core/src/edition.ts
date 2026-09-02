@@ -147,7 +147,7 @@ export const OSS_MACHINE_COPY: Record<OssMachine, { title: string; body: string 
   },
   "remote-supervisor": {
     title: "Minha VPS",
-    body: "O computador fica no seu servidor. Cole a URL e o token do supervisor. O celular continua com o notebook desligado.",
+    body: "O computador fica no seu servidor. Cole o alias SSH do ~/.ssh/config (tela ao vivo no notebook) ou a URL e o token do supervisor. O celular 24 h pede o stack inteiro na VPS.",
   },
   e2b: {
     title: "E2B",

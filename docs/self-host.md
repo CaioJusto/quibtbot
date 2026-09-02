@@ -95,16 +95,22 @@ Caddy terminates TLS for that name and talks to the supervisor over the internal
 supervisor still requires `SANDBOX_SUPERVISOR_TOKEN` on every `/computers` route. It binds
 80/443, the same ports as the site's `public` profile — do not run both on one host.
 
-In the app, paste the **https** endpoint and the same token. The endpoint is checked before it is
-stored: `https` outside loopback, no RFC1918 / CGNAT / link-local literal, no `169.254.169.254`,
-no embedded credentials, and a name that resolves into a private network is refused before any
-socket is opened. **Testar máquina** now calls an authenticated route (`GET /computers/_probe`),
-so a wrong token fails the test instead of failing every later boot.
+In the app, paste the **https** endpoint and the same token, **or** an SSH `Host` alias from
+this machine's `~/.ssh/config` (never a private key, never a password). The endpoint is checked
+before it is stored: `https` outside loopback, no RFC1918 / CGNAT / link-local literal, no
+`169.254.169.254`, no embedded credentials, and a name that resolves into a private network is
+refused before any socket is opened. An SSH alias is probed with `ssh -o BatchMode=yes -G`
+and `docker -H ssh://<alias>` — a missing Host or a password prompt fails **Testar**. The
+https path still calls `GET /computers/_probe`, so a wrong token fails the test instead of
+failing every later boot.
 
-**The screen does not cross a remote supervisor.** noVNC stays on that host's internal Docker
-network, and the app's `/novnc` proxy only accepts loopback, RFC1918 and `quibt-bot-*` targets,
-so a public supervisor's screen is unreachable. Commands, files and routines work; the screen
-panel stays black. If you want the screen, install the whole stack on that host.
+**Live screen over SSH.** When the API runs on your laptop and the bot computer lives on the
+VPS, Quibt talks to Docker with `docker -H ssh://<alias>` and opens a temporary SSH tunnel
+that forwards the container's noVNC (or the supervisor's internal bind) to `127.0.0.1` on
+the API host. `/novnc` and `computer.preview` are served from that loopback. The tunnel
+closes when the Computer panel closes or the control lease expires. This path never publishes
+supervisor `:7091` to the internet and refuses published 80/443 on the VPS Docker. Keep the
+existing whole-stack install on the VPS when you want the phone to work with the laptop off.
 
 `SANDBOX_SCREEN_HOST` is the host clients use to reach a screen port, and
 `SANDBOX_SCREEN_BIND_HOST` is the interface Docker publishes it on (`127.0.0.1` by default).

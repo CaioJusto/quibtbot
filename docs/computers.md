@@ -96,7 +96,9 @@ do Docker e o celular fala com a VPS quando o laptop está desligado. Nada para 
 3. Preenche o `.env` do servidor com `BETTER_AUTH_SECRET`, `ENCRYPTION_KEY`, `SANDBOX_SUPERVISOR_TOKEN` e `BOOTSTRAP_SECRET` (cada um com `openssl rand -hex 32`), mais `RESEND_API_KEY` ou `AUTH_EMAIL_DISABLED=true`, e sobe o Compose. O Compose roda como produção: valor faltando, com menos de 32 caracteres ou ainda começando com `replace-with-` faz o serviço recusar subir.
 4. Entra no Quibt dessa VPS por senha ou por código de pareamento. A entrada automática sem senha existe só no computador onde o Quibt roda: numa instalação de rede ou pública, `POST /api/local/session` responde 404 para todo mundo.
 
-**Só o computador noutra máquina (`remote-supervisor`)** — existe, e tem uma condição e um limite:
+**Só o computador noutra máquina (`remote-supervisor`)** — existe em dois modos: alias SSH
+(API no notebook, tela ao vivo por túnel) ou URL https (`supervisor-tls`). A porta `7091`
+nunca deve ser pública:
 
 - A porta `7091` **não é publicada** por padrão, e não deve ser: quem fala com ela manda no
   Docker daquele host. Para abri-la, o operador carrega um arquivo a mais e liga o profile, no
@@ -117,18 +119,27 @@ do Docker e o celular fala com a VPS quando o laptop está desligado. Nada para 
 - No Quibt, cole o endereço **https** desse nome e o **mesmo** token. "Testar máquina" agora
   bate numa rota que exige o token: token errado reprova ali, e não no primeiro boot. Endereço
   `http` fora de `127.0.0.1`, endereço de rede interna e `169.254.169.254` são recusados.
-- **A tela não atravessa um supervisor remoto.** O noVNC fica na rede interna do Docker daquele
-  host, e o proxy `/novnc` do app só alcança a tela quando o app roda no mesmo host (ou na mesma
-  rede privada, com `SANDBOX_SCREEN_HOST`/`SANDBOX_SCREEN_BIND_HOST` definidos lá — ver
-  [docs/self-host.md](./self-host.md)). Com a API no notebook e o supervisor na VPS, os comandos,
-  os arquivos e as rotinas funcionam; o painel da tela fica preto. Se você quer ver a tela,
-  instale o stack inteiro na VPS.
+- **Tela ao vivo com a API no notebook.** Cole o alias `Host` que já existe no `~/.ssh/config`
+  (nunca uma chave privada, nunca uma senha). O Quibt fala com o Docker da VPS com
+  `docker -H ssh://<alias>` e abre um túnel SSH temporário do noVNC até `127.0.0.1` neste
+  computador. O proxy `/novnc` e o retrato `computer.preview` saem desse loopback. O túnel
+  fecha quando o painel fecha ou o lease acaba. A `7091` do supervisor **não** é publicada
+  na internet; este caminho recusa 80/443 publicados no Docker da VPS. Comandos, arquivos e
+  rotinas continuam pelo supervisor, alcançado pelo mesmo túnel (IP da bridge, não uma porta
+  pública).
+- **Stack inteiro na VPS.** Continua valendo: `quibtbot install` no servidor, celular 24 h,
+  sem alias SSH. Aí a tela fica na rede Docker daquele host. Numa rede **privada**,
+  `SANDBOX_SCREEN_HOST` / `SANDBOX_SCREEN_BIND_HOST` ainda alcançam a tela de outro aparelho
+  — ver [docs/self-host.md](./self-host.md).
 
 **O que o sistema faz de verdade**
 
-- É o `DockerSandboxProvider` apontando para outro host. Mesma imagem, mesmas sessões por bot.
+- É o `DockerSandboxProvider` apontando para outro host — URL https **ou** alias SSH.
+  Mesma imagem, mesmas sessões por bot.
 - Receitas (`vps-hetzner`, …) **ativam como** `remote-supervisor` depois que o host responde.
-- O celular, com a mesma conta, continua falando com a API da VPS quando o laptop está off.
+- O celular, com a mesma conta, continua falando com a API da VPS quando o laptop está off
+  (caminho do stack inteiro). Com a API no notebook, o laptop precisa estar ligado para a
+  tela e para os comandos.
 
 Documentação dos provedores (não da Quibt): [criar servidor Hetzner](https://docs.hetzner.com/cloud/servers/getting-started/creating-a-server), [criar Droplet](https://docs.digitalocean.com/products/droplets/how-to/create/).
 

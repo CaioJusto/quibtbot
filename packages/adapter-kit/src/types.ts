@@ -65,6 +65,11 @@ export interface ScreenSession {
    * endereço de antes do reboot, cuja porta e senha já não existem.
    */
   reason?: string;
+  /**
+   * Endereço estável para o banco. A URL viva pode ser um túnel em 127.0.0.1; gravar essa
+   * porta efêmera deixaria a próxima abertura apontando para um soquete morto.
+   */
+  persistedUrl?: string;
   close(): Promise<void>;
 }
 

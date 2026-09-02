@@ -206,7 +206,7 @@ The app you open and the computer provider are separate. Web, Electron, and mobi
 | `SANDBOX_PROVIDER` | Where commands run | Best fit |
 | --- | --- | --- |
 | `docker` (default) | One resource-limited Linux container per workspace, **one graphical desktop per bot** | Local and trusted single-machine self-host |
-| `remote-supervisor` | Same Docker supervisor on a host you already run, **one graphical desktop per bot** | BYO VPS (`SANDBOX_REMOTE_SUPERVISOR_URL` or Settings → Máquina) |
+| `remote-supervisor` | Same Docker supervisor on a host you already run, **one graphical desktop per bot** | BYO VPS: SSH `Host` alias (live screen tunneled to `127.0.0.1`) or https URL + token (`SANDBOX_REMOTE_SUPERVISOR_URL` or Settings → Máquina) |
 | `e2b` | Remote E2B sandbox, **one sandbox per bot** | Public or multi-user (env or BYOK); bot computer only, never a server host |
 | `box` | Persistent Ubuntu VM, **one VM per bot** | Public or multi-user (env or BYOK) |
 | `daytona` | Private Daytona sandbox with Computer Use, **one sandbox per bot** | Public or multi-user (env or BYOK) |

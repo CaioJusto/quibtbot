@@ -203,7 +203,8 @@ export async function ensureDesktopScreenUrl(
       ? undefined
       : (session.screenUrl ?? undefined);
   }
-  const persistedUrl = screenUrlForPersistence(screen.url, session.computer.kind);
+  const persistedUrl =
+    screen.persistedUrl ?? screenUrlForPersistence(screen.url, session.computer.kind);
   if (persistedUrl === session.screenUrl) return screen.url;
   try {
     await deps.prisma.desktopSession.updateMany({

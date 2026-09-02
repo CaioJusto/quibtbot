@@ -1,3 +1,4 @@
+import { isSshHostAlias } from "@quibt/contracts";
 import { OSS_MACHINE_COPY, OSS_MACHINES, type OssMachine, parseOssMachine } from "./edition.js";
 import { INSTALL_SCRIPT_RAW_URL } from "./install-script.js";
 
@@ -57,8 +58,9 @@ export const MACHINE_CATALOG: MachineCatalogDefinition[] = [
     needsKey: true,
     needsEndpoint: true,
     needsDocker: false,
-    keyLabel: "Token do supervisor",
-    endpointLabel: "URL https do supervisor (o outro host precisa do profile supervisor-tls)",
+    keyLabel: "Token do supervisor (só no caminho https)",
+    endpointLabel:
+      "Alias SSH do ~/.ssh/config, ou URL https (o outro host precisa do profile supervisor-tls)",
     searchable: ["vps", "supervisor", "remoto", "self-host", "ssh", "servidor"],
   },
   {
@@ -200,7 +202,9 @@ export function machineIsReady(kind: string, readiness: CatalogReadiness): boole
   const boot = bootableKind(kind);
   if (boot === "docker") return readiness.dockerReady !== false;
   if (boot === "remote-supervisor") {
-    return Boolean(readiness.remoteSupervisorUrl && readiness.remoteSupervisorToken);
+    const url = readiness.remoteSupervisorUrl?.trim() ?? "";
+    if (url && isSshHostAlias(url)) return true;
+    return Boolean(url && readiness.remoteSupervisorToken);
   }
   if (boot === "e2b") return Boolean(readiness.e2bApiKey);
   if (boot === "box") return Boolean(readiness.boxApiKey);
