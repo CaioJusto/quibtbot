@@ -77,16 +77,80 @@ export async function discoverPublicIpv4(
 
 export type PortCheck = (port: number) => Promise<boolean>;
 
-/** `true` quando dá para escutar na porta em todas as interfaces — ou seja, ela está livre. */
-export function portIsFree(port: number, host = "0.0.0.0"): Promise<boolean> {
+export type BindErrorKind = "busy" | "unprivileged" | "other";
+
+/** EACCES/EPERM: este usuário não pode bindar a porta; não significa que ela está ocupada. */
+export function classifyBindError(code: string | undefined): BindErrorKind {
+  if (code === "EADDRINUSE") return "busy";
+  if (code === "EACCES" || code === "EPERM") return "unprivileged";
+  return "other";
+}
+
+function tryListen(port: number, host: string): Promise<"free" | NodeJS.ErrnoException> {
   return new Promise((resolve) => {
     const server = net.createServer();
     server.unref();
-    server.once("error", () => resolve(false));
+    server.once("error", (error: NodeJS.ErrnoException) => resolve(error));
     server.listen({ port, host, exclusive: true }, () => {
-      server.close(() => resolve(true));
+      server.close(() => resolve("free"));
     });
   });
+}
+
+/**
+ * Alguém já aceita TCP nesta porta? Usado quando este processo não pode bindar
+ * (80/443 sem root). O Docker ainda publica essas portas; o que importa é se
+ * outro site/proxy já está na frente.
+ */
+export function probePortAccepting(
+  port: number,
+  hosts: readonly string[] = ["127.0.0.1", "::1"],
+  timeoutMs = 400,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    let remaining = hosts.length;
+    let settled = false;
+    const succeed = () => {
+      if (settled) return;
+      settled = true;
+      resolve(true);
+    };
+    const failOne = () => {
+      remaining -= 1;
+      if (!settled && remaining === 0) resolve(false);
+    };
+    for (const host of hosts) {
+      const socket = net.connect({ port, host });
+      socket.unref();
+      const timer = setTimeout(() => {
+        socket.destroy();
+        failOne();
+      }, timeoutMs);
+      socket.once("connect", () => {
+        clearTimeout(timer);
+        socket.destroy();
+        succeed();
+      });
+      socket.once("error", () => {
+        clearTimeout(timer);
+        socket.destroy();
+        failOne();
+      });
+    }
+  });
+}
+
+/**
+ * `true` quando a porta está livre para o Caddy/Docker publicar.
+ * Bind com sucesso prova isso. EADDRINUSE prova o contrário. EACCES em 80/443
+ * é o caso de `quibtbot install` como ubuntu: a porta privilegiada não é
+ * "ocupada" — cai para um connect e só então decide.
+ */
+export async function portIsFree(port: number, host = "0.0.0.0"): Promise<boolean> {
+  const result = await tryListen(port, host);
+  if (result === "free") return true;
+  if (classifyBindError(result.code) === "busy") return false;
+  return !(await probePortAccepting(port));
 }
 
 export type PublicAccessDecision =

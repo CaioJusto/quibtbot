@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
+import net from "node:net";
 import {
+  classifyBindError,
   decidePublicAccess,
   discoverPublicIpv4,
   instanceLabel,
   isPublicIpv4,
+  portIsFree,
+  probePortAccepting,
   sslipHost,
 } from "./public-access.js";
 
@@ -65,6 +69,44 @@ describe("discoverPublicIpv4", () => {
     expect(
       await discoverPublicIpv4(fetchImpl as typeof fetch, ["https://nat", "https://down"]),
     ).toBe(null);
+  });
+});
+
+describe("portIsFree", () => {
+  it("classifica EACCES/EPERM como falta de privilégio, não como porta ocupada", () => {
+    expect(classifyBindError("EADDRINUSE")).toBe("busy");
+    expect(classifyBindError("EACCES")).toBe("unprivileged");
+    expect(classifyBindError("EPERM")).toBe("unprivileged");
+    expect(classifyBindError("EADDRNOTAVAIL")).toBe("other");
+  });
+
+  it("vê uma porta alta livre e uma que este processo ocupa", async () => {
+    const server = net.createServer();
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => resolve());
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("sem porta");
+    try {
+      expect(await portIsFree(address.port)).toBe(false);
+      expect(await probePortAccepting(address.port)).toBe(true);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+    expect(await portIsFree(address.port)).toBe(true);
+    expect(await probePortAccepting(address.port)).toBe(false);
+  });
+
+  it("não trata EACCES em 80/443 como ocupada quando ninguém atende", async () => {
+    // `quibtbot install` numa Ubuntu comum roda como ubuntu, não como root.
+    // bind(80) dá EACCES; o Docker ainda consegue publicar 80/443. Se o
+    // instalador traduz isso em "porta em uso", a VPS limpa fica local e o
+    // celular nunca ganha https.
+    for (const port of [80, 443]) {
+      if (await probePortAccepting(port)) continue;
+      expect(await portIsFree(port), `port ${port}`).toBe(true);
+    }
   });
 });
 
