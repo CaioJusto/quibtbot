@@ -554,7 +554,7 @@ export function createRouter(deps: RouterDeps) {
           provider: LOCAL_CLI_PROVIDER,
           // Marcador interno, não uma chave. O runtime local usa a sessão do próprio binário.
           plaintext: `local-cli:${input.binary}`,
-          label: localCliLabel(input.binary),
+          label: engine.label,
           modelId: input.binary,
           verified: true,
         });

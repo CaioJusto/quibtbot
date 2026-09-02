@@ -209,4 +209,32 @@ describe("modelos por CLI do host", () => {
       data: { code: "LOCAL_CLI_NOT_FOUND", binary: "grok" },
     });
   });
+
+  it("ativa a CLI ACP extra detectada e recusa quando o binário não está no host", async () => {
+    const { router, created } = harness(
+      () => {
+        throw new Error("must not probe");
+      },
+      {},
+      async () => [{ id: "acp", label: "my-agent", path: "/home/test/.local/bin/my-agent" }],
+    );
+    const credential = await call(router.models.connectCli, { binary: "acp" }, { context });
+    expect(credential).toMatchObject({ provider: "local-cli", label: "my-agent", verified: true });
+    expect(created).toContainEqual(
+      expect.objectContaining({ provider: "local-cli", defaultModel: "acp" }),
+    );
+    const missing = harness(
+      () => {
+        throw new Error("must not probe");
+      },
+      {},
+      async () => [],
+    );
+    await expect(
+      call(missing.router.models.connectCli, { binary: "acp" }, { context }),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      data: { code: "LOCAL_CLI_NOT_FOUND", binary: "acp" },
+    });
+  });
 });

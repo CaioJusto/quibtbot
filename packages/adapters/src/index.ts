@@ -9,6 +9,8 @@ export * from "./box-screens.js";
 export * from "./builtin-tools.js";
 export * from "./chief-of-staff.js";
 export * from "./child-bots.js";
+export * from "./cli-acp.js";
+export * from "./cli-tool-bridge.js";
 export * from "./composio-catalog-cache.js";
 export * from "./composio-connector.js";
 export * from "./composio-key.js";
