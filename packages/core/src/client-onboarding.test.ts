@@ -266,6 +266,12 @@ describe("machineCredentialsReady", () => {
       ).ok,
     ).toBe(true);
   });
+
+  it("um alias SSH da VPS não pede token do supervisor", () => {
+    const vps = { needsKey: true, needsEndpoint: true };
+    expect(machineCredentialsReady(vps, { endpoint: "meu-vps", apiKey: "" }).ok).toBe(true);
+    expect(machineCredentialsReady(vps, { endpoint: "", apiKey: "" }).ok).toBe(false);
+  });
 });
 
 describe("chooseProvider", () => {

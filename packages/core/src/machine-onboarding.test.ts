@@ -105,9 +105,9 @@ describe("machineGuideFor", () => {
     }
   });
 
-  it("tells the VPS owner what the remote supervisor really needs, and what it cannot do", () => {
+  it("tells the VPS owner about the SSH live screen and the whole-stack path", () => {
     // A porta 7091 não é publicada; o operador liga o profile `supervisor-tls` (Caddy, 443) no
-    // host do computador. E a tela não atravessa supervisor remoto hoje.
+    // host do computador, ou cola um alias SSH para a tela chegar ao notebook por túnel.
     for (const kind of ["remote-supervisor", "vps-hetzner", "vps-digitalocean", "vps-generic"]) {
       const guide = machineGuideFor(kind);
       const text = [guide.what, ...guide.youNeed, ...guide.steps, guide.botsShare].join("\n");
@@ -115,8 +115,11 @@ describe("machineGuideFor", () => {
         /https?:\/\/[^\s"']*:7091/,
       );
       expect(text, `${kind} must name the opt-in profile`).toContain("supervisor-tls");
-      expect(text, `${kind} must say the screen does not cross it`).toMatch(
-        /tela[^\n]{0,160}(não|nao)/i,
+      expect(text, `${kind} must describe the SSH live screen`).toMatch(
+        /túnel SSH|alias SSH|127\.0\.0\.1/i,
+      );
+      expect(text, `${kind} must not claim the screen stays black`).not.toMatch(
+        /painel do computador fica preto|tela não atravessa/i,
       );
       expect(text, `${kind} must recommend the whole stack`).toMatch(
         /stack (inteiro|todo)|instale o Quibt inteiro/i,

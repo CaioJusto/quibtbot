@@ -480,24 +480,44 @@ function isInternalSandboxAddress(host: string): boolean {
 }
 
 /**
+ * Alias `Host` que já existe no `~/.ssh/config` do operador. Não é URL: sem esquema, sem
+ * porta, sem caminho. A chave fica no agente SSH; este campo nunca guarda chave nem senha.
+ */
+export function isSshHostAlias(value: string): boolean {
+  const alias = value.trim();
+  if (!alias || alias.length > 64) return false;
+  if (/[:/@\s]/.test(alias) || alias.includes("://")) return false;
+  return /^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(alias);
+}
+
+/**
  * Para onde este deploy aceita apontar um supervisor de computador (o caminho "VPS").
  *
- * O valor colado aqui recebe o token do supervisor em **todo** boot de bot, e quem manda no
- * supervisor manda no Docker daquele host. Um `z.string()` cru aceitava `http://` — token em
- * claro — e qualquer endereço interno, o que transformava "Testar máquina" numa requisição
- * autenticada que o dono podia apontar para 169.254.169.254 ou para a impressora da rede.
+ * Dois textos passam: um alias SSH do `~/.ssh/config` (API no notebook, Docker na VPS, tela
+ * por túnel até 127.0.0.1) ou uma URL https pública / loopback (stack inteiro na VPS, ou o
+ * supervisor deste computador).
  *
- * A política é a do `model-probe`, com um aperto: um supervisor remoto é uma máquina pública,
- * com nome e certificado, então a faixa privada não passa nem em https. `http` sobra só para o
- * loopback declarado (o supervisor deste computador, que é o caminho padrão do produto).
+ * O valor colado aqui, no caminho https, recebe o token do supervisor em **todo** boot de
+ * bot, e quem manda no supervisor manda no Docker daquele host. Um `z.string()` cru aceitava
+ * `http://` — token em claro — e qualquer endereço interno, o que transformava "Testar
+ * máquina" numa requisição autenticada que o dono podia apontar para 169.254.169.254 ou
+ * para a impressora da rede.
+ *
+ * A política da URL é a do `model-probe`, com um aperto: um supervisor remoto é uma máquina
+ * pública, com nome e certificado, então a faixa privada não passa nem em https. `http`
+ * sobra só para o loopback declarado (o supervisor deste computador, que é o caminho
+ * padrão do produto).
  *
  * Isto é a checagem síncrona do contrato, que só enxerga o texto. Um NOME que aponta para a
- * rede interna é recusado no `probeComputer`, que resolve o DNS antes de abrir socket.
+ * rede interna é recusado no `probeComputer`, que resolve o DNS antes de abrir socket. Um
+ * alias SSH sem `Host` no config falha no `ssh -G`, sem gravar chave.
  */
 export function isAllowedSandboxEndpoint(value: string): boolean {
+  const trimmed = value.trim();
+  if (isSshHostAlias(trimmed)) return true;
   let url: URL;
   try {
-    url = new URL(value.trim());
+    url = new URL(trimmed);
   } catch {
     return false;
   }
@@ -513,7 +533,7 @@ export function isAllowedSandboxEndpoint(value: string): boolean {
 
 export const SandboxEndpointInput = z.string().max(2048).refine(isAllowedSandboxEndpoint, {
   message:
-    "Endereço do supervisor precisa ser https de um host público (http só em 127.0.0.1). Endereço de rede interna não é aceito.",
+    "Use um alias SSH do ~/.ssh/config, ou https de um host público (http só em 127.0.0.1). Endereço de rede interna não é aceito.",
 });
 
 export const DeploymentSettingsSchema = z.object({

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isAllowedSandboxEndpoint, SandboxEndpointInput } from "./domain.js";
+import { isAllowedSandboxEndpoint, isSshHostAlias, SandboxEndpointInput } from "./domain.js";
 
 /**
  * O endereço do supervisor remoto recebe o token do supervisor em todo boot, e quem manda
@@ -36,8 +36,23 @@ describe("sandboxEndpoint", () => {
     expect(isAllowedSandboxEndpoint("")).toBe(false);
   });
 
+  it("aceita um alias SSH do ~/.ssh/config e recusa o que parece URL crua", () => {
+    expect(isSshHostAlias("meu-vps")).toBe(true);
+    expect(isSshHostAlias("vps.example.com")).toBe(true);
+    expect(isSshHostAlias("vps_1")).toBe(true);
+    expect(isSshHostAlias("vps.example.com:7091")).toBe(false);
+    expect(isSshHostAlias("ssh://meu-vps")).toBe(false);
+    expect(isSshHostAlias("user@vps")).toBe(false);
+    expect(isSshHostAlias("-evil")).toBe(false);
+    expect(isAllowedSandboxEndpoint("meu-vps")).toBe(true);
+    expect(isAllowedSandboxEndpoint("vps.example.com")).toBe(true);
+    expect(isAllowedSandboxEndpoint("vps.example.com:7091")).toBe(false);
+    expect(isAllowedSandboxEndpoint("ssh://meu-vps")).toBe(false);
+  });
+
   it("o schema do contrato recusa antes de gravar", () => {
     expect(SandboxEndpointInput.safeParse("https://minha-vps.example.com:7091").success).toBe(true);
+    expect(SandboxEndpointInput.safeParse("meu-vps").success).toBe(true);
     expect(SandboxEndpointInput.safeParse("http://203.0.113.9:7091").success).toBe(false);
     expect(SandboxEndpointInput.safeParse("https://169.254.169.254").success).toBe(false);
     expect(

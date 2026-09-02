@@ -2,6 +2,11 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, describe, expect, it } from "vitest";
 import { probeComputer, SUPERVISOR_PROBE_PATH } from "./computer-probe.js";
+import {
+  SSH_PUBLISHED_WEB_PORTS_MESSAGE,
+  sshAliasMissingMessage,
+  type SshDockerPort,
+} from "./ssh-docker.js";
 
 const resolvePublic = async () => [{ address: "203.0.113.9" }];
 
@@ -193,5 +198,71 @@ describe("probeComputer — a conferência vale até o socket", () => {
     });
     expect(result.ok).toBe(true);
     expect(seen).toEqual([{ url: SUPERVISOR_PROBE_PATH, authorization: "Bearer tok" }]);
+  });
+});
+
+describe("probeComputer — alias SSH", () => {
+  const sshOk = (): SshDockerPort => ({
+    resolveAlias: async () => ({ ok: true }),
+    refusePublishedWebPorts: async () => undefined,
+    supervisorOrigin: async () => "http://127.0.0.1:1",
+    openNovncTunnel: async () => {
+      throw new Error("probe não abre túnel de tela");
+    },
+  });
+
+  it("alias ausente falha o Testar em português, sem abrir URL", async () => {
+    let fetched = false;
+    const result = await probeComputer(
+      { kind: "remote-supervisor", endpoint: "ghost-host" },
+      (async () => {
+        fetched = true;
+        return new Response("{}", { status: 200 });
+      }) as typeof fetch,
+      {
+        ssh: {
+          ...sshOk(),
+          resolveAlias: async (alias) => ({
+            ok: false,
+            message: sshAliasMissingMessage(alias),
+          }),
+        },
+      },
+    );
+    expect(result.ok).toBe(false);
+    expect(result.message).toBe(sshAliasMissingMessage("ghost-host"));
+    expect(fetched).toBe(false);
+  });
+
+  it("80/443 publicados reprovam o Testar", async () => {
+    const result = await probeComputer(
+      { kind: "remote-supervisor", endpoint: "meu-vps" },
+      undefined,
+      {
+        ssh: {
+          ...sshOk(),
+          refusePublishedWebPorts: async () => {
+            throw new Error(SSH_PUBLISHED_WEB_PORTS_MESSAGE);
+          },
+        },
+      },
+    );
+    expect(result.ok).toBe(false);
+    expect(result.message).toBe(SSH_PUBLISHED_WEB_PORTS_MESSAGE);
+  });
+
+  it("alias válido não pede token nem chama o supervisor por https", async () => {
+    let fetched = false;
+    const result = await probeComputer(
+      { kind: "remote-supervisor", endpoint: "meu-vps" },
+      (async () => {
+        fetched = true;
+        return new Response("no", { status: 500 });
+      }) as typeof fetch,
+      { ssh: sshOk() },
+    );
+    expect(result.ok).toBe(true);
+    expect(result.message).toMatch(/ssh:\/\/meu-vps/);
+    expect(fetched).toBe(false);
   });
 });

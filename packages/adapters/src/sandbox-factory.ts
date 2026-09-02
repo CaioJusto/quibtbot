@@ -10,7 +10,9 @@ import { BoxSandboxEmulator } from "./box-emulator.js";
 import { BoxSandboxProvider } from "./box-sandbox.js";
 import { DaytonaSandboxEmulator } from "./daytona-emulator.js";
 import { DaytonaSandboxProvider } from "./daytona-sandbox.js";
+import { isSshHostAlias } from "@quibt/contracts";
 import { DockerSandboxProvider } from "./docker-sandbox.js";
+import type { SshDockerPort } from "./ssh-docker.js";
 import { ManagedSandboxEmulator } from "./e2b-emulator.js";
 import { E2BSandboxProvider } from "./e2b-sandbox.js";
 import { FakeSandboxProvider } from "./fake-sandbox.js";
@@ -34,15 +36,22 @@ function registerBuiltinSandboxFactories(): void {
         opts.supervisorToken,
       ),
   );
-  registerSandboxFactory(
-    "remote-supervisor",
-    (opts) =>
-      new DockerSandboxProvider(
-        opts.remoteSupervisorUrl ?? opts.supervisorUrl ?? "http://127.0.0.1:7091",
+  registerSandboxFactory("remote-supervisor", (opts) => {
+    const endpoint = (opts.remoteSupervisorUrl ?? opts.supervisorUrl ?? "").trim();
+    if (endpoint && isSshHostAlias(endpoint)) {
+      return new DockerSandboxProvider(
+        "http://127.0.0.1:0",
         opts.remoteSupervisorToken ?? opts.supervisorToken,
         "remote-supervisor",
-      ),
-  );
+        { sshAlias: endpoint, ssh: opts.ssh },
+      );
+    }
+    return new DockerSandboxProvider(
+      endpoint || "http://127.0.0.1:7091",
+      opts.remoteSupervisorToken ?? opts.supervisorToken,
+      "remote-supervisor",
+    );
+  });
   registerSandboxFactory("e2b", (opts) => {
     if (!opts.e2bApiKey) throw new Error("E2B_API_KEY is required for the e2b sandbox provider");
     return new E2BSandboxProvider(opts.e2bApiKey);
@@ -122,6 +131,8 @@ export interface SandboxFactoryOptions {
   encryptionKey?: string;
   desktopGrants?: string[];
   desktopGrantsByUser?: Record<string, string[]>;
+  /** Injetável nos testes; em produção o provider cria o CLI `docker -H ssh://`. */
+  ssh?: SshDockerPort;
 }
 
 /** How long the routed provider trusts its cached copy of the saved machine. */
@@ -348,6 +359,9 @@ export function createRoutingSandboxProvider(deps: SandboxRouterDeps): RoutingSa
         keepAlive?: (ref: ComputerRef, ctx?: AdapterContext) => Promise<void>;
       };
       await provider.keepAlive?.(computer, context);
+    },
+    async getLoopbackPreview(computer) {
+      return (await forRef(computer).getLoopbackPreview?.(computer)) ?? null;
     },
   };
 }

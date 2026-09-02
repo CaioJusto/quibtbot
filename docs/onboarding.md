@@ -86,7 +86,7 @@ Esta tela só aparece para quem é dono do install. Toque numa opção e **leia 
 | Opção | Em uma frase | O que você precisa |
 | --- | --- | --- |
 | Nesta máquina (Docker) | Os bots usam este computador. | Docker Desktop aberto |
-| Minha VPS | Os bots usam o seu servidor. | URL + token do supervisor |
+| Minha VPS | Os bots usam o seu servidor. | Alias SSH do ~/.ssh/config, ou URL + token |
 | E2B | Cada bot ganha um desktop isolado na nuvem da E2B. | Conta e chave em e2b.dev |
 | Box | Cada bot ganha uma VM Ubuntu na Box. | Conta e chave em box.ascii.dev |
 | Daytona | Cada bot ganha um sandbox com terminal e desktop VNC. | Conta e chave em daytona.io |
@@ -103,7 +103,13 @@ de colocar atrás do seu proxy. `quibtbot install --local` deixa local mesmo num
 
 O passo a passo de cada uma está em [computers.md](./computers.md) e no próprio app (o mesmo texto).
 
-Toque em **Testar** antes de salvar. Se algo faltar, a tela diz o que colar.
+Se a API do Quibt roda no notebook e o computador do bot na VPS, cole o alias `Host` do
+`~/.ssh/config` (chave, sem senha colada). A tela ao vivo chega por um túnel SSH temporário
+até `127.0.0.1` — sem publicar 80, 443 ou 7091 na VPS. O caminho do celular 24 h continua
+sendo instalar o Quibt **inteiro** na VPS.
+
+Toque em **Testar** antes de salvar. Se o alias SSH não existir no config, ou o SSH pedir
+senha, o Testar falha em português. Se algo faltar, a tela diz o que colar.
 
 ## 5. Criar o primeiro bot
 

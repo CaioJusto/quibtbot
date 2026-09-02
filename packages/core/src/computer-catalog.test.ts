@@ -73,6 +73,10 @@ describe("computer catalog", () => {
         remoteSupervisorToken: "tok",
       }),
     ).toBe(true);
+    expect(machineIsReady("remote-supervisor", { remoteSupervisorUrl: "meu-vps" })).toBe(true);
+    expect(machineIsReady("remote-supervisor", { remoteSupervisorUrl: "https://vps.example" })).toBe(
+      false,
+    );
     const catalog = filterCatalog("docker", { dockerReady: true });
     expect(catalog[0]?.ready).toBe(true);
   });

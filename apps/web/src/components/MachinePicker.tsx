@@ -1,4 +1,5 @@
 import type { ComputerCatalogItem } from "@quibt/contracts";
+import { isSshHostAlias } from "@quibt/contracts";
 import type { ReactNode } from "react";
 import { rpc } from "../lib/rpc";
 
@@ -42,6 +43,7 @@ const FALLBACK_ICON = (
 
 /** A etiqueta diz o que a escolha vai exigir — tirada do próprio catálogo. */
 function requirement(item: ComputerCatalogItem): string {
+  if (item.family === "remote-supervisor") return "Alias SSH ou URL";
   if (item.needsKey && item.needsEndpoint) return "URL e token";
   if (item.needsKey) return "Chave da sua conta";
   if (item.needsEndpoint) return "URL do supervisor";
@@ -152,6 +154,7 @@ export function MachineCredentials({
   if (!item) return null;
   const vpsHelp =
     item.family === "remote-supervisor" ? (recipes ?? []).filter((entry) => entry.recipe) : [];
+  const sshPath = isSshHostAlias(endpoint);
   return (
     <div className="mt-4 grid gap-2.5 border-t border-[var(--qb-hairline)] pt-4">
       {item.needsEndpoint ? (
@@ -161,21 +164,22 @@ export function MachineCredentials({
             value={endpoint}
             disabled={disabled}
             onChange={(event) => onEndpoint(event.target.value)}
-            placeholder="https://sua-vps.exemplo"
+            placeholder="meu-vps ou https://sua-vps.exemplo"
             className="mt-1 w-full rounded-xl border border-[var(--qb-hairline)] bg-[var(--qb-surface-2)] px-3.5 py-2 text-[13px] text-[var(--qb-ink)] outline-none placeholder:text-[var(--qb-muted-2)] focus:border-[var(--qb-accent)]"
           />
           {item.family === "remote-supervisor" ? (
             <span className="mt-1.5 block text-[11px] leading-[1.45] text-[var(--qb-muted-2)]">
-              A porta do supervisor não fica publicada. No outro host, ligue o profile
-              supervisor-tls (docker compose --profile supervisor-tls up -d supervisor
-              supervisor-tls) e cole aqui o endereço https desse nome. Nesse modo a tela não chega:
-              comandos, arquivos e rotinas funcionam, e o painel do computador fica preto. Para ver
-              a tela, instale o Quibt inteiro nessa máquina.
+              Alias SSH do ~/.ssh/config: a API no notebook fala com o Docker da VPS (`docker -H
+              ssh://alias`) e abre um túnel temporário do noVNC até 127.0.0.1 — a tela ao vivo
+              aparece aqui, sem publicar 80, 443 ou 7091. Nunca cole chave privada nem senha. Ou
+              cole a URL https do profile supervisor-tls (docker compose --profile supervisor-tls
+              up -d supervisor supervisor-tls) e o token. O caminho que deixa o celular ligado 24 h
+              é instalar o Quibt inteiro na VPS.
             </span>
           ) : null}
         </label>
       ) : null}
-      {item.needsKey ? (
+      {item.needsKey && !sshPath ? (
         <label className="block text-[12px] text-[var(--qb-muted)]">
           {item.keyLabel ?? "Chave da sua conta"}
           <input
@@ -191,8 +195,8 @@ export function MachineCredentials({
       {vpsHelp.length ? (
         <div className="rounded-xl border border-[var(--qb-hairline)] bg-[var(--qb-surface-2)] p-3">
           <p className="text-[12px] text-[var(--qb-muted)]">
-            Ainda não tem supervisor? Escolha uma receita, rode no seu provedor, depois cole a URL e
-            o token.
+            Ainda não tem supervisor? Escolha uma receita, rode no seu provedor, depois cole o alias
+            SSH ou a URL e o token.
           </p>
           <div className="mt-2 flex flex-wrap gap-1.5">
             {vpsHelp.map((recipe) => (

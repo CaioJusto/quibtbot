@@ -11,6 +11,26 @@ import type {
   ScreenSession,
 } from "@quibt/adapter-kit";
 import { boundedSandboxCommandTimeoutMs, resolveSupervisorToken } from "@quibt/core";
+import {
+  createSshDockerPort,
+  rewriteScreenUrlToLoopback,
+  type SshDockerPort,
+  type SshLocalForward,
+} from "./ssh-docker.js";
+
+/** Tira a senha VNC do endereço remoto antes de gravar no banco. */
+function persistedRemoteScreenUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    parsed.searchParams.delete("password");
+    const fragment = new URLSearchParams(parsed.hash.replace(/^#/, ""));
+    fragment.delete("password");
+    parsed.hash = fragment.toString();
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
 
 const SUPERVISOR_REQUEST_TIMEOUT_MS = 30_000;
 /** Extra time for the supervisor to return after it has already killed the command. */
@@ -253,17 +273,31 @@ export function publicComputerBootMessage(error: unknown): string {
   return (body || "Não foi possível ligar o computador.").slice(0, 280);
 }
 
+export interface DockerSandboxExtras {
+  sshAlias?: string;
+  ssh?: SshDockerPort;
+}
+
 export class DockerSandboxProvider implements SandboxProvider {
   private readonly supervisorToken: string;
   private readonly kind: "docker" | "remote-supervisor";
+  private readonly configuredSupervisorUrl: string;
+  private readonly sshAlias: string | undefined;
+  private readonly ssh: SshDockerPort | undefined;
+  private resolvedSupervisorUrl: string | undefined;
+  private readonly novncTunnels = new Map<string, SshLocalForward>();
 
   constructor(
-    private readonly supervisorUrl: string,
+    supervisorUrl = "http://127.0.0.1:7091",
     supervisorToken?: string,
     kind: "docker" | "remote-supervisor" = "docker",
+    extras?: DockerSandboxExtras,
   ) {
+    this.configuredSupervisorUrl = supervisorUrl;
     this.supervisorToken = supervisorToken ?? resolveSupervisorToken(process.env);
     this.kind = kind;
+    this.sshAlias = extras?.sshAlias?.trim() || undefined;
+    this.ssh = extras?.ssh ?? (this.sshAlias ? createSshDockerPort() : undefined);
   }
 
   describe() {
@@ -282,8 +316,20 @@ export class DockerSandboxProvider implements SandboxProvider {
     };
   }
 
-  private url(path: string) {
-    return `${this.supervisorUrl.replace(/\/$/, "")}${path}`;
+  private url(path: string, base = this.resolvedSupervisorUrl ?? this.configuredSupervisorUrl) {
+    return `${base.replace(/\/$/, "")}${path}`;
+  }
+
+  /**
+   * No caminho SSH a URL do supervisor é um túnel em 127.0.0.1, aberto na primeira
+   * chamada. Docker local e https remoto continuam com o endereço configurado.
+   */
+  private async ensureSupervisorUrl(): Promise<string> {
+    if (!this.sshAlias || !this.ssh) return this.configuredSupervisorUrl;
+    if (this.resolvedSupervisorUrl) return this.resolvedSupervisorUrl;
+    const origin = await this.ssh.supervisorOrigin(this.sshAlias);
+    this.resolvedSupervisorUrl = origin;
+    return origin;
   }
 
   private headers(context: AdapterContext, botId?: string) {
@@ -318,7 +364,8 @@ export class DockerSandboxProvider implements SandboxProvider {
     parent: AbortSignal,
   ): Promise<Response> {
     try {
-      return await fetch(this.url(path), init);
+      const base = await this.ensureSupervisorUrl();
+      return await fetch(this.url(path, base), init);
     } catch (error) {
       // Cancelamento de quem chamou não é o Docker fechado.
       if (parent.aborted) throw error;
@@ -467,17 +514,64 @@ export class DockerSandboxProvider implements SandboxProvider {
       };
     }
     const body = (await res.json()) as { screenUrl?: string };
+    const remoteUrl = body.screenUrl ?? null;
+    if (!remoteUrl) {
+      return {
+        url: null,
+        mimeType: "text/html",
+        reason: "O supervisor não devolveu um endereço seguro para a tela.",
+        close: async () => undefined,
+      };
+    }
+    if (this.sshAlias && this.ssh) {
+      const tunnel = await this.ssh.openNovncTunnel(this.sshAlias, remoteUrl);
+      const previous = this.novncTunnels.get(computer.id);
+      this.novncTunnels.set(computer.id, tunnel);
+      await previous?.close().catch(() => undefined);
+      const persistedUrl = persistedRemoteScreenUrl(remoteUrl);
+      return {
+        url: rewriteScreenUrlToLoopback(remoteUrl, tunnel.origin),
+        mimeType: "text/html",
+        persistedUrl,
+        close: async () => {
+          await this.closeNovncTunnel(computer.id);
+        },
+      };
+    }
     return {
-      url: body.screenUrl ?? null,
+      url: remoteUrl,
       mimeType: "text/html",
-      ...(body.screenUrl
-        ? {}
-        : { reason: "O supervisor não devolveu um endereço seguro para a tela." }),
       close: async () => undefined,
     };
   }
 
+  private async closeNovncTunnel(computerId: string): Promise<void> {
+    const tunnel = this.novncTunnels.get(computerId);
+    if (!tunnel) return;
+    this.novncTunnels.delete(computerId);
+    await tunnel.close().catch(() => undefined);
+  }
+
+  async getLoopbackPreview(
+    computer: ComputerRef,
+  ): Promise<{ bytes: Uint8Array; contentType: string } | null> {
+    const tunnel = this.novncTunnels.get(computer.id);
+    if (!tunnel) return null;
+    try {
+      const res = await fetch(`${tunnel.origin}/`, {
+        redirect: "manual",
+        signal: AbortSignal.timeout(4_000),
+      });
+      const contentType = res.headers.get("content-type") ?? "";
+      if (!res.ok || !contentType.includes("image/")) return null;
+      return { bytes: new Uint8Array(await res.arrayBuffer()), contentType };
+    } catch {
+      return null;
+    }
+  }
+
   async revokeScreen(computer: ComputerRef, context: AdapterContext): Promise<void> {
+    await this.closeNovncTunnel(computer.id);
     const res = await this.call(
       "revoke screen",
       `/computers/${computer.id}/screen/revoke`,
@@ -620,7 +714,8 @@ export class DockerSandboxProvider implements SandboxProvider {
    */
   async keepAlive(computer: ComputerRef, context?: AdapterContext): Promise<void> {
     if (!context?.workspaceId) return;
-    await fetch(this.url(`/computers/${computer.id}`), {
+    const base = await this.ensureSupervisorUrl().catch(() => this.configuredSupervisorUrl);
+    await fetch(this.url(`/computers/${computer.id}`, base), {
       headers: {
         ...this.headers(context, computerIdentity(computer, context)),
         ...this.displayHeader(computer),

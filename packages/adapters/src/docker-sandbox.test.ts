@@ -1,4 +1,6 @@
 import type { AdapterContext, ComputerRef, ProcessEvent } from "@quibt/adapter-kit";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   COMPUTER_REVIVED_NOTE,
@@ -13,6 +15,7 @@ import {
   SupervisorRequestError,
   supervisorErrorMessage,
 } from "./docker-sandbox.js";
+import { SSH_PUBLISHED_WEB_PORTS_MESSAGE, type SshDockerPort } from "./ssh-docker.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -583,5 +586,122 @@ describe("a frase do religou vem do supervisor", () => {
     // Supervisor mais velho: só `revived`, sem frase.
     captureFetch(Response.json({ stdout: "", stderr: "", code: 0, revived: true }));
     expect((await drain())[0]).toEqual({ type: "stderr", data: `${COMPUTER_REVIVED_NOTE}\n` });
+  });
+});
+
+describe("remote-supervisor over SSH", () => {
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const servers: Array<{ close: () => void }> = [];
+
+  afterEach(() => {
+    for (const server of servers) server.close();
+    servers.length = 0;
+  });
+
+  function fakeSsh(overrides: Partial<SshDockerPort> = {}): SshDockerPort {
+    return {
+      resolveAlias: async () => ({ ok: true }),
+      refusePublishedWebPorts: async () => undefined,
+      supervisorOrigin: async () => "http://supervisor.test",
+      openNovncTunnel: async () => ({
+        localPort: 19999,
+        origin: "http://127.0.0.1:19999",
+        close: async () => undefined,
+      }),
+      ...overrides,
+    };
+  }
+
+  it("tunnels noVNC to loopback, serves preview PNG, and closes the tunnel", async () => {
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { "content-type": "image/png" });
+      res.end(png);
+    });
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as AddressInfo).port;
+    const closed: string[] = [];
+    captureFetch(
+      Response.json({
+        screenUrl: "http://172.18.0.4:6080/embed.html#password=vnc_secret",
+      }),
+    );
+    const provider = new DockerSandboxProvider("http://unused", "token", "remote-supervisor", {
+      sshAlias: "meu-vps",
+      ssh: fakeSsh({
+        openNovncTunnel: async () => ({
+          localPort: port,
+          origin: `http://127.0.0.1:${port}`,
+          close: async () => {
+            closed.push("novnc");
+          },
+        }),
+      }),
+    });
+    const session = await provider.connectScreen(
+      ref({ kind: "remote-supervisor" }),
+      { view: "stream" },
+      context(),
+    );
+    expect(session.url).toBe(`http://127.0.0.1:${port}/embed.html#password=vnc_secret`);
+    expect(session.persistedUrl).toBe("http://172.18.0.4:6080/embed.html");
+    expect(session.persistedUrl).not.toContain("vnc_secret");
+    expect(session.persistedUrl).not.toContain("127.0.0.1");
+
+    const preview = await provider.getLoopbackPreview(ref({ kind: "remote-supervisor" }));
+    expect(preview?.contentType).toMatch(/png/);
+    expect(Buffer.from(preview!.bytes).equals(png)).toBe(true);
+
+    await session.close();
+    expect(closed).toEqual(["novnc"]);
+  });
+
+  it("revokeScreen fecha o túnel da tela", async () => {
+    const closed: string[] = [];
+    captureFetch(Response.json({ rotated: true }));
+    const provider = new DockerSandboxProvider("http://unused", "token", "remote-supervisor", {
+      sshAlias: "meu-vps",
+      ssh: fakeSsh({
+        supervisorOrigin: async () => "http://supervisor.test",
+        openNovncTunnel: async () => ({
+          localPort: 1,
+          origin: "http://127.0.0.1:1",
+          close: async () => {
+            closed.push("novnc");
+          },
+        }),
+      }),
+    });
+    vi.stubGlobal(
+      "fetch",
+      async (url: string) => {
+        if (String(url).includes("/screen/revoke")) {
+          return Response.json({ rotated: true });
+        }
+        return Response.json({ screenUrl: "http://172.18.0.4:6080/embed.html" });
+      },
+    );
+    await provider.connectScreen(ref({ kind: "remote-supervisor" }), { view: "stream" }, context());
+    await provider.revokeScreen(ref({ kind: "remote-supervisor" }), context());
+    expect(closed).toEqual(["novnc"]);
+  });
+
+  it("recusa 80/443 publicados neste caminho", async () => {
+    const provider = new DockerSandboxProvider("http://unused", "token", "remote-supervisor", {
+      sshAlias: "meu-vps",
+      ssh: fakeSsh({
+        supervisorOrigin: async () => {
+          throw new Error(SSH_PUBLISHED_WEB_PORTS_MESSAGE);
+        },
+      }),
+    });
+    await expect(provider.exists(ref(), context())).rejects.toThrow(/80 ou 443/);
+  });
+
+  it("Docker local continua falando com o supervisor sem SSH", async () => {
+    const calls = captureFetch(Response.json({ running: true }));
+    const provider = new DockerSandboxProvider("http://127.0.0.1:7091", "token");
+    expect(await provider.exists(ref(), context())).toBe(true);
+    expect(calls[0]?.url).toBe("http://127.0.0.1:7091/computers/container-1/exists");
   });
 });

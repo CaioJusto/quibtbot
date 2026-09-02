@@ -1,7 +1,7 @@
 import type { AdapterContext, SandboxProvider } from "@quibt/adapter-kit";
 import type { PrismaClient } from "@quibt/db";
 import { describe, expect, it, vi } from "vitest";
-import { bootComputer, screenUrlForPersistence } from "./computer-boot.js";
+import { bootComputer, ensureDesktopScreenUrl, screenUrlForPersistence } from "./computer-boot.js";
 
 const context: AdapterContext & { userId: string } = {
   operationId: "boot",
@@ -70,6 +70,20 @@ describe("booting a computer that is already running", () => {
     expect(session.screenUrl).toBe("http://127.0.0.1:35590/embed.html");
     expect(JSON.stringify(session)).not.toContain("fresh_secret");
     expect(JSON.stringify(session)).not.toContain("old_secret");
+  });
+
+  it("grava o endereço remoto do túnel SSH, não a porta efêmera de 127.0.0.1", async () => {
+    const connectScreen = vi.fn(async () => ({
+      url: "http://127.0.0.1:19999/embed.html#password=vnc_secret",
+      persistedUrl: "http://172.18.0.4:6080/embed.html",
+      mimeType: "text/html",
+      close: async () => undefined,
+    })) as unknown as SandboxProvider["connectScreen"];
+    const { deps, session } = makeRunningHarness(connectScreen);
+    const url = await ensureDesktopScreenUrl(deps, session, context, { refresh: true });
+    expect(url).toBe("http://127.0.0.1:19999/embed.html#password=vnc_secret");
+    expect(session.screenUrl).toBe("http://172.18.0.4:6080/embed.html");
+    expect(JSON.stringify(session)).not.toContain("vnc_secret");
   });
 
   it("strips only the Docker password and leaves managed provider URLs untouched", () => {

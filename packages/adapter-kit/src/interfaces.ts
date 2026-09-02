@@ -60,6 +60,14 @@ export interface SandboxProvider {
   ): Promise<ScreenSession>;
   /** Immediately invalidates an already-issued interactive screen session, when supported. */
   revokeScreen?(computer: ComputerRef, context: AdapterContext): Promise<void>;
+  /**
+   * Retrato PNG (ou outro image/*) servido do túnel noVNC em 127.0.0.1, quando este
+   * processo abriu um encaminhamento SSH. Sem túnel, devolve null e o caller cai no
+   * screenshot dentro do container.
+   */
+  getLoopbackPreview?(
+    computer: ComputerRef,
+  ): Promise<{ bytes: Uint8Array; contentType: string } | null>;
   sendInput(
     computer: ComputerRef,
     input: ComputerInput,
