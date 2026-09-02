@@ -36,13 +36,13 @@ function seedInstalledState(dataDir: string): void {
   const statePath = path.join(dataDir, "install-state.json");
   writeFileSync(
     statePath,
-    readFileSync(statePath, "utf8").replace('"release": "0.2.18"', '"release": "0.2.13"'),
+    readFileSync(statePath, "utf8").replace('"release": "0.2.19"', '"release": "0.2.13"'),
     { mode: 0o600 },
   );
   writeFileSync(
     env.path,
     readFileSync(env.path, "utf8").replace(
-      "QUIBT_STACK_VERSION=0.2.18",
+      "QUIBT_STACK_VERSION=0.2.19",
       "QUIBT_STACK_VERSION=0.2.13",
     ),
     { mode: 0o600 },
@@ -119,7 +119,7 @@ describe("runUpdate", () => {
       composeFile: COMPOSE_FILE,
       // A suíte não pode depender do disco livre de quem a roda.
       statfs: async () => ({ bsize: 4096, bavail: 25_000_000 }),
-      targetRelease: "0.2.18",
+      targetRelease: "0.2.19",
       run: makeRunner("success"),
       fetch: async (url) => {
         if (String(url).endsWith("/ready")) {
@@ -146,7 +146,7 @@ describe("runUpdate", () => {
     ]);
     expect(envBefore).toContain("QUIBT_STACK_VERSION=0.2.13");
     expect(readFileSync(path.join(dataDir, "quibt.env"), "utf8")).toContain(
-      "QUIBT_STACK_VERSION=0.2.18",
+      "QUIBT_STACK_VERSION=0.2.19",
     );
   });
 
@@ -179,7 +179,7 @@ describe("runUpdate", () => {
       composeFile: COMPOSE_FILE,
       // A suíte não pode depender do disco livre de quem a roda.
       statfs: async () => ({ bsize: 4096, bavail: 25_000_000 }),
-      targetRelease: "0.2.18",
+      targetRelease: "0.2.19",
       run: makeRunner("up-fail"),
       fetch: async (url) => {
         if (String(url).endsWith("/ready")) {
@@ -206,7 +206,7 @@ describe("runUpdate", () => {
       composeFile: COMPOSE_FILE,
       // A suíte não pode depender do disco livre de quem a roda.
       statfs: async () => ({ bsize: 4096, bavail: 25_000_000 }),
-      targetRelease: "0.2.18",
+      targetRelease: "0.2.19",
       run: makeRunner("migrate-fail"),
       fetch: async (url) => {
         if (String(url).endsWith("/ready")) {
@@ -231,7 +231,7 @@ describe("runUpdate", () => {
     const dump = validCustomDump();
     const targetImages = [
       "postgres:16@sha256:e17e86066e5ef83e0952a9347f5c792b7ece00972e2aa787a6986f471b3dd3d5",
-      "ghcr.io/quibt/quibt-stack:0.2.18",
+      "ghcr.io/quibt/quibt-stack:0.2.19",
     ];
     const pulled: string[] = [];
     const pullOptions: Array<{ inactivityTimeoutMs?: number; timeoutMs?: number }> = [];
@@ -279,7 +279,7 @@ describe("runUpdate", () => {
       dataDir,
       composeFile: COMPOSE_FILE,
       statfs: async () => ({ bsize: 4096, bavail: 25_000_000 }),
-      targetRelease: "0.2.18",
+      targetRelease: "0.2.19",
       run,
       fetch: async (url) =>
         String(url).endsWith("/ready")
@@ -298,7 +298,7 @@ describe("runUpdate", () => {
       expect(options.timeoutMs).toBe(60 * 60_000);
     }
     const images = events.filter((event) => event.step === "images");
-    expect(images.some((event) => event.progress?.label === "quibt-stack:0.2.18")).toBe(true);
+    expect(images.some((event) => event.progress?.label === "quibt-stack:0.2.19")).toBe(true);
     expect(images.map((event) => event.message)).toContainEqual(
       expect.stringContaining("Vou baixar cerca de 1,7 GB"),
     );
@@ -316,7 +316,7 @@ describe("runUpdate", () => {
       composeFile: COMPOSE_FILE,
       // A suíte não pode depender do disco livre de quem a roda.
       statfs: async () => ({ bsize: 4096, bavail: 25_000_000 }),
-      targetRelease: "0.2.18",
+      targetRelease: "0.2.19",
       run: makeRunner("health-fail"),
       fetch: async () => new Response("down", { status: 503 }),
       clock: { now: () => new Date("2026-08-17T01:00:00.000Z"), sleep: async () => undefined },

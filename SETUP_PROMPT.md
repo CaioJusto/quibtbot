@@ -17,7 +17,7 @@ docs/self-host.md do repositório — e me pergunte qual caminho eu quero antes 
 Caminho A — um comando (Mac Apple silicon ou Linux, sem o app):
 
   curl -fsSL https://raw.githubusercontent.com/CaioJusto/quibtbot/f75c7c22b79a75cf682e3e461e6d61ea58202101/scripts/install.sh \
-    | QUIBT_RELEASE=0.2.18 sh
+    | QUIBT_RELEASE=0.2.19 sh
 
   O script baixa o binário `quibtbot` da release para a minha arquitetura, confere o
   SHA-256 contra o manifesto autenticado pelo metadata da release no GitHub, instala em
@@ -78,7 +78,7 @@ docs/self-host.md — and ask me which path I want before starting.
 Path A — one command (Apple-silicon Mac or Linux, no desktop app):
 
   curl -fsSL https://raw.githubusercontent.com/CaioJusto/quibtbot/f75c7c22b79a75cf682e3e461e6d61ea58202101/scripts/install.sh \
-    | QUIBT_RELEASE=0.2.18 sh
+    | QUIBT_RELEASE=0.2.19 sh
 
   The script downloads the `quibtbot` release binary for my architecture, checks its
   SHA-256 against the manifest authenticated by GitHub's release metadata, installs it
