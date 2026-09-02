@@ -492,7 +492,7 @@ describe("state validation split", () => {
     expect(result.ok).toBe(true);
     expect(result.previousRelease).toBe("0.1.0");
     expect(result.release).toBe("0.2.20");
-    expect(readFileSync(env.path, "utf8")).toMatch(/QUIBT_STACK_VERSION=0\.2\.19/);
+    expect(readFileSync(env.path, "utf8")).toMatch(/QUIBT_STACK_VERSION=0\.2\.20/);
   });
 });
 
