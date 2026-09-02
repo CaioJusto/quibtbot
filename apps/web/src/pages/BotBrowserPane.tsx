@@ -102,15 +102,19 @@ export function BotBrowserPane({
       </form>
       {waiting ? (
         <p className="shrink-0 border-b border-[var(--qb-hairline)] bg-[var(--qb-surface-2)] px-4 py-2 text-[13px] text-[var(--qb-ink)]">
-          {botName} precisa que você termine o login aqui. Este navegador é só do app desktop —
-          não é o Chrome deste computador nem a tela Linux.
+          {botName} precisa que você termine o login aqui. Este navegador é só do app desktop — não
+          é o Chrome deste computador nem a tela Linux.
         </p>
       ) : (
         <p className="sr-only">
           Navegador embutido de {botName}. Cookies ficam em persist:bot-{botId}.
         </p>
       )}
-      <div ref={mountRef} className="min-h-0 flex-1 bg-[var(--qb-canvas)]" data-bot-browser={botId} />
+      <div
+        ref={mountRef}
+        className="min-h-0 flex-1 bg-[var(--qb-canvas)]"
+        data-bot-browser={botId}
+      />
       <p className="sr-only" aria-live="polite">
         {url}
       </p>

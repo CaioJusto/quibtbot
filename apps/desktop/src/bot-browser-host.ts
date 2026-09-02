@@ -1,8 +1,7 @@
-import { Notification, WebContentsView, type BrowserWindow } from "electron";
+import { type BrowserWindow, Notification, WebContentsView } from "electron";
 import {
   allowedBotBrowserUrl,
   botBrowserPartition,
-  type BotBrowserBounds,
   parseBotBrowserAttach,
   parseBotBrowserId,
   takeoverOsNotification,
@@ -24,7 +23,10 @@ export class BotBrowserHost {
   private visibleBotId: string | null = null;
 
   constructor(
-    private readonly notify: (payload: { title: string; body: string }) => void = showOsNotification,
+    private readonly notify: (payload: {
+      title: string;
+      body: string;
+    }) => void = showOsNotification,
   ) {}
 
   attach(win: HostWindow, raw: unknown): { partition: string } | { error: string } {
@@ -38,7 +40,7 @@ export class BotBrowserHost {
     return { partition: parsed.partition };
   }
 
-  setBounds(win: HostWindow, raw: unknown): { ok: true } | { error: string } {
+  setBounds(_win: HostWindow, raw: unknown): { ok: true } | { error: string } {
     const parsed = parseBotBrowserAttach(raw);
     if (!parsed) return { error: "Pedido inválido para o navegador do bot." };
     const view = this.views.get(parsed.botId);
@@ -142,7 +144,10 @@ export class BotBrowserHost {
 
   private emitState(win: HostWindow, botId: string): void {
     if (win.isDestroyed()) return;
-    win.webContents.send("desktop.botBrowser.navigated", this.snapshot(botId, this.views.get(botId)));
+    win.webContents.send(
+      "desktop.botBrowser.navigated",
+      this.snapshot(botId, this.views.get(botId)),
+    );
   }
 }
 

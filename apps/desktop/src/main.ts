@@ -26,9 +26,19 @@ import {
   runPair,
   runUninstall,
 } from "@quibt/installer";
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, shell, Tray } from "electron";
-import { BotBrowserHost } from "./bot-browser-host.js";
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  Menu,
+  Notification,
+  nativeImage,
+  shell,
+  Tray,
+} from "electron";
 import { appBundlePath } from "./app-bundle.js";
+import { BotBrowserHost } from "./bot-browser-host.js";
 import { firstDeepLinkFromArgv, webUrlFromDeepLink } from "./deep-link.js";
 import { isMainFrameLoadFailure, parseDidFailLoad } from "./did-fail-load.js";
 import {

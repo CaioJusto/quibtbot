@@ -61,13 +61,7 @@ function memoryComputer() {
           : null,
     },
     run: {
-      update: async ({
-        where,
-        data,
-      }: {
-        where: { id: string };
-        data: Record<string, unknown>;
-      }) => {
+      update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
         if (where.id !== run.id) return null;
         Object.assign(run, data);
         return run;

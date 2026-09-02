@@ -65,7 +65,6 @@ import { deleteSpawnedBot, spawnBot } from "./child-bots.js";
 import { collectLogIds, isComposioUnknownOutcomeResult } from "./composio-connector.js";
 import { bootComputer } from "./computer-boot.js";
 import { capHistory, HISTORY_MESSAGE_CAP } from "./history.js";
-import { agentComputerUseAllowed, applyRequestTakeover } from "./request-takeover.js";
 import { PROVIDER_RETRY_PROGRESS_MESSAGE, TRY_AGAIN_HINT } from "./llm-retry.js";
 import { callMcpTool, discoverMcpTools, matchMcpSource, parseMcpToolName } from "./mcp-http.js";
 import {
@@ -80,6 +79,7 @@ import {
   wakeRunsWaitingForPeer,
 } from "./peer-wait.js";
 import { parseModelSecret, resolveModelApiKey, secretValuesToRedact } from "./pi-oauth.js";
+import { agentComputerUseAllowed, applyRequestTakeover } from "./request-takeover.js";
 import {
   acquireRunLease,
   botBusyWith,

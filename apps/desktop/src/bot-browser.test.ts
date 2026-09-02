@@ -56,9 +56,9 @@ describe("embedded browser attach payload", () => {
       partition: "persist:bot-bot_1",
       bounds: { x: 12, y: 40, width: 800, height: 600 },
     });
-    expect(parseBotBrowserAttach({ botId: "nope!", bounds: { x: 0, y: 0, width: 1, height: 1 } })).toBe(
-      null,
-    );
+    expect(
+      parseBotBrowserAttach({ botId: "nope!", bounds: { x: 0, y: 0, width: 1, height: 1 } }),
+    ).toBe(null);
     expect(normalizeBotBrowserBounds({ x: -4, y: 2, width: 0, height: 10 })).toBe(null);
   });
 });

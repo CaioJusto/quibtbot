@@ -50,6 +50,10 @@ import { type Attachment, attachmentTooBig, uploadAttachment } from "../lib/atta
 import { authClient } from "../lib/auth";
 import { bootStatusLine, bootSteps } from "../lib/boot-steps";
 import {
+  desktopComputerSurface,
+  takeoverRequested as takeoverIsRequested,
+} from "../lib/bot-browser";
+import {
   buildPaletteItems,
   messagePaletteItems,
   opensPalette,
@@ -66,9 +70,7 @@ import {
 } from "../lib/composer-drafts";
 import { filesFromTransfer, transferHasFiles } from "../lib/composer-drop";
 import { dayStamps, inboxTimeLabel } from "../lib/day-stamps";
-import { desktopComputerSurface, takeoverRequested as takeoverIsRequested } from "../lib/bot-browser";
 import { desktopBridge, trafficLightInset } from "../lib/desktop";
-import { BotBrowserPane } from "./BotBrowserPane";
 import {
   opensThreadSearch,
   shortcutFromKey,
@@ -122,6 +124,7 @@ import { isAnsweringMessage } from "../lib/turn-start";
 import { createVoiceRecorder, extensionFor, formatDuration, voiceSupported } from "../lib/voice";
 import { AccountSheet } from "./AccountSheet";
 import { AgentSettings, InstructionsPanel, MemoryPanel } from "./AgentSettings";
+import { BotBrowserPane } from "./BotBrowserPane";
 import { CommandPalette } from "./CommandPalette";
 import { ComputerPreview } from "./ComputerPreview";
 import { CreateBotForm } from "./CreateBotForm";
@@ -3740,7 +3743,8 @@ export function ShellPage() {
                 state={working ? "working" : "idle"}
               />
               <span className="truncate text-[15.5px] font-medium text-[var(--qb-ink)]">
-                {active.name} — {computerSurface === "browser" && desktopBrowser ? "navegador" : "tela"}
+                {active.name} —{" "}
+                {computerSurface === "browser" && desktopBrowser ? "navegador" : "tela"}
               </span>
               <span className="shrink-0 text-[13px] text-[var(--qb-muted)]">
                 no computador compartilhado
