@@ -79,6 +79,7 @@ import {
   wakeRunsWaitingForPeer,
 } from "./peer-wait.js";
 import { parseModelSecret, resolveModelApiKey, secretValuesToRedact } from "./pi-oauth.js";
+import { agentComputerUseAllowed, applyRequestTakeover } from "./request-takeover.js";
 import {
   acquireRunLease,
   botBusyWith,
@@ -1460,20 +1461,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 runId,
                 payload: { reason: redactSecrets(event.reason, runSecrets) },
               });
-              await deps.prisma.desktopSession.updateMany({
-                where: { botId: bot.id },
-                data: { state: "running", controlHolder: "none" },
-              });
-              await deps.prisma.run.update({
-                where: { id: runId },
-                data: { status: "waiting_takeover" },
-              });
-              await notifyRun(deps, run, {
-                kind: "takeover",
-                title: `${bot.name} needs you on the screen`,
-                body: redactSecrets(event.reason, runSecrets),
-                botId: bot.id,
-                threadId: thread.id,
+              await applyRequestTakeover({
+                prisma: deps.prisma,
+                notifications: deps.notifications,
+                bot,
+                run: { ...run, id: runId },
+                reason: redactSecrets(event.reason, runSecrets),
               });
               return;
             } else if (event.type === "tool") {
@@ -1957,6 +1950,7 @@ export async function reclaimComputerControlForBot(
   const claimed = await prisma.desktopSession.updateMany({
     where: {
       botId,
+      waitingTakeover: false,
       // Mirrors `controlLeaseLive` from @quibt/core: only a "user" holder with a deadline
       // still in the future is live; a legacy row without a deadline is dead.
       OR: [
@@ -2213,6 +2207,8 @@ export async function lockComputerForAgent(
     select: {
       state: true,
       controlFence: true,
+      waitingTakeover: true,
+      controlHolder: true,
     },
   });
   if (session?.state !== "running") {
@@ -2222,11 +2218,21 @@ export async function lockComputerForAgent(
       code: "computer_not_running",
     };
   }
+  if (!agentComputerUseAllowed(session)) {
+    return {
+      ok: false,
+      error: session.waitingTakeover
+        ? "Computer action refused because the owner was asked to take over the desktop."
+        : "Computer action refused because a person has control of the desktop.",
+      code: "takeover_active",
+    };
+  }
   const controlLock = await tx.desktopSession.updateMany({
     where: {
       botId: input.botId,
       state: "running",
       controlHolder: "bot",
+      waitingTakeover: false,
       controlFence: session.controlFence,
     },
     data: { controlHolder: "bot" },

@@ -4,8 +4,49 @@ export type RemoteAccess =
 
 export interface DesktopTrayStatus {
   pendingApprovalCount: number;
+  pendingTakeoverCount?: number;
   lastRoutineLabel: string | null;
   lastRoutineAt: string | null;
+}
+
+export interface DesktopBotBrowserBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface DesktopBotBrowserState {
+  botId: string;
+  partition: string;
+  url: string;
+  title: string;
+  canGoBack: boolean;
+  canGoForward: boolean;
+}
+
+export interface DesktopBotBrowser {
+  attach: (input: {
+    botId: string;
+    bounds: DesktopBotBrowserBounds;
+  }) => Promise<{ partition: string } | { error: string }>;
+  hide: (input: { botId: string }) => Promise<{ ok: true }>;
+  setBounds: (input: {
+    botId: string;
+    bounds: DesktopBotBrowserBounds;
+  }) => Promise<{ ok: true } | { error: string }>;
+  loadUrl: (input: { botId: string; url: string }) => Promise<{ ok: true } | { error: string }>;
+  go: (input: {
+    botId: string;
+    action: "back" | "forward" | "reload";
+  }) => Promise<{ ok: true } | { error: string }>;
+  state: (input: { botId: string }) => Promise<DesktopBotBrowserState | { error: string }>;
+  notifyTakeover: (input: {
+    botName: string;
+    reason?: string;
+    botId?: string;
+  }) => Promise<{ ok: true } | { error: string }>;
+  onNavigated?: (callback: (state: DesktopBotBrowserState) => void) => () => void;
 }
 
 export interface QuibtDesktop {
@@ -27,6 +68,7 @@ export interface QuibtDesktop {
   tray?: {
     setStatus: (status: DesktopTrayStatus) => Promise<void>;
   };
+  botBrowser?: DesktopBotBrowser;
 }
 
 declare global {

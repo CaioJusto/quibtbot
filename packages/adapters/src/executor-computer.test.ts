@@ -205,6 +205,8 @@ describe("computer executor action", () => {
       const findSession = vi.fn(async () => ({
         state: input.state ?? "running",
         controlFence: input.controlFence ?? 9,
+        controlHolder: "bot",
+        waitingTakeover: false,
       }));
       const controlUpdate = vi.fn(async () => ({ count: input.controlCount ?? 1 }));
       return {
@@ -246,6 +248,7 @@ describe("computer executor action", () => {
           botId: "bot-1",
           state: "running",
           controlHolder: "bot",
+          waitingTakeover: false,
           controlFence: 12,
         },
         data: { controlHolder: "bot" },

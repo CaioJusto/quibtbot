@@ -13,6 +13,7 @@ interface SessionRow {
   controlLeaseUserId: string | null;
   controlLeaseExpiresAt: Date | null;
   controlFence: number;
+  waitingTakeover: boolean;
 }
 
 type Where = Record<string, unknown>;
@@ -61,6 +62,7 @@ function session(overrides: Partial<SessionRow> = {}): SessionRow {
     controlLeaseUserId: null,
     controlLeaseExpiresAt: null,
     controlFence: 0,
+    waitingTakeover: false,
     ...overrides,
   };
 }
@@ -103,6 +105,12 @@ describe("reclaimComputerControlForBot", () => {
     const store = sessionStore(session());
     expect(await reclaimComputerControlForBot(store.prisma, "bot-1", now)).toBe(true);
     expect(store.row.controlHolder).toBe("bot");
+  });
+
+  it("does not hand the keyboard back while the bot is waiting for takeover", async () => {
+    const store = sessionStore(session({ controlHolder: "none", waitingTakeover: true }));
+    expect(await reclaimComputerControlForBot(store.prisma, "bot-1", now)).toBe(false);
+    expect(store.row.controlHolder).toBe("none");
   });
 
   it("only spares the sessions @quibt/core calls live", async () => {

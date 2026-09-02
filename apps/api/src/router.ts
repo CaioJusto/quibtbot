@@ -1538,6 +1538,7 @@ export function createRouter(deps: RouterDeps) {
           data: {
             state: "stopped",
             controlHolder: "none",
+            waitingTakeover: false,
             controlLeaseId: null,
             controlLeaseUserId: null,
             controlLeaseExpiresAt: null,
@@ -3437,6 +3438,7 @@ async function computerStatus(
     kind: (computer?.kind ?? "fake") as ComputerStatus["kind"],
     state,
     controlHolder: (desktop?.controlHolder ?? "none") as ComputerStatus["controlHolder"],
+    waitingTakeover: desktop?.waitingTakeover === true,
     controlLeaseExpiresAt: desktop?.controlLeaseExpiresAt?.toISOString() ?? null,
     screenAvailable: state === "running" || state === "booting",
     homeRevision,

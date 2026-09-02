@@ -44,6 +44,20 @@ const bridge = {
   tray: {
     setStatus: (status) => ipcRenderer.invoke("desktop.tray.setStatus", status),
   },
+  botBrowser: {
+    attach: (input) => ipcRenderer.invoke("desktop.botBrowser.attach", input),
+    hide: (input) => ipcRenderer.invoke("desktop.botBrowser.hide", input),
+    setBounds: (input) => ipcRenderer.invoke("desktop.botBrowser.setBounds", input),
+    loadUrl: (input) => ipcRenderer.invoke("desktop.botBrowser.loadUrl", input),
+    go: (input) => ipcRenderer.invoke("desktop.botBrowser.go", input),
+    state: (input) => ipcRenderer.invoke("desktop.botBrowser.state", input),
+    notifyTakeover: (input) => ipcRenderer.invoke("desktop.botBrowser.notifyTakeover", input),
+    onNavigated: (callback) => {
+      const listener = (_event, data) => callback(data);
+      ipcRenderer.on("desktop.botBrowser.navigated", listener);
+      return () => ipcRenderer.removeListener("desktop.botBrowser.navigated", listener);
+    },
+  },
 };
 
 contextBridge.exposeInMainWorld("quibtDesktop", bridge);

@@ -411,6 +411,7 @@ export async function releaseControlLease(
       controlLeaseUserId: null,
       controlLeaseExpiresAt: null,
       controlLastInputAt: null,
+      waitingTakeover: false,
     },
   });
   return released.count === 1;

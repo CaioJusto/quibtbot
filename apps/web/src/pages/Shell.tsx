@@ -50,6 +50,10 @@ import { type Attachment, attachmentTooBig, uploadAttachment } from "../lib/atta
 import { authClient } from "../lib/auth";
 import { bootStatusLine, bootSteps } from "../lib/boot-steps";
 import {
+  desktopComputerSurface,
+  takeoverRequested as takeoverIsRequested,
+} from "../lib/bot-browser";
+import {
   buildPaletteItems,
   messagePaletteItems,
   opensPalette,
@@ -120,6 +124,7 @@ import { isAnsweringMessage } from "../lib/turn-start";
 import { createVoiceRecorder, extensionFor, formatDuration, voiceSupported } from "../lib/voice";
 import { AccountSheet } from "./AccountSheet";
 import { AgentSettings, InstructionsPanel, MemoryPanel } from "./AgentSettings";
+import { BotBrowserPane } from "./BotBrowserPane";
 import { CommandPalette } from "./CommandPalette";
 import { ComputerPreview } from "./ComputerPreview";
 import { CreateBotForm } from "./CreateBotForm";
@@ -311,6 +316,7 @@ export function ShellPage() {
   }, []);
   const [screenUrl, setScreenUrl] = useState<string | null>(null);
   const [computerOpen, setComputerOpen] = useState(false);
+  const [computerSurface, setComputerSurface] = useState<"screen" | "browser">("screen");
   const [computerMenu, setComputerMenu] = useState(false);
   const [trackpadMode, setTrackpadMode] = useState(false);
   const [usage, setUsage] = useState<{
@@ -564,6 +570,7 @@ export function ShellPage() {
     void tray
       .setStatus({
         pendingApprovalCount: bots.filter((bot) => bot.status === "waiting_input").length,
+        pendingTakeoverCount: bots.filter((bot) => bot.status === "waiting_takeover").length,
         lastRoutineLabel: lastTrayRoutine.current?.label ?? null,
         lastRoutineAt: lastTrayRoutine.current?.at ?? null,
       })
@@ -576,6 +583,7 @@ export function ShellPage() {
       void tray
         ?.setStatus({
           pendingApprovalCount: 0,
+          pendingTakeoverCount: 0,
           lastRoutineLabel: null,
           lastRoutineAt: null,
         })
@@ -1509,6 +1517,9 @@ export function ShellPage() {
   }, [active?.id]);
 
   function closeComputerOverlay() {
+    const browser = desktopBridge()?.botBrowser;
+    if (active && browser) void browser.hide({ botId: active.id });
+    setComputerSurface("screen");
     setComputerOpen(false);
     setPanel((current) => (current === "computer" ? null : current));
   }
@@ -1656,7 +1667,27 @@ export function ShellPage() {
   // Bumped once per reconnect attempt so the pin below knows the session died.
   const [screenDrop, setScreenDrop] = useState(0);
   const [screenLost, setScreenLost] = useState(false);
-  const takeoverRequested = snapshot?.run?.status === "waiting_takeover";
+  const takeoverRequested = takeoverIsRequested({
+    runStatus: snapshot?.run?.status,
+    waitingTakeover: computer?.waitingTakeover,
+  });
+  const desktopBrowser = desktopComputerSurface(desktopBridge()) === "embedded";
+  const notifiedTakeover = useRef<string | null>(null);
+  useEffect(() => {
+    if (!desktopBrowser || !active || !takeoverRequested) return;
+    const key = `${active.id}:${snapshot?.run?.id ?? "waiting"}`;
+    if (notifiedTakeover.current === key) return;
+    notifiedTakeover.current = key;
+    setComputerSurface("browser");
+    setComputerOpen(true);
+    void desktopBridge()
+      ?.botBrowser?.notifyTakeover({
+        botName: active.name,
+        reason: "Assuma o controle para terminar o login.",
+        botId: active.id,
+      })
+      .catch(() => undefined);
+  }, [active, desktopBrowser, snapshot?.run?.id, takeoverRequested]);
   const screenVisible = (panel === "computer" || computerOpen) && computer?.state === "running";
   // `controlHolder` é o campo do banco: vale "user" para a workspace inteira enquanto
   // alguém tiver o lease. A URL da tela só vem para quem o tem — é ela que diz "é meu".
@@ -3712,11 +3743,40 @@ export function ShellPage() {
                 state={working ? "working" : "idle"}
               />
               <span className="truncate text-[15.5px] font-medium text-[var(--qb-ink)]">
-                {active.name} — tela
+                {active.name} —{" "}
+                {computerSurface === "browser" && desktopBrowser ? "navegador" : "tela"}
               </span>
               <span className="shrink-0 text-[13px] text-[var(--qb-muted)]">
                 no computador compartilhado
               </span>
+              {desktopBrowser ? (
+                <span className="app-no-drag flex shrink-0 rounded-full bg-[var(--qb-surface-2)] p-0.5 text-[12px] font-medium">
+                  <button
+                    type="button"
+                    aria-pressed={computerSurface === "screen"}
+                    className={`rounded-full px-2.5 py-1 ${
+                      computerSurface === "screen"
+                        ? "bg-[var(--qb-canvas)] text-[var(--qb-ink)]"
+                        : "text-[var(--qb-muted)]"
+                    }`}
+                    onClick={() => setComputerSurface("screen")}
+                  >
+                    Tela
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={computerSurface === "browser"}
+                    className={`rounded-full px-2.5 py-1 ${
+                      computerSurface === "browser"
+                        ? "bg-[var(--qb-canvas)] text-[var(--qb-ink)]"
+                        : "text-[var(--qb-muted)]"
+                    }`}
+                    onClick={() => setComputerSurface("browser")}
+                  >
+                    Navegador
+                  </button>
+                </span>
+              ) : null}
               {computer?.controlHolder === "user" ? (
                 <span className="rounded-full bg-[rgba(44,138,75,.12)] px-[11px] py-1 text-[13px] font-medium text-[#2C8A4B]">
                   Você tem o controle
@@ -3786,11 +3846,23 @@ export function ShellPage() {
               </button>
             </div>
           </div>
+          {desktopBrowser && computerSurface === "browser" ? (
+            <div className="min-h-0 flex-1">
+              <BotBrowserPane
+                botId={active.id}
+                botName={active.name}
+                visible
+                waiting={takeoverRequested}
+              />
+            </div>
+          ) : null}
           {/* biome-ignore lint/a11y/noStaticElementInteractions: no modo trackpad esta área É o trackpad; fora dele os handlers não fazem nada. */}
           <div
             ref={trackpadSurface}
             tabIndex={trackpadMode ? 0 : -1}
-            className={`min-h-0 flex-1 bg-[var(--qb-rail)] outline-none ${trackpadMode ? "cursor-none" : ""}`}
+            className={`min-h-0 flex-1 bg-[var(--qb-rail)] outline-none ${
+              trackpadMode ? "cursor-none" : ""
+            } ${desktopBrowser && computerSurface === "browser" ? "hidden" : ""}`}
             onPointerDown={onTrackpadPointerDown}
             onPointerMove={onTrackpadMove}
             onPointerUp={onTrackpadPointerUp}

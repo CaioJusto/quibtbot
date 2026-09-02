@@ -293,6 +293,8 @@ export const ComputerStatusSchema = z.object({
   kind: SandboxKind,
   state: z.enum(["stopped", "booting", "running", "suspended", "error"]),
   controlHolder: z.enum(["bot", "user", "none"]),
+  /** True while the bot asked the owner to take the wheel and has not been released. */
+  waitingTakeover: z.boolean().optional(),
   /** When the current takeover lease runs out; null when the bot is in control. */
   controlLeaseExpiresAt: z.string().nullable(),
   screenAvailable: z.boolean(),
