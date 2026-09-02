@@ -1,6 +1,6 @@
 {
   "name": "@quibt/mobile",
-  "version": "0.2.18",
+  "version": "0.2.19",
   "license": "Apache-2.0",
   "main": "expo-router/entry",
   "scripts": {

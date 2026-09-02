@@ -87,12 +87,12 @@ const context = { actor };
 
 describe("edition gating", () => {
   it("keeps health, me, and the picker on one answer for an unpaid self-host deploy", async () => {
-    const { router } = harness({ release: "0.2.18" });
+    const { router } = harness({ release: "0.2.19" });
     const health = await call(router.health, undefined, { context });
     const me = await call(router.me, undefined, { context });
     expect(health.edition).toBe("oss");
     expect(health.canChooseMachine).toBe(true);
-    expect(health.version).toBe("0.2.18");
+    expect(health.version).toBe("0.2.19");
     expect(me.edition).toBe("oss");
     expect(me.canChooseMachine).toBe(true);
   });

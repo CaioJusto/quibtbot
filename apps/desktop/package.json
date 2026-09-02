@@ -1,6 +1,6 @@
 {
   "name": "@quibt/desktop",
-  "version": "0.2.18",
+  "version": "0.2.19",
   "description": "Quibt Bot — seu time digital, ligado do seu jeito.",
   "author": "QuibTI Inovações",
   "homepage": "https://quibt.com.br",
@@ -60,7 +60,7 @@
     ],
     "extraMetadata": {
       "main": "dist/main.js",
-      "quibtStackVersion": "0.2.18"
+      "quibtStackVersion": "0.2.19"
     },
     "protocols": [
       {
