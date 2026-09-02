@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
 import net from "node:net";
+import { describe, expect, it } from "vitest";
 import {
   classifyBindError,
   decidePublicAccess,
