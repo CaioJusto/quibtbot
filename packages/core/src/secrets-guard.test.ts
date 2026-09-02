@@ -237,4 +237,11 @@ describe("hmacSha256", () => {
       createHmac("sha256", secret).update("quibt-bot/sandbox-supervisor/v1").digest("hex"),
     );
   });
+
+  it("matches node:crypto for the bootstrap secret derivation itself", () => {
+    const secret = "one-secret-for-this-machine";
+    expect(resolveBootstrapSecret({ NODE_ENV: "development", BETTER_AUTH_SECRET: secret })).toBe(
+      createHmac("sha256", secret).update("quibt-bot/bootstrap-secret/v1").digest("hex"),
+    );
+  });
 });
