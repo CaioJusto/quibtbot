@@ -88,7 +88,8 @@ function makeIdleHarness(
   const siblings = options?.siblings ?? [];
   const stop = vi.fn(async () => undefined);
   const destroy = vi.fn(async () => undefined);
-  const sandbox = { stop, destroy } as unknown as SandboxProvider;
+  const checkpointHome = vi.fn(async () => undefined);
+  const sandbox = { stop, destroy, checkpointHome } as unknown as SandboxProvider;
   const enqueue = vi.fn(async () => undefined);
   const orphanCreate = vi.fn(async () => undefined);
   const orphanFindFirst = vi.fn(async () => null);
@@ -193,7 +194,17 @@ function makeIdleHarness(
     $transaction: vi.fn(async (cb: (tx: typeof prisma) => Promise<void>) => cb(prisma)),
   } as unknown as PrismaClient;
 
-  return { prisma, sandbox, stop, destroy, enqueue, desktop, fixture, orphanCreate };
+  return {
+    prisma,
+    sandbox,
+    stop,
+    destroy,
+    checkpointHome,
+    enqueue,
+    desktop,
+    fixture,
+    orphanCreate,
+  };
 }
 
 describe("sleepComputerIfIdle", () => {
@@ -221,12 +232,19 @@ describe("sleepComputerIfIdle", () => {
   it.each(["docker", "remote-supervisor"] as const)(
     "%s bot A idle with bot B running suspends locally without stopping shared sandbox",
     async (kind) => {
-      const { prisma, sandbox, stop, destroy, enqueue, fixture } = makeIdleHarness(kind, {
-        siblings: [{ botId: "bot-b", state: "running" }],
-      });
+      const { prisma, sandbox, stop, destroy, checkpointHome, enqueue, fixture } = makeIdleHarness(
+        kind,
+        {
+          siblings: [{ botId: "bot-b", state: "running" }],
+        },
+      );
       await sleepComputerIfIdle({ prisma, sandbox, wakeup: { enqueue } as never }, "bot-a");
       expect(stop).not.toHaveBeenCalled();
       expect(destroy).not.toHaveBeenCalled();
+      expect(checkpointHome).toHaveBeenCalledWith(
+        expect.objectContaining({ botId: "bot-a", providerRef: fixture.sessionRef }),
+        expect.anything(),
+      );
       expect(fixture.sessionRef).toBe(fixture.computerRef);
     },
   );

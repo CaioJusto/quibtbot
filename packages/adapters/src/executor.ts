@@ -99,6 +99,7 @@ import { screenshotCommand, screenshotPath } from "./screenshot.js";
 import { inferScript } from "./scripted-runtime.js";
 import type { EncryptedSecretStore } from "./secrets.js";
 import { webFetch, webFetchRequestForTranscript } from "./web-fetch.js";
+import { checkpointSandboxHome } from "./workspace-checkpoint.js";
 
 export interface ExecutorDeps {
   prisma: PrismaClient;
@@ -563,7 +564,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let apiKey: string | undefined;
         let oauthCredential: string | undefined;
         let runSecrets = [...deps.secrets, ...botMcpSecretValues(botMcpServers)];
-        let computer: ComputerRef;
+        let computer: ComputerRef | undefined;
         const scripted = deps.runtime.describe().capabilities.scripted;
         try {
           const resolved = await resolveModelKey(deps, run.userId, run.workspaceId, credential);
@@ -581,6 +582,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           await failRun(deps, run, error, fence, bot.name);
           return;
         }
+        if (!computer) return;
 
         let assembled = "";
         const script = scripted
@@ -1634,6 +1636,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
           await failRun(deps, run, error, fence, bot.name, bot.notifyOnFinish, runSecrets);
         } finally {
           watcher.stop();
+          if (computer) {
+            await checkpointSandboxHome(deps.sandbox, computer, {
+              ...context,
+              botId: bot.id,
+            }).catch((error) => console.error("workspace-checkpoint", error));
+          }
           // Teammates parked on this run resume as soon as it stops, whatever the outcome.
           await wakeRunsWaitingForPeer(deps, runId).catch(() => undefined);
           // The bot is free again: give its oldest queued run its turn without waiting for the

@@ -13,6 +13,15 @@ describe("createSandboxProvider", () => {
     expect(sandbox.describe().id).toBe("fake");
   });
 
+  it("wraps providers with a portable-home checkpoint when DATA_DIR is set", () => {
+    const sandbox = createSandboxProvider("fake", {
+      dataDir: "/tmp/quibt-checkpoint-factory",
+      encryptionKey: "test-encryption-key-32chars-minimum!!",
+    });
+    expect(sandbox.describe().id).toBe("fake");
+    expect(typeof (sandbox as { checkpointHome?: unknown }).checkpointHome).toBe("function");
+  });
+
   it("throws on unknown provider", () => {
     expect(() => createSandboxProvider("bogus", {})).toThrow(
       'Unknown SANDBOX_PROVIDER "bogus". Use docker | remote-supervisor | e2b | e2b-emulator | box | box-emulator | daytona | daytona-emulator | desktop | fake.',
