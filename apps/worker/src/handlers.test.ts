@@ -135,6 +135,7 @@ describe("control.reap", () => {
           // Devolver o computador apaga também a marca do último uso: o próximo lease
           // começa sem crédito de renovação herdado de quem estava antes.
           controlLastInputAt: null,
+          waitingTakeover: false,
         },
       },
       { where: { botId: "bot-1" }, data: { screenUrl: null } },
