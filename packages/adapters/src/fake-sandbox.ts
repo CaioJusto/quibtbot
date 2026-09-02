@@ -9,6 +9,12 @@ import type {
   ScreenRequest,
   ScreenSession,
 } from "@quibt/adapter-kit";
+import {
+  applyToFileMap,
+  collectFromFileMap,
+  type PortableHomeEntry,
+  portableHomeLayout,
+} from "./workspace-checkpoint.js";
 
 export interface FakeBox {
   ref: ComputerRef;
@@ -191,6 +197,25 @@ export class FakeSandboxProvider implements SandboxProvider {
       return;
     }
     await this.destroy(computer, context);
+  }
+
+  async collectPortableHome(
+    computer: ComputerRef,
+    context: AdapterContext,
+  ): Promise<PortableHomeEntry[]> {
+    const box = this.box(computer, context);
+    if (!box) return [];
+    return collectFromFileMap(box.files, portableHomeLayout(computer.kind, computer.botId));
+  }
+
+  async applyPortableHome(
+    computer: ComputerRef,
+    entries: PortableHomeEntry[],
+    context: AdapterContext,
+  ): Promise<void> {
+    const box = this.box(computer, context);
+    if (!box) return;
+    applyToFileMap(box.files, portableHomeLayout(computer.kind, computer.botId), entries);
   }
 
   session(computer: ComputerRef) {

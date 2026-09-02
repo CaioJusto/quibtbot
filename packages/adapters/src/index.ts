@@ -63,4 +63,5 @@ export * from "./tts.js";
 export * from "./wakeup.js";
 export * from "./web-fetch.js";
 export * from "./worker-heartbeat.js";
+export * from "./workspace-checkpoint.js";
 export * from "./workspace-computer.js";

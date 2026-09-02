@@ -23,6 +23,7 @@ import {
   validateDesktopSuspendClaim,
   withComputerSessionGate,
 } from "./session-lifecycle.js";
+import { checkpointSandboxHome } from "./workspace-checkpoint.js";
 import {
   ACTIVE_RUN_STATUSES,
   isWorkspaceScopedSandbox,
@@ -174,6 +175,19 @@ export async function sleepComputerIfIdle(
     });
   }
 
+  const stopRef = computerRefFromSession(desktop);
+  const ctx = {
+    operationId: "computer.sleep",
+    traceId: "computer.sleep",
+    workspaceId: desktop.workspaceId,
+    userId: desktop.computer.userId,
+    botId,
+    signal: new AbortController().signal,
+  };
+  await checkpointSandboxHome(deps.sandbox, stopRef, ctx).catch((error) => {
+    console.error("workspace-checkpoint", error);
+  });
+
   if (!shouldCallProvider) {
     if (await finalizeDesktopSuspended(deps.prisma, botId, claim.token)) {
       await suspendDesktopSession(deps, desktop);
@@ -184,8 +198,6 @@ export async function sleepComputerIfIdle(
   if (!(await validateDesktopSuspendClaim(deps.prisma, botId, claim.token))) {
     return;
   }
-
-  const stopRef = computerRefFromSession(desktop);
 
   await reconcileProviderCleanupIntent(
     { prisma: deps.prisma, sandbox: deps.sandbox },
@@ -204,15 +216,6 @@ export async function sleepComputerIfIdle(
     workspaceId: desktop.workspaceId,
     reason: cleanupIntentReason("stop:idle"),
   });
-
-  const ctx = {
-    operationId: "computer.sleep",
-    traceId: "computer.sleep",
-    workspaceId: desktop.workspaceId,
-    userId: desktop.computer.userId,
-    botId,
-    signal: new AbortController().signal,
-  };
 
   const shared = isWorkspaceScopedSandbox(kind);
   if (!(await validateDesktopSuspendClaim(deps.prisma, botId, claim.token))) {

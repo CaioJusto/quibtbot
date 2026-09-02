@@ -10,6 +10,7 @@ import type {
   ScreenSession,
 } from "@quibt/adapter-kit";
 import { FakeSandboxProvider } from "./fake-sandbox.js";
+import type { PortableHomeEntry } from "./workspace-checkpoint.js";
 
 /**
  * Protocol-faithful Box emulator, mirroring the managed-sandbox (E2B) one.
@@ -78,5 +79,13 @@ export class BoxSandboxEmulator implements SandboxProvider {
 
   destroy(computer: ComputerRef, context: AdapterContext) {
     return this.inner.destroy(computer, context);
+  }
+
+  collectPortableHome(computer: ComputerRef, context: AdapterContext) {
+    return this.inner.collectPortableHome(computer, context);
+  }
+
+  applyPortableHome(computer: ComputerRef, entries: PortableHomeEntry[], context: AdapterContext) {
+    return this.inner.applyPortableHome(computer, entries, context);
   }
 }

@@ -279,9 +279,10 @@ machine and there is no speech API key. The model (~75 MB) is fetched from the H
 Hub the first time someone records, then cached — that download is the only network call, and
 after it the feature works offline. If it fails, the voice note is still sent as audio.
 
-4. Persist `DATA_DIR` (bot homes) and `ARTIFACTS_DIR` (files exchanged in the chat: screenshots, PDFs,
+4. Persist `DATA_DIR` (bot homes and the encrypted portable-computer snapshots under
+   `workspace-checkpoints/`) and `ARTIFACTS_DIR` (files exchanged in the chat: screenshots, PDFs,
    spreadsheets, voice notes; defaults to `./data/artifacts`). Both are local filesystems today, so attach a
-   volume. Object-storage-backed homes are not wired yet.
+   volume. Object-storage-backed homes are not wired yet. See [workspace-checkpoint.md](./workspace-checkpoint.md).
 5. Choose computers: **`SANDBOX_PROVIDER=e2b`** with `E2B_API_KEY`, **`SANDBOX_PROVIDER=box`** with `BOX_API_KEY`, or **`SANDBOX_PROVIDER=daytona`** with `DAYTONA_API_KEY` for a public or multi-user production service. Each bot keeps one sandbox id (`providerRef`) and a graphical desktop with a browser. Take control, sign in, then release — the bot keeps that session. Idle boxes pause after `SANDBOX_IDLE_MS` (default 10 minutes) and resume on the next message or Take control. Docker remains the local and trusted single-machine default.
 6. A Hetzner CX22 (2 vCPU / 4 GB) is enough for API + worker + Postgres when E2B owns the desktops. 2 GB works for a quiet box; 8 GB is only needed if you also run Docker computers on that same machine.
 7. Set public HTTPS `WEB_ORIGIN` / `BETTER_AUTH_URL` / `API_URL`, secrets, and an OpenRouter (or other Pi) deployment key if you want to skip per-user model keys.

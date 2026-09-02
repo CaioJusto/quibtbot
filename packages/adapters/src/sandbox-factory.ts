@@ -5,7 +5,7 @@ import {
   type ComputerRef,
   type SandboxProvider,
 } from "@quibt/adapter-kit";
-import { machineFamily, resolveDeploymentMachine } from "@quibt/core";
+import { machineFamily, resolveDeploymentMachine, resolveEncryptionKey } from "@quibt/core";
 import { BoxSandboxEmulator } from "./box-emulator.js";
 import { BoxSandboxProvider } from "./box-sandbox.js";
 import { DaytonaSandboxEmulator } from "./daytona-emulator.js";
@@ -14,6 +14,7 @@ import { DockerSandboxProvider } from "./docker-sandbox.js";
 import { ManagedSandboxEmulator } from "./e2b-emulator.js";
 import { E2BSandboxProvider } from "./e2b-sandbox.js";
 import { FakeSandboxProvider } from "./fake-sandbox.js";
+import { createWorkspaceCheckpointStore, withWorkspaceCheckpoint } from "./workspace-checkpoint.js";
 
 export type SandboxFactoryFn = (opts: SandboxFactoryOptions) => SandboxProvider;
 
@@ -78,7 +79,19 @@ export function createSandboxProvider(kind: string, opts: SandboxFactoryOptions)
       `Unknown SANDBOX_PROVIDER "${kind}". Use docker | remote-supervisor | e2b | e2b-emulator | box | box-emulator | daytona | daytona-emulator | desktop | fake.`,
     );
   }
-  return factory(opts);
+  return wrapPortableHome(factory(opts), opts);
+}
+
+function wrapPortableHome(provider: SandboxProvider, opts: SandboxFactoryOptions): SandboxProvider {
+  if (!opts.dataDir) return provider;
+  return withWorkspaceCheckpoint(
+    provider,
+    createWorkspaceCheckpointStore({
+      dataDir: opts.dataDir,
+      encryptionKey: opts.encryptionKey ?? resolveEncryptionKey(),
+    }),
+    { dataDir: opts.dataDir },
+  );
 }
 
 /** Live instances that this process can actually build with the given options. */
@@ -106,6 +119,7 @@ export interface SandboxFactoryOptions {
   daytonaApiUrl?: string;
   daytonaTarget?: string;
   dataDir?: string;
+  encryptionKey?: string;
   desktopGrants?: string[];
   desktopGrantsByUser?: Record<string, string[]>;
 }

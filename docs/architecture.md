@@ -72,6 +72,7 @@ different provider; a computer stays in the family that created it until it is d
 | --- | --- | --- |
 | Workspaces, bots, threads, messages, memory, `deployment_settings` | Postgres | The only source of truth; every client reads it through the API. |
 | Bot home directories | `DATA_DIR` on the sandbox host (or inside the E2B/Box/Daytona computer) | Local filesystem today; object-storage-backed homes are not wired yet. |
+| Portable computer home (files + Chromium profile) | `DATA_DIR/workspace-checkpoints/<botId>/` | Encrypted with `ENCRYPTION_KEY`. Provider disk is a cache; Docker↔Box↔E2B↔Daytona restore this snapshot. GUI windows do not teleport. |
 | Chat attachments (screenshots, PDFs, voice notes) | `ARTIFACTS_DIR` | Local filesystem, defaults to `./data/artifacts`. |
 | Mobile session token, SSH/Box credentials, push token | Device SecureStore (Keychain / Keystore) | Never touches Postgres; see [`docs/mobile.md`](./mobile.md). |
 | Encrypted secrets (model keys, provider tokens) | Postgres, encrypted with `ENCRYPTION_KEY` | Decrypted only inside the API/worker process. |
