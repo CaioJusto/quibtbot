@@ -32,7 +32,7 @@ describe("loadEnv", () => {
   });
 
   it("reports the deployed stack release instead of the API package version", () => {
-    expect(loadEnv({ ...base, QUIBT_STACK_VERSION: "0.2.19" }).release).toBe("0.2.19");
+    expect(loadEnv({ ...base, QUIBT_STACK_VERSION: "0.2.20" }).release).toBe("0.2.20");
   });
 
   it("keeps explicit emulator settings for pnpm verify:fast", () => {

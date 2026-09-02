@@ -4,7 +4,7 @@
     "slug": "quibt-bot",
     "owner": "quibt",
     "scheme": "quibt",
-    "version": "0.2.19",
+    "version": "0.2.20",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "icon": "./assets/icon.png",

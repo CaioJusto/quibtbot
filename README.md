@@ -20,7 +20,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="Apache-2.0" /></a>
   <a href="package.json"><img src="https://img.shields.io/badge/node-%3E%3D22.19-brightgreen.svg" alt="Node.js >= 22.19" /></a>
   <a href="package.json"><img src="https://img.shields.io/badge/pnpm-10.34.5-F69220.svg" alt="pnpm 10.34.5" /></a>
-  <a href="https://github.com/CaioJusto/quibtbot/releases/latest"><img src="https://img.shields.io/badge/release-v0.2.19-brightgreen.svg" alt="latest public release v0.2.19" /></a>
+  <a href="https://github.com/CaioJusto/quibtbot/releases/latest"><img src="https://img.shields.io/badge/release-v0.2.20-brightgreen.svg" alt="latest public release v0.2.20" /></a>
 </p>
 
 Give Ada research, Nilo operations, and Dora the daily brief. Each named bot keeps one thread,
@@ -32,23 +32,30 @@ from one Markdown pack, then pair the phone by scanning the computer's QR code.
 You run the stack on your machine. Packages live under `@quibt/*`. This repository is the complete
 product.
 
-> **Where this is:** `v0.2.19` is the latest public release (2026-08-31): tag, desktop
+> **Where this is:** `v0.2.20` is the latest public release (2026-09-02): tag, desktop
 > installers, standalone CLI binaries, SHA-256 checksums and digest-pinned Docker images all
 > come from the same tag. CI proves the Linux path on every release run —
 > a real Docker host boots a bot computer and the VPS Compose stack comes up and answers.
 >
-> What is **not** covered yet: the `v0.2.19` desktop installers are **unsigned** on every
+> What is **not** covered yet: the `v0.2.20` desktop installers are **unsigned** on every
 > platform. Until the maintainer replaces the Apple-silicon
 > `QuibtBot.dmg`, it is not notarized
 > (`signing-status-mac.json` says `signed: false, notarized: false`), so macOS warns the first
 > time — **right-click → Open**. The `v0.2.14`, `v0.2.10` and `v0.2.9` DMGs were replaced by
-> Developer ID signed, notarized and stapled builds; the same gate applies to `v0.2.19`,
+> Developer ID signed, notarized and stapled builds; the same gate applies to `v0.2.20`,
 > so until that swap `v0.2.14` carries the newest notarized DMG.
 > The Windows installer and the Linux AppImage are unsigned test builds (Intel Macs run from
 > source), and a public multi-user deployment still needs the isolation and TLS choices in
 > [Security model](#security-model) — Docker and `remote-supervisor` assume one trusted owner.
 > The evidence behind each claim, per tag, is in the
 > [release-readiness ledger](docs/release-readiness.md).
+
+## What's new in 0.2.20
+
+- Local Claude, Codex, and Grok CLIs now have hands on the bot computer (MCP/ACP), plus one extra ACP CLI path
+- Portable home + Chromium profile survives Docker ↔ Box ↔ E2B ↔ Daytona
+- VPS computer live screen via SSH alias (`docker -H ssh://`, noVNC on loopback, no public ports)
+- Desktop embedded per-bot browser + `request_takeover` (web and mobile still use noVNC)
 
 ## Download
 
@@ -71,7 +78,7 @@ each installer follows `DESKTOP_SIGNING` in `packages/installer/src/compose.ts`,
 `signing-status-*.json` files attached to the tag. Details are in
 [`docs/desktop.md`](docs/desktop.md).
 
-**Opening the unsigned Mac build.** The `v0.2.19` `QuibtBot.dmg` is **not signed or
+**Opening the unsigned Mac build.** The `v0.2.20` `QuibtBot.dmg` is **not signed or
 notarized** — macOS is right to warn; the newest notarized DMG is still `v0.2.14`. The
 first launch says the app "cannot be opened because Apple cannot check it for malicious
 software". That message is expected for this build:
@@ -80,7 +87,7 @@ software". That message is expected for this build:
 2. If macOS 15 (Sequoia) offers no Open button, go to **System Settings → Privacy &
    Security**, find *"QuibtBot" was blocked*, and click **Open Anyway**.
 3. Terminal alternative, after verifying the DMG's SHA-256 against the release's
-   `checksums-0.2.19.txt`:
+   `checksums-0.2.20.txt`:
 
    ```bash
    xattr -d com.apple.quarantine /Applications/QuibtBot.app
@@ -88,12 +95,12 @@ software". That message is expected for this build:
 
 Only bypass Gatekeeper for a download whose checksum you verified.
 
-The `v0.2.19` release publishes those three desktop installers, standalone macOS/Linux/Windows
+The `v0.2.20` release publishes those three desktop installers, standalone macOS/Linux/Windows
 `quibtbot` binaries, matching SHA-256 files, and public multi-architecture Docker images from
 the same tag. The immutable install command:
 
 ```bash
-release=0.2.19
+release=0.2.20
 curl -fsSL "https://raw.githubusercontent.com/CaioJusto/quibtbot/f75c7c22b79a75cf682e3e461e6d61ea58202101/scripts/install.sh" \
   | QUIBT_RELEASE="${release}" sh
 ```
@@ -116,7 +123,7 @@ The QR always follows the server currently open in the desktop app. If Electron 
 laptop. Only a desktop using its local stack offers the LAN / user-owned HTTPS tunnel choice.
 
 ```bash
-release=0.2.19
+release=0.2.20
 curl -fsSL "https://raw.githubusercontent.com/CaioJusto/quibtbot/f75c7c22b79a75cf682e3e461e6d61ea58202101/scripts/install.sh" \
   | QUIBT_RELEASE="${release}" QUIBT_SHOW_SENSITIVE=1 sh
 ```

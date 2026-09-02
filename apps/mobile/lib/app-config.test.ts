@@ -51,7 +51,7 @@ describe("mobile native app config", () => {
 
   it("isolates OTA updates whenever the native dependency fingerprint changes", () => {
     expect(config.expo.runtimeVersion).toEqual({ policy: "fingerprint" });
-    expect(config.expo.version).toBe("0.2.19");
+    expect(config.expo.version).toBe("0.2.20");
     expect(config.expo.ios?.buildNumber).toBe("18");
     expect(config.expo.android?.versionCode).toBe(18);
   });

@@ -209,7 +209,7 @@ describe("mobile bootstrap system journey", () => {
 
     const command = bootstrapCommand("linux");
     expect(command).toContain(INSTALL_SCRIPT_RAW_URL);
-    expect(command).toContain("QUIBT_RELEASE=0.2.19");
+    expect(command).toContain("QUIBT_RELEASE=0.2.20");
     expect(command).toContain("QUIBT_SHOW_SENSITIVE=1");
     expect(command).not.toContain("/releases/latest/");
     expect(command).not.toContain('"$tmpdir/quibtbot" install');
