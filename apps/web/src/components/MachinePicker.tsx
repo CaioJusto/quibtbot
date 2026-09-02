@@ -172,9 +172,9 @@ export function MachineCredentials({
               Alias SSH do ~/.ssh/config: a API no notebook fala com o Docker da VPS (`docker -H
               ssh://alias`) e abre um túnel temporário do noVNC até 127.0.0.1 — a tela ao vivo
               aparece aqui, sem publicar 80, 443 ou 7091. Nunca cole chave privada nem senha. Ou
-              cole a URL https do profile supervisor-tls (docker compose --profile supervisor-tls
-              up -d supervisor supervisor-tls) e o token. O caminho que deixa o celular ligado 24 h
-              é instalar o Quibt inteiro na VPS.
+              cole a URL https do profile supervisor-tls (docker compose --profile supervisor-tls up
+              -d supervisor supervisor-tls) e o token. O caminho que deixa o celular ligado 24 h é
+              instalar o Quibt inteiro na VPS.
             </span>
           ) : null}
         </label>

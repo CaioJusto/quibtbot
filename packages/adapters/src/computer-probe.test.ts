@@ -4,8 +4,8 @@ import { afterAll, describe, expect, it } from "vitest";
 import { probeComputer, SUPERVISOR_PROBE_PATH } from "./computer-probe.js";
 import {
   SSH_PUBLISHED_WEB_PORTS_MESSAGE,
-  sshAliasMissingMessage,
   type SshDockerPort,
+  sshAliasMissingMessage,
 } from "./ssh-docker.js";
 
 const resolvePublic = async () => [{ address: "203.0.113.9" }];

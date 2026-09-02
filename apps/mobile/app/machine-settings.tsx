@@ -248,9 +248,9 @@ export function MachineSettingsBody({ onSaved }: { onSaved?: () => void }) {
           />
           {item.family === "remote-supervisor" ? (
             <Text style={styles.savedCredential}>
-              Alias SSH do ~/.ssh/config no computador da API: tela ao vivo por túnel até
-              127.0.0.1, sem publicar 80/443. Nunca cole chave nem senha. Ou URL https do
-              supervisor-tls e o token. Celular 24 h: instale o Quibt inteiro na VPS.
+              Alias SSH do ~/.ssh/config no computador da API: tela ao vivo por túnel até 127.0.0.1,
+              sem publicar 80/443. Nunca cole chave nem senha. Ou URL https do supervisor-tls e o
+              token. Celular 24 h: instale o Quibt inteiro na VPS.
             </Text>
           ) : null}
         </>

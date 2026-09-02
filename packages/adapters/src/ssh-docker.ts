@@ -1,5 +1,5 @@
-import { execFile, spawn, type ChildProcess } from "node:child_process";
-import { createConnection, createServer, type AddressInfo } from "node:net";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
+import { type AddressInfo, createConnection, createServer } from "node:net";
 
 /** Mensagens de Testar / túnel. Nunca incluem stderr do SSH (pode trazer IdentityFile). */
 export function sshAliasMissingMessage(alias: string): string {
@@ -21,6 +21,19 @@ export const SSH_SUPERVISOR_MISSING_MESSAGE =
 
 export const SSH_TUNNEL_FAILED_MESSAGE =
   "O túnel SSH da tela não abriu em 127.0.0.1. Confira o alias no ~/.ssh/config e se a chave entra sem senha.";
+
+/** Recusa de política do caminho SSH — não é timeout nem Docker fechado. */
+export function isSshPolicyError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return (
+    message === SSH_PUBLISHED_WEB_PORTS_MESSAGE ||
+    message === SSH_PUBLISHED_SUPERVISOR_MESSAGE ||
+    message === SSH_SUPERVISOR_MISSING_MESSAGE ||
+    message === SSH_TUNNEL_FAILED_MESSAGE ||
+    /Não achei o alias SSH/.test(message) ||
+    /O Docker em ssh:\/\//.test(message)
+  );
+}
 
 export type ProcessResult = { status: number; stdout: string; stderr: string };
 
@@ -251,7 +264,10 @@ export function createSshDockerPort(options: SshDockerOptions = {}): SshDockerPo
       if (listed.status !== 0) {
         throw new Error(sshDockerUnreachableMessage(alias));
       }
-      const match = listed.stdout.split("\n").map((line) => line.trim()).find(supervisorLine);
+      const match = listed.stdout
+        .split("\n")
+        .map((line) => line.trim())
+        .find(supervisorLine);
       if (!match) throw new Error(SSH_SUPERVISOR_MISSING_MESSAGE);
       const id = match.split("\t")[0]?.trim();
       if (!id) throw new Error(SSH_SUPERVISOR_MISSING_MESSAGE);
@@ -269,11 +285,7 @@ export function createSshDockerPort(options: SshDockerOptions = {}): SshDockerPo
 
     async openNovncTunnel(alias, remoteUrl) {
       const parsed = new URL(remoteUrl);
-      const port = parsed.port
-        ? Number(parsed.port)
-        : parsed.protocol === "https:"
-          ? 443
-          : 80;
+      const port = parsed.port ? Number(parsed.port) : parsed.protocol === "https:" ? 443 : 80;
       if (!Number.isInteger(port) || port < 1) {
         throw new Error("O supervisor não devolveu um endereço seguro para a tela.");
       }
@@ -292,7 +304,8 @@ export async function probeSshDockerComputer(input: {
   try {
     await ssh.refusePublishedWebPorts(input.alias);
   } catch (error) {
-    const message = error instanceof Error ? error.message : sshDockerUnreachableMessage(input.alias);
+    const message =
+      error instanceof Error ? error.message : sshDockerUnreachableMessage(input.alias);
     return { ok: false, message };
   }
   return {

@@ -1,6 +1,6 @@
-import type { AdapterContext, ComputerRef, ProcessEvent } from "@quibt/adapter-kit";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import type { AdapterContext, ComputerRef, ProcessEvent } from "@quibt/adapter-kit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   COMPUTER_REVIVED_NOTE,
@@ -621,11 +621,15 @@ describe("remote-supervisor over SSH", () => {
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const port = (server.address() as AddressInfo).port;
     const closed: string[] = [];
-    captureFetch(
-      Response.json({
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      if (String(url).startsWith("http://127.0.0.1:")) {
+        return realFetch(url, init);
+      }
+      return Response.json({
         screenUrl: "http://172.18.0.4:6080/embed.html#password=vnc_secret",
-      }),
-    );
+      });
+    });
     const provider = new DockerSandboxProvider("http://unused", "token", "remote-supervisor", {
       sshAlias: "meu-vps",
       ssh: fakeSsh({
@@ -672,15 +676,12 @@ describe("remote-supervisor over SSH", () => {
         }),
       }),
     });
-    vi.stubGlobal(
-      "fetch",
-      async (url: string) => {
-        if (String(url).includes("/screen/revoke")) {
-          return Response.json({ rotated: true });
-        }
-        return Response.json({ screenUrl: "http://172.18.0.4:6080/embed.html" });
-      },
-    );
+    vi.stubGlobal("fetch", async (url: string) => {
+      if (String(url).includes("/screen/revoke")) {
+        return Response.json({ rotated: true });
+      }
+      return Response.json({ screenUrl: "http://172.18.0.4:6080/embed.html" });
+    });
     await provider.connectScreen(ref({ kind: "remote-supervisor" }), { view: "stream" }, context());
     await provider.revokeScreen(ref({ kind: "remote-supervisor" }), context());
     expect(closed).toEqual(["novnc"]);

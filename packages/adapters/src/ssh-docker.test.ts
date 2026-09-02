@@ -3,15 +3,15 @@ import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   createSshDockerPort,
+  type ProcessRunner,
   portsPublishPublicHttp,
   portsPublishPublicSupervisor,
   probeSshDockerComputer,
   rewriteScreenUrlToLoopback,
   SSH_PUBLISHED_WEB_PORTS_MESSAGE,
+  type SshLocalForward,
   sshAliasMissingMessage,
   sshDockerUnreachableMessage,
-  type ProcessRunner,
-  type SshLocalForward,
 } from "./ssh-docker.js";
 
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -75,7 +75,9 @@ describe("createSshDockerPort", () => {
         return { status: 0, stdout: "" };
       }),
     });
-    await expect(ssh.refusePublishedWebPorts("meu-vps")).rejects.toThrow(SSH_PUBLISHED_WEB_PORTS_MESSAGE);
+    await expect(ssh.refusePublishedWebPorts("meu-vps")).rejects.toThrow(
+      SSH_PUBLISHED_WEB_PORTS_MESSAGE,
+    );
   });
 
   it("docker -H ssh:// que não responde falha em português", async () => {

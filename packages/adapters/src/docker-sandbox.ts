@@ -13,6 +13,7 @@ import type {
 import { boundedSandboxCommandTimeoutMs, resolveSupervisorToken } from "@quibt/core";
 import {
   createSshDockerPort,
+  isSshPolicyError,
   rewriteScreenUrlToLoopback,
   type SshDockerPort,
   type SshLocalForward,
@@ -634,6 +635,9 @@ export class DockerSandboxProvider implements SandboxProvider {
       if (isComputerUnreachableError(error)) {
         return { presence: "unknown", unreachable: error as SupervisorRequestError };
       }
+      // Política SSH (80/443, alias, Docker no host) não é soluço de rede: quem perguntou
+      // precisa ler a recusa, não um "unknown" que o boot trata como "ainda está lá".
+      if (isSshPolicyError(error)) throw error;
       return { presence: "unknown" };
     }
   }
