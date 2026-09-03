@@ -134,7 +134,14 @@ export function QuibtCloudPanel({
       onSessionToken(nextToken);
       setInfo("Conta Cloud conectada.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Não foi possível entrar na conta Cloud");
+      const raw = err instanceof Error ? err.message : "";
+      setError(
+        /failed to fetch|networkerror|load failed/i.test(raw)
+          ? placeholderApi
+            ? `Não foi possível alcançar a API Cloud (${apiUrl}). Defina QUIBT_CLOUD_API_URL quando o backend estiver pronto.`
+            : `Não foi possível alcançar a API Cloud (${apiUrl}). Confira a URL e a rede.`
+          : raw || "Não foi possível entrar na conta Cloud",
+      );
     } finally {
       setPending(false);
     }
