@@ -46,10 +46,18 @@ export const SandboxKind = z.enum([
   "e2b",
   "box",
   "daytona",
+  "quibt-cloud",
   "desktop",
   "fake",
 ]);
 export type SandboxKind = z.infer<typeof SandboxKind>;
 
-export const OssMachineKind = z.enum(["docker", "remote-supervisor", "e2b", "box", "daytona"]);
+export const OssMachineKind = z.enum([
+  "docker",
+  "remote-supervisor",
+  "e2b",
+  "box",
+  "daytona",
+  "quibt-cloud",
+]);
 export type OssMachineKind = z.infer<typeof OssMachineKind>;

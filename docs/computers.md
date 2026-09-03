@@ -214,15 +214,37 @@ Conferido na [documentação oficial](https://www.daytona.io/docs/en/typescript-
 
 **Limite honesto:** você paga a Daytona. A URL de tela expira; o painel pede outra quando necessário. Imagens customizadas só terão desktop se incluírem os pacotes VNC documentados, por isso o provider usa a imagem padrão.
 
+## Quibt Bot Cloud (opcional)
+
+Serviço **SaaS separado** (outro repositório, ainda em construção). Não substitui Docker, VPS, E2B, Box nem Daytona — é mais uma opção no catálogo do app desktop/mobile.
+
+**Para quem:** quer assinar um plano e deixar a Quibt provisionar/ligar/desligar uma VM isolada (ASCII Box) sem colar chave de terceiros.
+
+**O que a pessoa faz**
+
+1. No app (Electron ou celular), escolhe **Quibt Bot Cloud** em onboarding ou Ajustes → Máquina.
+2. Entra com e-mail e senha da conta Cloud (não é a conta do self-host local).
+3. Vê o plano, as horas usadas no ciclo e quantos computadores podem ficar ligados ao mesmo tempo.
+4. Liga ou desliga a box. Quando ligada, conversa com o bot normalmente; a tela remota reutiliza o mesmo fluxo noVNC da VPS/Box (`/api/boxes/:id/connection` no backend Cloud — contrato hipotético).
+
+**O que o cliente faz de verdade** (`packages/adapters/src/quibt-cloud-client.ts`)
+
+- HTTP isolado contra a API Cloud (URL em `QUIBT_CLOUD_API_URL`, padrão `https://cloud.quibt.invalid` — placeholder).
+- `POST /api/auth/login`, `GET /api/me`, `GET /api/boxes`, `POST /api/boxes/:id/resume|stop`, `GET /api/boxes/:id/connection` — **REVISAR** quando o contrato real fechar.
+- O provider `quibt-cloud` guarda o token de sessão criptografado em `deployment_settings` como as outras chaves BYOK.
+- Limites de horas ou de computadores simultâneos: mensagem clara sugerindo upgrade; o app **não trava**.
+
+**Limite honesto:** opcional. Self-host e modos locais continuam sem conta Cloud. O backend Cloud ainda está sendo construído em paralelo; ajuste só `quibt-cloud-client.ts` quando a API real existir.
+
 ## O que funciona de ponta a ponta
 
-| Peça                                 | Docker / VPS                                                                | E2B                              | Box                                | Daytona                              |
-| ------------------------------------ | --------------------------------------------------------------------------- | -------------------------------- | ---------------------------------- | ------------------------------------ |
-| Ligar o desktop na primeira mensagem | Sim (`quibt-session`)                                                       | Sim (`Sandbox.create` + browser) | Sim (espera `ready`, pede desktop) | Sim (`create` + `computerUse.start`) |
-| Painel noVNC / stream no app         | Sim, URL assinada `/novnc/*`                                                | Sim, stream E2B                  | Sim, URL da Box                    | Sim, preview assinado da porta 6080  |
-| Assumir controle                     | noVNC + input xdotool                                                       | stream + `press` / mouse         | só noVNC interativo                | noVNC + Computer Use                 |
-| Vários bots ao mesmo tempo           | Sim, displays 1…32 no **mesmo** container                                   | Sim, **N sandboxes**             | Sim, **N VMs**                     | Sim, **N sandboxes**                 |
-| Persistência                         | Home no disco do host + checkpoint portátil por bot                         | Pause/resume **e** checkpoint em `DATA_DIR` | Archive/resume **e** checkpoint em `DATA_DIR` | Stop/start **e** checkpoint em `DATA_DIR` |
+| Peça                                 | Docker / VPS                                                                | E2B                              | Box                                | Daytona                              | Quibt Cloud (hipótese) |
+| ------------------------------------ | --------------------------------------------------------------------------- | -------------------------------- | ---------------------------------- | ------------------------------------ | ---------------------- |
+| Ligar o desktop na primeira mensagem | Sim (`quibt-session`)                                                       | Sim (`Sandbox.create` + browser) | Sim (espera `ready`, pede desktop) | Sim (`create` + `computerUse.start`) | Sim (`resume` + connection) |
+| Painel noVNC / stream no app         | Sim, URL assinada `/novnc/*`                                                | Sim, stream E2B                  | Sim, URL da Box                    | Sim, preview assinado da porta 6080  | Sim, URL da connection Cloud |
+| Assumir controle                     | noVNC + input xdotool                                                       | stream + `press` / mouse         | só noVNC interativo                | noVNC + Computer Use                 | noVNC interativo       |
+| Vários bots ao mesmo tempo           | Sim, displays 1…32 no **mesmo** container                                   | Sim, **N sandboxes**             | Sim, **N VMs**                     | Sim, **N sandboxes**                 | Limitado pelo plano Cloud |
+| Persistência                         | Home no disco do host + checkpoint portátil por bot                         | Pause/resume **e** checkpoint em `DATA_DIR` | Archive/resume **e** checkpoint em `DATA_DIR` | Stop/start **e** checkpoint em `DATA_DIR` | Resume/stop na Box Cloud |
 | Trocar de máquina depois             | Salva em `deployment_settings`; no próximo boot o home e o perfil Chromium voltam do checkpoint | idem                             | idem                               | idem                                 |
 
 O roteador (`createRoutingSandboxProvider`) nunca teleporta um desktop ligado para outro provedor. Computador já criado fica na família que o criou até o próximo boot; aí o disco do vendor é só cache. Arquivos e cookies do Chromium daquele bot voltam de um snapshot em `DATA_DIR` — ver [workspace-checkpoint.md](./workspace-checkpoint.md). Janelas abertas, o X11 e o noVNC **não** atravessam a troca.

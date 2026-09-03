@@ -161,6 +161,30 @@ const DAYTONA_GUIDE: MachineGuide = {
   keyLabel: "Abrir as chaves da Daytona",
 };
 
+const QUIBT_CLOUD_GUIDE: MachineGuide = {
+  kind: "quibt-cloud",
+  family: "quibt-cloud",
+  title: OSS_MACHINE_COPY["quibt-cloud"].title,
+  body: OSS_MACHINE_COPY["quibt-cloud"].body,
+  headline: "O computador do bot fica numa VM Cloud isolada",
+  what: "Quibt Bot Cloud é um serviço opcional, noutro repositório. Você entra com a conta Cloud neste app; o backend deles liga uma VM isolada (ASCII Box) com o Quibt Bot. Docker, VPS, E2B, Box e Daytona continuam iguais — nenhuma conta Cloud é necessária nesses caminhos.",
+  who: "Quem já tem (ou vai ter) uma assinatura Quibt Bot Cloud e quer ligar o bot sem Docker local nem chave de outro provedor.",
+  youNeed: [
+    "Uma conta Quibt Bot Cloud (e-mail e senha). A URL da API vem de QUIBT_CLOUD_API_URL; o valor de desenvolvimento é um placeholder, não um servidor de verdade.",
+    "Horas e computadores simultâneos dentro do teto do plano. Se o teto acabar, o app avisa e sugere upgrade — não trava o resto do Quibt.",
+  ],
+  steps: [
+    "Escolha “Quibt Bot Cloud” nesta tela.",
+    "Entre com o e-mail e a senha da conta Cloud. O app mostra o plano e as horas usadas contra o teto.",
+    "Toque em Ligar na box. Se o plano estiver no limite, aparece o aviso de upgrade e o app segue aberto.",
+    "Com a box ligada, a tela ao vivo usa o mesmo caminho de tela remota da VPS (URL de conexão / noVNC). No celular, converse com o bot quando ele estiver rodando.",
+    "Salve para este deploy lembrar da sessão. Para voltar ao Docker ou à VPS, escolha outra máquina — não precisa da conta Cloud.",
+  ],
+  botsShare:
+    "Não compartilham computador. É uma VM isolada por box da conta Cloud, não é aba de navegador e não é o Docker desta máquina.",
+  cost: "Você paga o plano Quibt Bot Cloud (horas-equivalentes contra o teto). Os modos locais e BYOK não cobram essa assinatura.",
+};
+
 const HETZNER_GUIDE: MachineGuide = {
   ...REMOTE_GUIDE,
   kind: "vps-hetzner",
@@ -216,6 +240,7 @@ const GUIDES: Record<string, MachineGuide> = {
   e2b: E2B_GUIDE,
   box: BOX_GUIDE,
   daytona: DAYTONA_GUIDE,
+  "quibt-cloud": QUIBT_CLOUD_GUIDE,
   "vps-hetzner": HETZNER_GUIDE,
   "vps-digitalocean": DIGITALOCEAN_GUIDE,
   "vps-generic": GENERIC_VPS_GUIDE,
@@ -227,6 +252,7 @@ const FAMILY_GUIDES: Record<OssMachine, MachineGuide> = {
   e2b: E2B_GUIDE,
   box: BOX_GUIDE,
   daytona: DAYTONA_GUIDE,
+  "quibt-cloud": QUIBT_CLOUD_GUIDE,
 };
 
 /** Exact catalog kind first, then the bootable family, then Docker. */

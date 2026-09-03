@@ -15,6 +15,7 @@ import { DockerSandboxProvider } from "./docker-sandbox.js";
 import { ManagedSandboxEmulator } from "./e2b-emulator.js";
 import { E2BSandboxProvider } from "./e2b-sandbox.js";
 import { FakeSandboxProvider } from "./fake-sandbox.js";
+import { QuibtCloudSandboxProvider } from "./quibt-cloud-sandbox.js";
 import type { SshDockerPort } from "./ssh-docker.js";
 import { createWorkspaceCheckpointStore, withWorkspaceCheckpoint } from "./workspace-checkpoint.js";
 
@@ -69,6 +70,15 @@ function registerBuiltinSandboxFactories(): void {
       target: opts.daytonaTarget,
     });
   });
+  registerSandboxFactory("quibt-cloud", (opts) => {
+    if (!opts.quibtCloudSessionToken) {
+      throw new Error("A sessão Quibt Bot Cloud é necessária para o provedor quibt-cloud");
+    }
+    return new QuibtCloudSandboxProvider({
+      apiUrl: opts.quibtCloudApiUrl,
+      token: opts.quibtCloudSessionToken,
+    });
+  });
   registerSandboxFactory("e2b-emulator", () => new ManagedSandboxEmulator());
   registerSandboxFactory("box-emulator", () => new BoxSandboxEmulator());
   registerSandboxFactory("daytona-emulator", () => new DaytonaSandboxEmulator());
@@ -85,7 +95,7 @@ export function createSandboxProvider(kind: string, opts: SandboxFactoryOptions)
   const factory = sandboxFactories.get(kind);
   if (!factory) {
     throw new Error(
-      `Unknown SANDBOX_PROVIDER "${kind}". Use docker | remote-supervisor | e2b | e2b-emulator | box | box-emulator | daytona | daytona-emulator | desktop | fake.`,
+      `Unknown SANDBOX_PROVIDER "${kind}". Use docker | remote-supervisor | e2b | e2b-emulator | box | box-emulator | daytona | daytona-emulator | quibt-cloud | desktop | fake.`,
     );
   }
   return wrapPortableHome(factory(opts), opts);
@@ -127,6 +137,10 @@ export interface SandboxFactoryOptions {
   daytonaApiKey?: string;
   daytonaApiUrl?: string;
   daytonaTarget?: string;
+  /** Session token from POST /api/auth/login on the Cloud SaaS. */
+  quibtCloudSessionToken?: string;
+  /** REVIEW: hypothesized Cloud API base; defaults to the marked placeholder. */
+  quibtCloudApiUrl?: string;
   dataDir?: string;
   encryptionKey?: string;
   desktopGrants?: string[];

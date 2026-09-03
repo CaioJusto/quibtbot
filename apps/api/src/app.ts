@@ -225,6 +225,8 @@ export async function createApp(overrides: CreateAppOverrides = {}): Promise<App
     daytonaApiKey: env.daytonaApiKey,
     daytonaApiUrl: env.daytonaApiUrl,
     daytonaTarget: env.daytonaTarget,
+    quibtCloudSessionToken: env.quibtCloudSessionToken,
+    quibtCloudApiUrl: env.quibtCloudApiUrl,
     dataDir: env.dataDir,
     desktopGrantsByUser,
   };

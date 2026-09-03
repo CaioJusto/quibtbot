@@ -22,6 +22,7 @@ export * from "./network-errors.js";
 export * from "./plans.js";
 export * from "./polling.js";
 export * from "./presence.js";
+export * from "./quibt-cloud.js";
 export * from "./run-state.js";
 export * from "./sandbox-command.js";
 export * from "./secrets-guard.js";

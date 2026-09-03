@@ -8,7 +8,7 @@ The first is where the server (API, worker, Postgres) runs: this computer, your 
 VM. The second is where each bot's own computer runs: Docker, a remote supervisor, E2B, Box, or Daytona.
 See [`docs/architecture.md`](./architecture.md) for the full picture.
 
-Onboarding asks for an OpenRouter key, a local Ollama / OpenAI-compatible URL (`http://127.0.0.1:11434`), a ChatGPT / Copilot / SuperGrok subscription, **or** a detected authenticated Claude Code / Codex / Grok CLI (or one extra ACP CLI). Host CLIs use no pasted API key, run beside the API/worker, and call the bot computer's existing tools; they do not control the host Mac/Windows. See [cli-engines.md](./cli-engines.md). There is no Quibt token plan. The first owner picks the machine from the catalog (Docker, a remote supervisor / BYO VPS, E2B, Box, or Daytona). E2B, Box, Daytona, and the remote supervisor accept keys and endpoints in the UI (BYOK), not only in `.env`. The pick is saved in `deployment_settings` and the API and worker route new computers to it; `SANDBOX_PROVIDER` stays the fallback for a deploy that never chose. VPS recipes (Hetzner, DigitalOcean, generic) install the Compose stack on **your** account — Quibt does not resell VMs. Plugins can add an HTTP MCP server without Composio.
+Onboarding asks for an OpenRouter key, a local Ollama / OpenAI-compatible URL (`http://127.0.0.1:11434`), a ChatGPT / Copilot / SuperGrok subscription, **or** a detected authenticated Claude Code / Codex / Grok CLI (or one extra ACP CLI). Host CLIs use no pasted API key, run beside the API/worker, and call the bot computer's existing tools; they do not control the host Mac/Windows. See [cli-engines.md](./cli-engines.md). There is no Quibt token plan. The first owner picks the machine from the catalog (Docker, a remote supervisor / BYO VPS, E2B, Box, Daytona, or **Quibt Bot Cloud**). E2B, Box, Daytona, remote supervisor, and Quibt Bot Cloud accept credentials in the UI (BYOK / Cloud login), not only in `.env`. The pick is saved in `deployment_settings` and the API and worker route new computers to it; `SANDBOX_PROVIDER` stays the fallback for a deploy that never chose. VPS recipes (Hetzner, DigitalOcean, generic) install the Compose stack on **your** account — Quibt does not resell VMs. Plugins can add an HTTP MCP server without Composio.
 
 The signed-in product is a long-running API, a Graphile Worker, Postgres, and a computer provider (Docker supervisor, E2B, Box, or Daytona). It is not a static site. The marketing site in `apps/www` can be hosted separately.
 
@@ -189,7 +189,7 @@ Optional:
 ```env
 SIGNUPS_ENABLED=true      # closed by default; true lets people beyond the first owner sign up
 SIGNUP_ALLOWLIST=you@example.com,@company.com
-SANDBOX_PROVIDER=docker   # or e2b / box / daytona. Keep fake only for pnpm verify:fast.
+SANDBOX_PROVIDER=docker   # or e2b / box / daytona / quibt-cloud. Keep fake only for pnpm verify:fast.
 AGENT_RUNTIME=pi          # Keep scripted only for pnpm verify:fast.
 WAKEUP_DRIVER=graphile
 SANDBOX_IDLE_MS=600000    # pause the bot computer after 10 minutes idle
@@ -201,6 +201,8 @@ BOX_API_KEY=              # when SANDBOX_PROVIDER=box
 DAYTONA_API_KEY=          # when SANDBOX_PROVIDER=daytona
 DAYTONA_API_URL=          # optional: self-hosted/custom Daytona API
 DAYTONA_TARGET=           # optional: Daytona target/region
+QUIBT_CLOUD_API_URL=      # optional SaaS; default placeholder https://cloud.quibt.invalid
+QUIBT_CLOUD_SESSION_TOKEN=
 ```
 
 The two database values only matter on a busy or large install:
@@ -227,7 +229,8 @@ The catalog in onboarding and **Settings → Máquina** is the picker. After a t
 - **E2B** keeps its existing one-bot/one-sandbox behavior. Paste `E2B_API_KEY` in the UI (BYOK) or set it in `.env`. Workspace-wide shared files and multi-display sessions are currently the Docker path; they are not emulated by sharing a browser tab in E2B.
 - **Box** (`SANDBOX_PROVIDER=box`, box.ascii.dev) gives each bot a persistent Ubuntu cloud VM with a virtual desktop, billed per second on **your** Box account. Paste `BOX_API_KEY` in the UI. User boxes are created with `noEnv: true`, so operator environment variables and credentials are never copied into them. Boxes are created without provider auto-stop; the `SANDBOX_IDLE_MS` scheduler stops (archives) idle boxes and they resume with their disk intact on the next message or Take control. Take control happens through the interactive noVNC desktop stream.
 - **Daytona** (`SANDBOX_PROVIDER=daytona`) gives each bot a private sandbox from Daytona's default graphical image. Paste `DAYTONA_API_KEY` in the UI or set it in `.env`; hosted Daytona needs no other setting. `DAYTONA_API_URL` and `DAYTONA_TARGET` are optional for self-hosted/custom control planes and target selection. The panel uses a one-hour signed noVNC preview and Computer Use for input. Quibt stops idle sandboxes, starts the same id on demand, and deletes it when the bot is deleted.
-- **Desktop provider** is disabled. Running the Electron client does not run model commands on the host. The packaged app can embed a per-bot Chromium (`persist:bot-<id>`) for the owner; that is not `SANDBOX_PROVIDER=desktop` and does not replace Docker, a VPS, E2B, Box, or Daytona.
+- **Quibt Bot Cloud** (`SANDBOX_PROVIDER=quibt-cloud`, optional SaaS) — sign in inside the desktop/mobile app with your Cloud account; the client talks to `QUIBT_CLOUD_API_URL` (placeholder `https://cloud.quibt.invalid` until the backend ships). Session token and plan limits are handled in `packages/adapters/src/quibt-cloud-client.ts` (**hypothesized API**). Local Docker, BYO VPS, E2B, Box, and Daytona paths do **not** require a Cloud account.
+- **Desktop provider** is disabled. Running the Electron client does not run model commands on the host. The packaged app can embed a per-bot Chromium (`persist:bot-<id>`) for the owner; that is not `SANDBOX_PROVIDER=desktop` and does not replace Docker, a VPS, E2B, Box, Daytona, or Quibt Cloud.
 - **Fake** is only an emulator for verification.
 
 ## Backup

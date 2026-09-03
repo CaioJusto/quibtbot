@@ -49,6 +49,8 @@ export * from "./pi-oauth.js";
 export * from "./pi-runtime.js";
 export * from "./provider-cleanup-reconcile.js";
 export * from "./provider-ref-persistence.js";
+export * from "./quibt-cloud-client.js";
+export * from "./quibt-cloud-sandbox.js";
 export * from "./realtime.js";
 export * from "./request-takeover.js";
 export * from "./run-lease.js";

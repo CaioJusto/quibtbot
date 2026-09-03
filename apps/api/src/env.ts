@@ -37,6 +37,9 @@ export interface AppEnv {
   daytonaApiKey: string | undefined;
   daytonaApiUrl: string | undefined;
   daytonaTarget: string | undefined;
+  /** REVIEW: optional Cloud SaaS session for operator installs. */
+  quibtCloudSessionToken: string | undefined;
+  quibtCloudApiUrl: string | undefined;
   composioApiKey: string | undefined;
   defaultProvider: string;
   defaultModel: string;
@@ -95,6 +98,8 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
     daytonaApiKey: source.DAYTONA_API_KEY,
     daytonaApiUrl: source.DAYTONA_API_URL,
     daytonaTarget: source.DAYTONA_TARGET,
+    quibtCloudSessionToken: source.QUIBT_CLOUD_SESSION_TOKEN,
+    quibtCloudApiUrl: source.QUIBT_CLOUD_API_URL,
     composioApiKey: source.COMPOSIO_API_KEY,
     defaultProvider: source.PI_DEFAULT_PROVIDER ?? "openrouter",
     defaultModel: source.PI_DEFAULT_MODEL ?? "deepseek/deepseek-v4-flash-0731",
@@ -105,6 +110,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
       e2bApiKey: source.E2B_API_KEY,
       boxApiKey: source.BOX_API_KEY,
       daytonaApiKey: source.DAYTONA_API_KEY,
+      quibtCloudSessionToken: source.QUIBT_CLOUD_SESSION_TOKEN,
       remoteSupervisorUrl: source.SANDBOX_REMOTE_SUPERVISOR_URL,
     }),
     billingEnabled,

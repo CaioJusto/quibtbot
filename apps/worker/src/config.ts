@@ -22,6 +22,8 @@ export function sandboxOptionsFromEnv(
     daytonaTarget: env.DAYTONA_TARGET,
     remoteSupervisorUrl: env.SANDBOX_REMOTE_SUPERVISOR_URL,
     remoteSupervisorToken: env.SANDBOX_REMOTE_SUPERVISOR_TOKEN,
+    quibtCloudSessionToken: env.QUIBT_CLOUD_SESSION_TOKEN,
+    quibtCloudApiUrl: env.QUIBT_CLOUD_API_URL,
     dataDir,
     desktopGrantsByUser,
   };

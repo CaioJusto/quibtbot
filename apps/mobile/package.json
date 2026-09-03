@@ -30,6 +30,7 @@
     "@expo/ui": "~57.0.14",
     "@orpc/client": "^1.15.0",
     "@quibt/chat-ui": "workspace:*",
+    "@quibt/adapters": "workspace:*",
     "@quibt/contracts": "workspace:*",
     "@quibt/core": "workspace:*",
     "@quibt/installer": "workspace:^",

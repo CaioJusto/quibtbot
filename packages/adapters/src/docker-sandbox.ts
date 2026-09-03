@@ -11,6 +11,7 @@ import type {
   ScreenSession,
 } from "@quibt/adapter-kit";
 import { boundedSandboxCommandTimeoutMs, resolveSupervisorToken } from "@quibt/core";
+import { isQuibtCloudLimitError } from "./quibt-cloud-client.js";
 import {
   createSshDockerPort,
   isSshPolicyError,
@@ -245,6 +246,7 @@ export function isComputerMissingError(error: unknown): boolean {
 
 /** What the owner should read when computer.boot throws. */
 export function publicComputerBootMessage(error: unknown): string {
+  if (isQuibtCloudLimitError(error)) return error.limit.upgradeMessage;
   const raw = error instanceof Error ? error.message : String(error);
   const detail = error instanceof SupervisorRequestError ? error.detail : "";
   if (/trial_auto_stop_required|free-trial boxes cannot run without auto-stop/i.test(raw)) {

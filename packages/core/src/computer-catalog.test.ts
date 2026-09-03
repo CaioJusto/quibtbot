@@ -18,12 +18,14 @@ describe("computer catalog", () => {
       "e2b",
       "box",
       "daytona",
+      "quibt-cloud",
     ]);
     expect(searchMachineCatalog("").map((entry) => entry.kind)).toContain("vps-hetzner");
     expect(isPrimaryMachine("docker")).toBe(true);
     expect(isPrimaryMachine("e2b")).toBe(true);
     expect(isPrimaryMachine("box")).toBe(true);
     expect(isPrimaryMachine("daytona")).toBe(true);
+    expect(isPrimaryMachine("quibt-cloud")).toBe(true);
     expect(isPrimaryMachine("remote-supervisor")).toBe(true);
     expect(isPrimaryMachine("vps-hetzner")).toBe(false);
   });
@@ -67,6 +69,8 @@ describe("computer catalog", () => {
     expect(machineIsReady("e2b", { e2bApiKey: "key" })).toBe(true);
     expect(machineIsReady("daytona", {})).toBe(false);
     expect(machineIsReady("daytona", { daytonaApiKey: "key" })).toBe(true);
+    expect(machineIsReady("quibt-cloud", {})).toBe(false);
+    expect(machineIsReady("quibt-cloud", { quibtCloudSessionToken: "sess" })).toBe(true);
     expect(
       machineIsReady("vps-generic", {
         remoteSupervisorUrl: "https://vps:7091",

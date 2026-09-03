@@ -113,9 +113,17 @@ describe("public documentation policy", () => {
   });
 
   it("keeps public docs free of a waitlist or a hosted Quibt Cloud call-to-action", () => {
+    /** Optional Cloud provider is documented in operator guides, not marketed on the landing path. */
+    const cloudProviderDocs = new Set(["docs/computers.md", "docs/self-host.md"]);
     for (const [name, text] of Object.entries(PUBLIC_DOCS)) {
       expect(text, name).not.toMatch(/waitlist|lista de espera/i);
-      expect(text, name).not.toMatch(/quibt cloud/i);
+      if (!cloudProviderDocs.has(name)) {
+        expect(text, name).not.toMatch(/quibt cloud/i);
+      }
+    }
+    for (const name of cloudProviderDocs) {
+      const text = PUBLIC_DOCS[name];
+      expect(text, name).not.toMatch(/sign up for (quibt )?cloud|assine.*cloud|lista de espera/i);
     }
   });
 

@@ -19,6 +19,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { QuibtCloudPanel } from "../components/QuibtCloudPanel";
 import { rpc } from "../lib/api";
 import { BRAND_BLUE, BRAND_BLUE_SOFT, QuibtComputerArt } from "../lib/brand";
 import { COLORS, GlassIconButton } from "../lib/design-system";
@@ -70,6 +71,7 @@ export function MachineSettingsBody({ onSaved }: { onSaved?: () => void }) {
   const [selected, setSelected] = useState("docker");
   const [endpoint, setEndpoint] = useState("");
   const [apiKey, setApiKey] = useState("");
+  const [cloudSessionToken, setCloudSessionToken] = useState<string | null>(null);
   const [savedBoxKey, setSavedBoxKey] = useState<string | null>(null);
   const [savedBoxKeyState, setSavedBoxKeyState] = useState<
     "loading" | "available" | "missing" | "reauth-required"
@@ -121,7 +123,10 @@ export function MachineSettingsBody({ onSaved }: { onSaved?: () => void }) {
   const { cards, recipes } = useMemo(() => splitMachineCatalog(catalog), [catalog]);
   const item = catalog.find((entry) => entry.kind === selected);
   const notice = machineNotice({ chosen: selected, running, saved });
-  const effectiveApiKey = effectiveMachineApiKey(selected, apiKey, savedBoxKey);
+  const effectiveApiKey =
+    selected === "quibt-cloud"
+      ? (cloudSessionToken ?? "")
+      : effectiveMachineApiKey(selected, apiKey, savedBoxKey);
 
   async function probe() {
     const ready = machineCredentialsReady(item, { endpoint, apiKey: effectiveApiKey });
@@ -255,7 +260,7 @@ export function MachineSettingsBody({ onSaved }: { onSaved?: () => void }) {
           ) : null}
         </>
       ) : null}
-      {item?.needsKey && !isSshHostAlias(endpoint) ? (
+      {item?.needsKey && !isSshHostAlias(endpoint) && selected !== "quibt-cloud" ? (
         <>
           <TextInput
             value={apiKey}
@@ -281,6 +286,13 @@ export function MachineSettingsBody({ onSaved }: { onSaved?: () => void }) {
             </Pressable>
           ) : null}
         </>
+      ) : null}
+      {selected === "quibt-cloud" ? (
+        <QuibtCloudPanel
+          configured={item?.configured}
+          disabled={pending}
+          onSessionToken={setCloudSessionToken}
+        />
       ) : null}
       {selected === "box" ? (
         <View style={styles.trialNotice}>

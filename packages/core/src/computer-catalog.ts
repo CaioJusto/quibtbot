@@ -100,6 +100,18 @@ export const MACHINE_CATALOG: MachineCatalogDefinition[] = [
     searchable: ["daytona", "sandbox", "vnc", "computer use", "nuvem", "cloud"],
   },
   {
+    kind: "quibt-cloud",
+    family: "quibt-cloud",
+    title: OSS_MACHINE_COPY["quibt-cloud"].title,
+    body: OSS_MACHINE_COPY["quibt-cloud"].body,
+    category: "cloud",
+    needsKey: true,
+    needsEndpoint: false,
+    needsDocker: false,
+    keyLabel: "Sessão Quibt Bot Cloud (depois do login)",
+    searchable: ["quibt", "cloud", "nuvem", "plano", "horas", "box"],
+  },
+  {
     kind: "vps-hetzner",
     family: "remote-supervisor",
     title: "Hetzner (receita)",
@@ -193,6 +205,7 @@ export interface CatalogReadiness {
   e2bApiKey?: string;
   boxApiKey?: string;
   daytonaApiKey?: string;
+  quibtCloudSessionToken?: string;
   remoteSupervisorUrl?: string;
   remoteSupervisorToken?: string;
   dockerReady?: boolean;
@@ -209,6 +222,7 @@ export function machineIsReady(kind: string, readiness: CatalogReadiness): boole
   if (boot === "e2b") return Boolean(readiness.e2bApiKey);
   if (boot === "box") return Boolean(readiness.boxApiKey);
   if (boot === "daytona") return Boolean(readiness.daytonaApiKey);
+  if (boot === "quibt-cloud") return Boolean(readiness.quibtCloudSessionToken);
   return false;
 }
 

@@ -169,6 +169,7 @@ describe("parseOssMachine", () => {
     expect(parseOssMachine("E2B")).toBe("e2b");
     expect(parseOssMachine("remote-supervisor")).toBe("remote-supervisor");
     expect(parseOssMachine("DAYTONA")).toBe("daytona");
+    expect(parseOssMachine("quibt-cloud")).toBe("quibt-cloud");
     expect(parseOssMachine("desktop")).toBeNull();
   });
 });
