@@ -91,7 +91,10 @@ export class QuibtCloudHttpClient implements QuibtCloudClient {
   constructor(options: QuibtCloudClientOptions = {}) {
     this.baseUrl = resolveQuibtCloudApiUrl({ override: options.baseUrl });
     this.token = options.token?.trim() || null;
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    // Bind global fetch: assigning `fetch` and calling it as `this.fetchImpl(...)` loses
+    // `Window`/`globalThis` and throws "Illegal invocation" in browsers.
+    this.fetchImpl =
+      options.fetchImpl ?? ((input, init) => globalThis.fetch(input, init));
     this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS;
   }
 

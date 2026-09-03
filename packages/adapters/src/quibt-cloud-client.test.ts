@@ -132,6 +132,22 @@ describe("QuibtCloudHttpClient hypothesized contract", () => {
     expect(client.baseUrl).toBe(QUIBT_CLOUD_API_URL_PLACEHOLDER);
   });
 
+  it("calls globalThis.fetch without Illegal invocation (browser-style binding)", async () => {
+    const original = globalThis.fetch;
+    const calls: string[] = [];
+    globalThis.fetch = mockFetch((req) => {
+      calls.push(`${req.method} ${req.path}`);
+      return { status: 200, body: { token: "sess-bind" } };
+    });
+    try {
+      const client = createQuibtCloudClient({ baseUrl: QUIBT_CLOUD_API_URL_PLACEHOLDER });
+      await expect(client.login("a@b.c", "x")).resolves.toEqual({ token: "sess-bind" });
+      expect(calls).toEqual(["POST /api/auth/login"]);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
   it("maps a hours-exhausted resume to a limit error", async () => {
     const fetchImpl = mockFetch((req) => {
       if (req.path.endsWith("/resume")) {
