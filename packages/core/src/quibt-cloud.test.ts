@@ -3,12 +3,12 @@ import {
   formatQuibtCloudHours,
   isQuibtCloudPlaceholderUrl,
   QUIBT_CLOUD_API_URL_PLACEHOLDER,
+  type QuibtCloudMe,
   quibtCloudCanResume,
   quibtCloudUpgradeMessage,
   quibtCloudUsage,
   resolveQuibtCloudApiUrl,
   screenUrlFromQuibtCloudConnection,
-  type QuibtCloudMe,
 } from "./quibt-cloud.js";
 
 function me(overrides: Partial<QuibtCloudMe> = {}): QuibtCloudMe {
@@ -42,7 +42,9 @@ describe("quibtCloudUsage", () => {
     expect(usage.hoursExhausted).toBe(false);
     expect(usage.blocked).toBe(false);
     expect(usage.limit).toBeNull();
-    expect(formatQuibtCloudHours(me({ hoursUsed: 4, hoursQuota: 10 }))).toBe("4 / 10 h neste ciclo");
+    expect(formatQuibtCloudHours(me({ hoursUsed: 4, hoursQuota: 10 }))).toBe(
+      "4 / 10 h neste ciclo",
+    );
   });
 
   it("marks the hour cap as exhausted without locking other app state", () => {

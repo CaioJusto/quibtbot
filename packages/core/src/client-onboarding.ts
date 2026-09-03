@@ -204,7 +204,10 @@ export function machineCredentialsReady(
   input: { endpoint: string; apiKey: string },
 ): { ok: true } | { ok: false; message: string } {
   if (!item) {
-    return { ok: false, message: "Escolha Docker, a sua VPS, E2B, Box, Daytona ou Quibt Bot Cloud." };
+    return {
+      ok: false,
+      message: "Escolha Docker, a sua VPS, E2B, Box, Daytona ou Quibt Bot Cloud.",
+    };
   }
   if (item.needsEndpoint && !input.endpoint.trim() && !item.configured) {
     return { ok: false, message: item.endpointLabel ?? "Cole a URL do supervisor da sua VPS." };

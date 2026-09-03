@@ -72,10 +72,9 @@ export interface QuibtCloudUsage {
   limit: QuibtCloudLimit | null;
 }
 
-export function resolveQuibtCloudApiUrl(input: {
-  override?: string | null;
-  envUrl?: string | null;
-} = {}): string {
+export function resolveQuibtCloudApiUrl(
+  input: { override?: string | null; envUrl?: string | null } = {},
+): string {
   const override = input.override?.trim();
   if (override) return stripTrailingSlash(override);
   const envUrl = input.envUrl?.trim();
@@ -111,7 +110,8 @@ export function quibtCloudUsage(me: QuibtCloudMe): QuibtCloudUsage {
   const hoursUsed = Math.max(0, finiteNumber(me.hoursUsed));
   const concurrentLimit = Math.max(0, finiteNumber(me.concurrentLimit));
   const concurrentComputers = Math.max(0, finiteNumber(me.concurrentComputers));
-  const hoursExhausted = hoursQuota > 0 ? hoursUsed >= hoursQuota : hoursUsed > 0 && hoursQuota === 0;
+  const hoursExhausted =
+    hoursQuota > 0 ? hoursUsed >= hoursQuota : hoursUsed > 0 && hoursQuota === 0;
   const concurrentAtLimit = concurrentLimit > 0 && concurrentComputers >= concurrentLimit;
   const kind: QuibtCloudLimitKind | null = hoursExhausted
     ? "hours"
@@ -152,9 +152,7 @@ export function formatQuibtCloudHours(me: QuibtCloudMe): string {
   return `${used} / ${quota} h neste ciclo`;
 }
 
-export function screenUrlFromQuibtCloudConnection(
-  connection: QuibtCloudConnection,
-): string | null {
+export function screenUrlFromQuibtCloudConnection(connection: QuibtCloudConnection): string | null {
   const ready = connection.screenUrl?.trim();
   if (ready) return ready;
   if (connection.protocol === "ssh") return null;

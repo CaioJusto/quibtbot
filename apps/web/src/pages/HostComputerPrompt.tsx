@@ -3,8 +3,8 @@ import { useEffect, useState } from "react";
 import { MachineGuide } from "../components/MachineGuide";
 import { activateMachine, MachineCredentials, MachinePicker } from "../components/MachinePicker";
 import { QuibtCloudPanel } from "../components/QuibtCloudPanel";
-import { machineCredentialsReady } from "../lib/onboarding-flow";
 import { desktopBridge } from "../lib/desktop";
+import { machineCredentialsReady } from "../lib/onboarding-flow";
 import { rpc } from "../lib/rpc";
 import { errorMessage } from "../lib/rpc-errors";
 

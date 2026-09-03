@@ -78,7 +78,9 @@ export interface QuibtCloudClientOptions {
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 
-export function createQuibtCloudClient(options: QuibtCloudClientOptions = {}): QuibtCloudHttpClient {
+export function createQuibtCloudClient(
+  options: QuibtCloudClientOptions = {},
+): QuibtCloudHttpClient {
   return new QuibtCloudHttpClient(options);
 }
 
@@ -93,8 +95,7 @@ export class QuibtCloudHttpClient implements QuibtCloudClient {
     this.token = options.token?.trim() || null;
     // Bind global fetch: assigning `fetch` and calling it as `this.fetchImpl(...)` loses
     // `Window`/`globalThis` and throws "Illegal invocation" in browsers.
-    this.fetchImpl =
-      options.fetchImpl ?? ((input, init) => globalThis.fetch(input, init));
+    this.fetchImpl = options.fetchImpl ?? ((input, init) => globalThis.fetch(input, init));
     this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS;
   }
 
@@ -305,12 +306,7 @@ export function parseQuibtCloudMe(body: unknown): QuibtCloudMe {
   return {
     email: optionalString(root, ["email"]) ?? optionalString(body, ["email"]),
     plan,
-    hoursUsed: numberField(root, [
-      "hoursUsed",
-      "hours_used",
-      "hoursEquivalentUsed",
-      "hoursEqUsed",
-    ]),
+    hoursUsed: numberField(root, ["hoursUsed", "hours_used", "hoursEquivalentUsed", "hoursEqUsed"]),
     hoursQuota: numberField(root, [
       "hoursQuota",
       "hours_quota",

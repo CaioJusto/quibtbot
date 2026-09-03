@@ -1,17 +1,17 @@
 import {
-  formatQuibtCloudHours,
-  isQuibtCloudPlaceholderUrl,
-  quibtCloudUsage,
-  resolveQuibtCloudApiUrl,
-  type QuibtCloudBox,
-  type QuibtCloudLimit,
-  type QuibtCloudMe,
-} from "@quibt/core";
-import {
   createQuibtCloudClient,
   isQuibtCloudLimitError,
   QuibtCloudSession,
 } from "@quibt/adapters/quibt-cloud-client";
+import {
+  formatQuibtCloudHours,
+  isQuibtCloudPlaceholderUrl,
+  type QuibtCloudBox,
+  type QuibtCloudLimit,
+  type QuibtCloudMe,
+  quibtCloudUsage,
+  resolveQuibtCloudApiUrl,
+} from "@quibt/core";
 import { useEffect, useMemo, useState } from "react";
 
 const SESSION_KEY = "quibt.cloud.session.v1";
@@ -104,9 +104,7 @@ export function QuibtCloudPanel({
   }, []);
 
   function cloudSession(activeToken: string) {
-    return new QuibtCloudSession(
-      createQuibtCloudClient({ baseUrl: apiUrl, token: activeToken }),
-    );
+    return new QuibtCloudSession(createQuibtCloudClient({ baseUrl: apiUrl, token: activeToken }));
   }
 
   async function login() {

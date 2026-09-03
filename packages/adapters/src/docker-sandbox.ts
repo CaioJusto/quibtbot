@@ -11,6 +11,7 @@ import type {
   ScreenSession,
 } from "@quibt/adapter-kit";
 import { boundedSandboxCommandTimeoutMs, resolveSupervisorToken } from "@quibt/core";
+import { isQuibtCloudLimitError } from "./quibt-cloud-client.js";
 import {
   createSshDockerPort,
   isSshPolicyError,
@@ -18,7 +19,6 @@ import {
   type SshDockerPort,
   type SshLocalForward,
 } from "./ssh-docker.js";
-import { isQuibtCloudLimitError } from "./quibt-cloud-client.js";
 
 /** Tira a senha VNC do endereço remoto antes de gravar no banco. */
 function persistedRemoteScreenUrl(url: string): string {

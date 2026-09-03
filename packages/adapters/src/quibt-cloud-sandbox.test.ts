@@ -54,10 +54,7 @@ describe("QuibtCloudSandboxProvider", () => {
         },
       }),
     });
-    const computer = await provider.provision(
-      { botId: "bot-1", homePath: "/home/quibt" },
-      ctx(),
-    );
+    const computer = await provider.provision({ botId: "bot-1", homePath: "/home/quibt" }, ctx());
     expect(computer.kind).toBe("quibt-cloud");
     expect(computer.providerRef).toBe("box-1");
     expect(resumed).toEqual(["box-1"]);

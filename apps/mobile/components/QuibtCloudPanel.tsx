@@ -1,17 +1,17 @@
 import {
-  formatQuibtCloudHours,
-  isQuibtCloudPlaceholderUrl,
-  quibtCloudUsage,
-  resolveQuibtCloudApiUrl,
-  type QuibtCloudBox,
-  type QuibtCloudLimit,
-  type QuibtCloudMe,
-} from "@quibt/core";
-import {
   createQuibtCloudClient,
   isQuibtCloudLimitError,
   QuibtCloudSession,
 } from "@quibt/adapters/quibt-cloud-client";
+import {
+  formatQuibtCloudHours,
+  isQuibtCloudPlaceholderUrl,
+  type QuibtCloudBox,
+  type QuibtCloudLimit,
+  type QuibtCloudMe,
+  quibtCloudUsage,
+  resolveQuibtCloudApiUrl,
+} from "@quibt/core";
 import * as SecureStore from "expo-secure-store";
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
@@ -195,12 +195,13 @@ export function QuibtCloudPanel({
   return (
     <View style={styles.wrap}>
       <Text style={styles.hint}>
-        Opcional. Entre na conta Quibt Bot Cloud para ligar a VM do plano. Os modos locais seguem sem
-        essa conta.
+        Opcional. Entre na conta Quibt Bot Cloud para ligar a VM do plano. Os modos locais seguem
+        sem essa conta.
       </Text>
       {placeholderApi ? (
         <Text style={styles.placeholder}>
-          API Cloud placeholder ({apiUrl}). Defina QUIBT_CLOUD_API_URL quando o backend estiver pronto.
+          API Cloud placeholder ({apiUrl}). Defina QUIBT_CLOUD_API_URL quando o backend estiver
+          pronto.
         </Text>
       ) : null}
       {!token ? (
@@ -259,7 +260,9 @@ export function QuibtCloudPanel({
             <View key={box.id} style={styles.boxRow}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.boxId}>{box.id}</Text>
-                <Text style={styles.boxStatus}>{box.status === "running" ? "Ligada" : "Desligada"}</Text>
+                <Text style={styles.boxStatus}>
+                  {box.status === "running" ? "Ligada" : "Desligada"}
+                </Text>
               </View>
               {box.status === "running" ? (
                 <Pressable

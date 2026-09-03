@@ -38,10 +38,7 @@ describe("probeComputer", () => {
         { status: 200 },
       );
     }) as typeof fetch;
-    const result = await probeComputer(
-      { kind: "quibt-cloud", apiKey: "sess-token" },
-      fetchImpl,
-    );
+    const result = await probeComputer({ kind: "quibt-cloud", apiKey: "sess-token" }, fetchImpl);
     expect(result.ok).toBe(true);
     expect(result.message).toMatch(/Starter/);
   });
