@@ -22,9 +22,16 @@ describe("createSandboxProvider", () => {
     expect(typeof (sandbox as { checkpointHome?: unknown }).checkpointHome).toBe("function");
   });
 
+  it("requires and wires the Quibt Cloud session token", () => {
+    expect(() => createSandboxProvider("quibt-cloud", {})).toThrow(/sessão Quibt Bot Cloud/);
+    expect(
+      createSandboxProvider("quibt-cloud", { quibtCloudSessionToken: "sess" }).describe().id,
+    ).toBe("quibt-cloud");
+  });
+
   it("throws on unknown provider", () => {
     expect(() => createSandboxProvider("bogus", {})).toThrow(
-      'Unknown SANDBOX_PROVIDER "bogus". Use docker | remote-supervisor | e2b | e2b-emulator | box | box-emulator | daytona | daytona-emulator | desktop | fake.',
+      'Unknown SANDBOX_PROVIDER "bogus". Use docker | remote-supervisor | e2b | e2b-emulator | box | box-emulator | daytona | daytona-emulator | quibt-cloud | desktop | fake.',
     );
   });
 

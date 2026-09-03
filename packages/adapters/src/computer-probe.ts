@@ -1,7 +1,8 @@
 import { lookup as dnsLookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { isAllowedSandboxEndpoint, isSshHostAlias } from "@quibt/contracts";
-import { bootableKind } from "@quibt/core";
+import { bootableKind, resolveQuibtCloudApiUrl } from "@quibt/core";
+import { createQuibtCloudClient, isQuibtCloudLimitError } from "./quibt-cloud-client.js";
 import { isPrivateMcpAddress, type ResolveHost } from "./mcp-http.js";
 import {
   BlockedAddressError,
@@ -109,6 +110,30 @@ export async function probeComputer(
     const key = input.apiKey?.trim();
     if (!key) return { ok: false, message: "Cole a DAYTONA_API_KEY para testar." };
     return { ok: true, message: "Chave presente. O próximo computador sobe na Daytona." };
+  }
+  if (boot === "quibt-cloud") {
+    const token = input.apiKey?.trim();
+    if (!token) {
+      return { ok: false, message: "Entre na conta Quibt Bot Cloud para testar." };
+    }
+    try {
+      const client = createQuibtCloudClient({
+        baseUrl: resolveQuibtCloudApiUrl({ override: input.endpoint }),
+        token,
+        fetchImpl,
+      });
+      const me = await client.me();
+      return {
+        ok: true,
+        message: `Conta Cloud ok (${me.plan.name}). ${me.hoursUsed}/${me.hoursQuota} h neste ciclo.`,
+      };
+    } catch (error) {
+      if (isQuibtCloudLimitError(error)) {
+        return { ok: true, message: error.limit.upgradeMessage };
+      }
+      const detail = error instanceof Error ? error.message : "sem resposta";
+      return { ok: false, message: `A API Cloud não confirmou a sessão: ${detail}` };
+    }
   }
   const url = (input.endpoint || input.supervisorUrl || "").trim().replace(/\/$/, "");
   if (boot === "remote-supervisor" && !url) {

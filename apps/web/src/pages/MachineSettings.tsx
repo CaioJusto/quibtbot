@@ -8,6 +8,7 @@ import {
   MachinePicker,
   probeMachine,
 } from "../components/MachinePicker";
+import { QuibtCloudPanel } from "../components/QuibtCloudPanel";
 import { machineCredentialsReady } from "../lib/onboarding-flow";
 import { rpc } from "../lib/rpc";
 import { errorMessage } from "../lib/rpc-errors";
@@ -38,6 +39,7 @@ export function MachineSettingsBody() {
   const [selected, setSelected] = useState("docker");
   const [endpoint, setEndpoint] = useState("");
   const [apiKey, setApiKey] = useState("");
+  const [cloudSessionToken, setCloudSessionToken] = useState<string | null>(null);
   const [active, setActive] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [probe, setProbe] = useState<string | null>(null);
@@ -64,9 +66,10 @@ export function MachineSettingsBody() {
   }, []);
 
   const item = items.find((entry) => entry.kind === selected);
+  const effectiveApiKey = selected === "quibt-cloud" ? (cloudSessionToken ?? "") : apiKey;
 
   async function save() {
-    const ready = machineCredentialsReady(item, { endpoint, apiKey });
+    const ready = machineCredentialsReady(item, { endpoint, apiKey: effectiveApiKey });
     if (!ready.ok) {
       setError(ready.message);
       return;
@@ -74,7 +77,11 @@ export function MachineSettingsBody() {
     setPending(true);
     setError(null);
     try {
-      const settings = await activateMachine({ kind: selected, endpoint, apiKey });
+      const settings = await activateMachine({
+        kind: selected,
+        endpoint,
+        apiKey: effectiveApiKey,
+      });
       setActive(settings.sandboxProvider);
       setApiKey("");
     } catch (err) {
@@ -88,7 +95,7 @@ export function MachineSettingsBody() {
     setPending(true);
     setError(null);
     try {
-      const result = await probeMachine({ kind: selected, endpoint, apiKey });
+      const result = await probeMachine({ kind: selected, endpoint, apiKey: effectiveApiKey });
       setProbe(result.message);
       if (!result.ok) setError(result.message);
     } catch (err) {
@@ -137,6 +144,13 @@ export function MachineSettingsBody() {
           onSelectRecipe={setSelected}
           disabled={pending}
         />
+        {selected === "quibt-cloud" ? (
+          <QuibtCloudPanel
+            configured={item?.configured}
+            disabled={pending}
+            onSessionToken={setCloudSessionToken}
+          />
+        ) : null}
         <div className="mt-4">
           <MachineGuide kind={selected} />
         </div>

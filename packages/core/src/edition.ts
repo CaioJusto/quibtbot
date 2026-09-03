@@ -1,7 +1,14 @@
 export const QUIBT_EDITIONS = ["oss", "cloud"] as const;
 export type QuibtEdition = (typeof QUIBT_EDITIONS)[number];
 
-export const OSS_MACHINES = ["docker", "remote-supervisor", "e2b", "box", "daytona"] as const;
+export const OSS_MACHINES = [
+  "docker",
+  "remote-supervisor",
+  "e2b",
+  "box",
+  "daytona",
+  "quibt-cloud",
+] as const;
 export type OssMachine = (typeof OSS_MACHINES)[number];
 
 export function resolveEdition(input: {
@@ -95,6 +102,7 @@ export function availableOssMachines(input: {
   e2bApiKey?: string;
   boxApiKey?: string;
   daytonaApiKey?: string;
+  quibtCloudSessionToken?: string;
   remoteSupervisorUrl?: string;
 }): OssMachine[] {
   const machines: OssMachine[] = ["docker"];
@@ -102,6 +110,7 @@ export function availableOssMachines(input: {
   if (input.e2bApiKey) machines.push("e2b");
   if (input.boxApiKey) machines.push("box");
   if (input.daytonaApiKey) machines.push("daytona");
+  if (input.quibtCloudSessionToken) machines.push("quibt-cloud");
   return machines;
 }
 
@@ -160,5 +169,9 @@ export const OSS_MACHINE_COPY: Record<OssMachine, { title: string; body: string 
   daytona: {
     title: "Daytona",
     body: "Sandbox isolado na Daytona com terminal e desktop VNC. Cole a chave; cada bot ganha o próprio computador.",
+  },
+  "quibt-cloud": {
+    title: "Quibt Bot Cloud",
+    body: "Opcional. Entre com a conta Cloud: o bot liga numa VM isolada do plano, com horas contra o teto. Docker, VPS e as outras máquinas seguem sem essa conta.",
   },
 };

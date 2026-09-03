@@ -4,7 +4,8 @@
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./quibt-cloud-client": "./src/quibt-cloud-client.ts"
   },
   "scripts": {
     "check": "tsc --noEmit -p tsconfig.json",

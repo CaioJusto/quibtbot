@@ -363,6 +363,7 @@ describe("machine step", () => {
     expect(machineStepNeeded({ sandbox: "box" })).toBe(false);
     expect(machineStepNeeded({ sandbox: "e2b" })).toBe(false);
     expect(machineStepNeeded({ sandbox: "remote-supervisor" })).toBe(false);
+    expect(machineStepNeeded({ sandbox: "quibt-cloud" })).toBe(false);
   });
 
   it("stays when there is a real choice to make", () => {

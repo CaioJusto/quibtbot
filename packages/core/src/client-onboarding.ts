@@ -56,7 +56,14 @@ export function needsModelConnection(message: string | null | undefined): boolea
  */
 export function machineStepNeeded(input: { sandbox?: string | null }): boolean {
   const sandbox = (input.sandbox ?? "").trim().toLowerCase();
-  if (sandbox === "box" || sandbox === "e2b" || sandbox === "remote-supervisor") return false;
+  if (
+    sandbox === "box" ||
+    sandbox === "e2b" ||
+    sandbox === "remote-supervisor" ||
+    sandbox === "quibt-cloud"
+  ) {
+    return false;
+  }
   return true;
 }
 
@@ -196,7 +203,9 @@ export function machineCredentialsReady(
     | undefined,
   input: { endpoint: string; apiKey: string },
 ): { ok: true } | { ok: false; message: string } {
-  if (!item) return { ok: false, message: "Escolha Docker, a sua VPS, E2B, Box ou Daytona." };
+  if (!item) {
+    return { ok: false, message: "Escolha Docker, a sua VPS, E2B, Box, Daytona ou Quibt Bot Cloud." };
+  }
   if (item.needsEndpoint && !input.endpoint.trim() && !item.configured) {
     return { ok: false, message: item.endpointLabel ?? "Cole a URL do supervisor da sua VPS." };
   }

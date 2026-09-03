@@ -24,6 +24,28 @@ describe("probeComputer", () => {
     expect(await probeComputer({ kind: "box" })).toMatchObject({ ok: false });
   });
 
+  it("confirms a Quibt Cloud session against /api/me", async () => {
+    const fetchImpl = (async (url: string) => {
+      expect(String(url)).toContain("/api/me");
+      return new Response(
+        JSON.stringify({
+          plan: { name: "Starter" },
+          hoursUsed: 1,
+          hoursQuota: 10,
+          concurrentComputers: 0,
+          concurrentLimit: 1,
+        }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+    const result = await probeComputer(
+      { kind: "quibt-cloud", apiKey: "sess-token" },
+      fetchImpl,
+    );
+    expect(result.ok).toBe(true);
+    expect(result.message).toMatch(/Starter/);
+  });
+
   it("hits the authenticated probe endpoint, not the open /health", async () => {
     const calls: Array<{ url: string; authorization: string | null }> = [];
     const fetchImpl = (async (url: string, init?: RequestInit) => {

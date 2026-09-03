@@ -30,6 +30,7 @@ import {
   MachinePicker,
   probeMachine,
 } from "../components/MachinePicker";
+import { QuibtCloudPanel } from "../components/QuibtCloudPanel";
 import { billingReturnUrls, openBillingUrl } from "../lib/billing-url";
 import {
   chooseMode,
@@ -125,6 +126,7 @@ export function OnboardingPage() {
   const [machine, setMachine] = useState("docker");
   const [machineEndpoint, setMachineEndpoint] = useState("");
   const [machineKey, setMachineKey] = useState("");
+  const [cloudSessionToken, setCloudSessionToken] = useState<string | null>(null);
   const [runningSandbox, setRunningSandbox] = useState("docker");
   const [savedMachine, setSavedMachine] = useState<string | null>(null);
   const [savingMachine, setSavingMachine] = useState(false);
@@ -487,11 +489,13 @@ export function OnboardingPage() {
         }
       : undefined);
 
+  const effectiveMachineKey = machine === "quibt-cloud" ? (cloudSessionToken ?? "") : machineKey;
+
   async function saveMachine() {
     if (savingMachine) return;
     const ready = machineCredentialsReady(selectedMachine, {
       endpoint: machineEndpoint,
-      apiKey: machineKey,
+      apiKey: effectiveMachineKey,
     });
     if (!ready.ok) {
       setError(ready.message);
@@ -503,7 +507,7 @@ export function OnboardingPage() {
       const settings = await activateMachine({
         kind: machine,
         endpoint: machineEndpoint,
-        apiKey: machineKey,
+        apiKey: effectiveMachineKey,
       });
       // Trust the write response, not the click: this is what the deploy really has now.
       setSavedMachine(settings.sandboxProvider);
@@ -532,7 +536,7 @@ export function OnboardingPage() {
       const result = await probeMachine({
         kind: machine,
         endpoint: machineEndpoint,
-        apiKey: machineKey,
+        apiKey: effectiveMachineKey,
       });
       setMachineProbe(result.message);
       if (!result.ok) setError(result.message);
@@ -878,6 +882,13 @@ export function OnboardingPage() {
                 }}
                 disabled={savingMachine}
               />
+              {machine === "quibt-cloud" ? (
+                <QuibtCloudPanel
+                  configured={selectedMachine?.configured}
+                  disabled={savingMachine}
+                  onSessionToken={setCloudSessionToken}
+                />
+              ) : null}
               <MachineGuide kind={machine} />
             </div>
             {machineProbe ? (

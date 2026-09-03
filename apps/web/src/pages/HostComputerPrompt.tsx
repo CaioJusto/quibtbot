@@ -2,6 +2,8 @@ import type { ComputerCatalogItem } from "@quibt/contracts";
 import { useEffect, useState } from "react";
 import { MachineGuide } from "../components/MachineGuide";
 import { activateMachine, MachineCredentials, MachinePicker } from "../components/MachinePicker";
+import { QuibtCloudPanel } from "../components/QuibtCloudPanel";
+import { machineCredentialsReady } from "../lib/onboarding-flow";
 import { desktopBridge } from "../lib/desktop";
 import { rpc } from "../lib/rpc";
 import { errorMessage } from "../lib/rpc-errors";
@@ -13,6 +15,7 @@ export function HostComputerPrompt() {
   const [selected, setSelected] = useState("docker");
   const [endpoint, setEndpoint] = useState("");
   const [apiKey, setApiKey] = useState("");
+  const [cloudSessionToken, setCloudSessionToken] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const hostLabel =
@@ -45,10 +48,17 @@ export function HostComputerPrompt() {
   if (!open) return null;
 
   async function choose() {
+    const item = items.find((entry) => entry.kind === selected);
+    const effectiveApiKey = selected === "quibt-cloud" ? (cloudSessionToken ?? "") : apiKey;
+    const ready = machineCredentialsReady(item, { endpoint, apiKey: effectiveApiKey });
+    if (!ready.ok) {
+      setError(ready.message);
+      return;
+    }
     setPending(true);
     setError(null);
     try {
-      await activateMachine({ kind: selected, endpoint, apiKey });
+      await activateMachine({ kind: selected, endpoint, apiKey: effectiveApiKey });
       setOpen(false);
     } catch (err) {
       setError(errorMessage(err, "Não foi possível salvar essa escolha"));
@@ -85,6 +95,9 @@ export function HostComputerPrompt() {
             onSelectRecipe={setSelected}
             disabled={pending}
           />
+          {selected === "quibt-cloud" ? (
+            <QuibtCloudPanel disabled={pending} onSessionToken={setCloudSessionToken} />
+          ) : null}
           <MachineGuide kind={selected} />
         </div>
         {error ? <p className="mt-3 text-sm text-[var(--qb-danger)]">{error}</p> : null}

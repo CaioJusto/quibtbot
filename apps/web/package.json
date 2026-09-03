@@ -16,6 +16,7 @@
     "@huggingface/transformers": "^4.2.0",
     "@orpc/client": "^1.15.0",
     "@orpc/contract": "^1.15.0",
+    "@quibt/adapters": "workspace:*",
     "@quibt/chat-ui": "workspace:*",
     "@quibt/contracts": "workspace:*",
     "@quibt/core": "workspace:*",

@@ -9,6 +9,7 @@ describe("machineGuideFor", () => {
       "e2b",
       "box",
       "daytona",
+      "quibt-cloud",
       "vps-hetzner",
       "vps-digitalocean",
       "vps-generic",

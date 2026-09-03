@@ -175,6 +175,9 @@ importers:
       '@orpc/client':
         specifier: ^1.15.0
         version: 1.15.0(@opentelemetry/api@1.9.1)
+      '@quibt/adapters':
+        specifier: workspace:*
+        version: link:../../packages/adapters
       '@quibt/chat-ui':
         specifier: workspace:*
         version: link:../../packages/chat-ui
@@ -335,6 +338,9 @@ importers:
       '@orpc/contract':
         specifier: ^1.15.0
         version: 1.15.0(@opentelemetry/api@1.9.1)
+      '@quibt/adapters':
+        specifier: workspace:*
+        version: link:../../packages/adapters
       '@quibt/chat-ui':
         specifier: workspace:*
         version: link:../../packages/chat-ui

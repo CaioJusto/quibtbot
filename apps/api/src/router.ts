@@ -183,6 +183,10 @@ export interface RouterDeps {
     e2bApiKey?: string;
     boxApiKey?: string;
     daytonaApiKey?: string;
+    /** Session token for the optional Quibt Bot Cloud SaaS provider. */
+    quibtCloudSessionToken?: string;
+    /** REVIEW: hypothesized Cloud API base URL. */
+    quibtCloudApiUrl?: string;
     /** COMPOSIO_API_KEY do deploy; quando existe, a chave colada no app não é usada. */
     composioApiKey?: string;
     /** Sem mailer o `health` avisa, e a senha se redefine no próprio computador. */
@@ -3645,6 +3649,8 @@ async function saveDeploymentMachine(
         (boot === "box" && (available.includes("box") || Boolean(deps.env.boxApiKey))) ||
         (boot === "daytona" &&
           (available.includes("daytona") || Boolean(deps.env.daytonaApiKey))) ||
+        (boot === "quibt-cloud" &&
+          (available.includes("quibt-cloud") || Boolean(deps.env.quibtCloudSessionToken))) ||
         (boot === "remote-supervisor" && Boolean(deps.env.sandboxSupervisorToken));
       if (
         !input.sandboxApiKey?.trim() &&
@@ -3656,7 +3662,15 @@ async function saveDeploymentMachine(
           message:
             boot === "remote-supervisor"
               ? "Cole o token do supervisor da sua VPS, ou um alias SSH do ~/.ssh/config."
-              : `Cole a chave da sua conta ${boot === "e2b" ? "E2B" : boot === "box" ? "Box" : "Daytona"}.`,
+              : `Cole a credencial da sua conta ${
+                  boot === "e2b"
+                    ? "E2B"
+                    : boot === "box"
+                      ? "Box"
+                      : boot === "quibt-cloud"
+                        ? "Quibt Bot Cloud"
+                        : "Daytona"
+                }.`,
         });
       }
     }
@@ -3734,6 +3748,8 @@ async function computerCatalog(deps: RouterDeps, query: string) {
     e2bApiKey: deps.env.e2bApiKey ?? (kind === "e2b" ? savedKey : undefined),
     boxApiKey: deps.env.boxApiKey ?? (kind === "box" ? savedKey : undefined),
     daytonaApiKey: deps.env.daytonaApiKey ?? (kind === "daytona" ? savedKey : undefined),
+    quibtCloudSessionToken:
+      deps.env.quibtCloudSessionToken ?? (kind === "quibt-cloud" ? savedKey : undefined),
     remoteSupervisorUrl:
       kind === "remote-supervisor" ? (settings?.sandboxEndpoint ?? undefined) : undefined,
     remoteSupervisorToken: kind === "remote-supervisor" ? savedKey : undefined,

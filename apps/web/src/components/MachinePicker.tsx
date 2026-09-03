@@ -31,6 +31,12 @@ const FAMILY_ICONS: Record<string, ReactNode> = {
       <path d="M10 10.4v6.8" />
     </>
   ),
+  "quibt-cloud": (
+    <>
+      <path d="M4.5 14.5 10 4.5l5.5 10" />
+      <path d="M7 11.5h6" />
+    </>
+  ),
 };
 
 const FALLBACK_ICON = (
@@ -43,6 +49,7 @@ const FALLBACK_ICON = (
 
 /** A etiqueta diz o que a escolha vai exigir — tirada do próprio catálogo. */
 function requirement(item: ComputerCatalogItem): string {
+  if (item.kind === "quibt-cloud") return "Conta Cloud";
   if (item.family === "remote-supervisor") return "Alias SSH ou URL";
   if (item.needsKey && item.needsEndpoint) return "URL e token";
   if (item.needsKey) return "Chave da sua conta";
@@ -179,7 +186,7 @@ export function MachineCredentials({
           ) : null}
         </label>
       ) : null}
-      {item.needsKey && !sshPath ? (
+      {item.needsKey && !sshPath && item.kind !== "quibt-cloud" ? (
         <label className="block text-[12px] text-[var(--qb-muted)]">
           {item.keyLabel ?? "Chave da sua conta"}
           <input

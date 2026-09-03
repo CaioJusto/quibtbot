@@ -18,6 +18,7 @@ import {
   type SshDockerPort,
   type SshLocalForward,
 } from "./ssh-docker.js";
+import { isQuibtCloudLimitError } from "./quibt-cloud-client.js";
 
 /** Tira a senha VNC do endereço remoto antes de gravar no banco. */
 function persistedRemoteScreenUrl(url: string): string {
@@ -245,6 +246,7 @@ export function isComputerMissingError(error: unknown): boolean {
 
 /** What the owner should read when computer.boot throws. */
 export function publicComputerBootMessage(error: unknown): string {
+  if (isQuibtCloudLimitError(error)) return error.limit.upgradeMessage;
   const raw = error instanceof Error ? error.message : String(error);
   const detail = error instanceof SupervisorRequestError ? error.detail : "";
   if (/trial_auto_stop_required|free-trial boxes cannot run without auto-stop/i.test(raw)) {
